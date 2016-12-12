@@ -1,0 +1,14 @@
+package: github.com/m3db/m3aggregator
+
+import:
+- package: github.com/m3db/m3x
+  version: 871bc2bd6d94337af12999ba77842f07465f6165
+
+- package: github.com/uber-go/tally
+  version: 1f0f7171f312a8cff5f697fe5f4d45dbaec8c3ac
+
+- package: github.com/stretchr/testify
+  version: 6fe211e493929a8aac0469b93f28b1d0688a9a3a
+  subpackages:
+  - assert
+  - require
