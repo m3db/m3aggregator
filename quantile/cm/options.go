@@ -24,7 +24,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/m3db/m3x/pool"
+	"github.com/m3db/m3aggregator/pool"
 )
 
 const (
@@ -37,9 +37,6 @@ const (
 
 var (
 	defaultQuantiles = []float64{0.5, 0.95, 0.99}
-	defaultBuckets   = []pool.Bucket{
-		{Capacity: 16, Count: 4096},
-	}
 
 	errInvalidEps       = fmt.Errorf("epsilon value must be between %f and %f", minEps, maxEps)
 	errInvalidQuantiles = fmt.Errorf("quantiles must be nonempty and between %f and %f", minQuantile, maxQuantile)
@@ -51,7 +48,7 @@ type options struct {
 	eps        float64
 	quantiles  []float64
 	samplePool SamplePool
-	floatsPool FloatsPool
+	floatsPool pool.FloatsPool
 }
 
 // NewOptions creates a new options
@@ -59,7 +56,7 @@ func NewOptions() Options {
 	samplePool := NewSamplePool(nil)
 	samplePool.Init()
 
-	floatsPool := NewFloatsPool(defaultBuckets, nil)
+	floatsPool := pool.NewFloatsPool(nil, nil)
 	floatsPool.Init()
 
 	return options{
@@ -97,12 +94,12 @@ func (o options) SamplePool() SamplePool {
 	return o.samplePool
 }
 
-func (o options) SetFloatsPool(value FloatsPool) Options {
+func (o options) SetFloatsPool(value pool.FloatsPool) Options {
 	o.floatsPool = value
 	return o
 }
 
-func (o options) FloatsPool() FloatsPool {
+func (o options) FloatsPool() pool.FloatsPool {
 	return o.floatsPool
 }
 

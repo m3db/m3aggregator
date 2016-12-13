@@ -2,7 +2,7 @@ package: github.com/m3db/m3aggregator
 
 import:
 - package: github.com/m3db/m3x
-  version: 871bc2bd6d94337af12999ba77842f07465f6165
+  version: 6af86ec01b1b937827d40ad4caca2b64043932ae
 
 - package: github.com/uber-go/tally
   version: 1f0f7171f312a8cff5f697fe5f4d45dbaec8c3ac

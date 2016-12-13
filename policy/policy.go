@@ -18,32 +18,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cm
+package policy
 
 import (
-	"github.com/m3db/m3x/pool"
+	"time"
+
+	"github.com/m3db/m3x/time"
 )
 
-type floatsPool struct {
-	pool pool.BucketizedObjectPool
-}
+// DefaultPolicyVersion is the version for the default policy
+const (
+	DefaultPolicyVersion = -1
+)
 
-// NewFloatsPool creates a new floats pool
-func NewFloatsPool(sizes []pool.Bucket, opts pool.ObjectPoolOptions) FloatsPool {
-	return &floatsPool{pool: pool.NewBucketizedObjectPool(sizes, opts)}
-}
-
-func (p *floatsPool) Init() {
-	p.pool.Init(func(capacity int) interface{} {
-		return make([]float64, 0, capacity)
-	})
-}
-
-func (p *floatsPool) Get(capacity int) []float64 {
-	return p.pool.Get(capacity).([]float64)
-}
-
-func (p *floatsPool) Put(value []float64) {
-	value = value[:0]
-	p.pool.Put(value, cap(value))
-}
+// DefaultVersionedPolicies are the default versioned policies
+var (
+	DefaultVersionedPolicies = VersionedPolicies{
+		Version: DefaultPolicyVersion,
+		Policies: []Policy{
+			{
+				Resolution: Resolution{Window: time.Duration(10), Precision: xtime.Second},
+				Retention:  Retention(2 * 24 * time.Hour),
+			},
+			{
+				Resolution: Resolution{Window: time.Duration(1), Precision: xtime.Minute},
+				Retention:  Retention(30 * 24 * time.Hour),
+			},
+		},
+	}
+)

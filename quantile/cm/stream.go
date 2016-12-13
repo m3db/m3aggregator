@@ -20,7 +20,11 @@
 
 package cm
 
-import "math"
+import (
+	"math"
+
+	"github.com/m3db/m3aggregator/pool"
+)
 
 const (
 	minSamplesToCompress = 3
@@ -28,11 +32,11 @@ const (
 
 // stream represents a data stream
 type stream struct {
-	capacity   int        // stream capacity
-	eps        float64    // desired epsilon for errors
-	quantiles  []float64  // sorted target quantiles
-	samplePool SamplePool // pool of samples
-	floatsPool FloatsPool // pool of float64 slices
+	capacity   int             // stream capacity
+	eps        float64         // desired epsilon for errors
+	quantiles  []float64       // sorted target quantiles
+	samplePool SamplePool      // pool of samples
+	floatsPool pool.FloatsPool // pool of float64 slices
 
 	closed          bool       // whether the stream is closed
 	numValues       int64      // number of values
