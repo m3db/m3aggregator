@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cm
+package aggregation
 
 import (
 	"testing"
@@ -26,60 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func validateList(t *testing.T, l *sampleList, expected []float64) {
-	require.Equal(t, l.Len(), len(expected))
-	i := 0
-	for sample := l.Front(); sample != nil; sample = sample.next {
-		require.Equal(t, expected[i], sample.value)
-		i++
+func TestGauge(t *testing.T) {
+	var g Gauge
+	for i := 1; i <= 100; i++ {
+		g.Set(float64(i))
 	}
-}
-
-func TestSampleListPushback(t *testing.T) {
-	var (
-		l      sampleList
-		iter   = 10
-		inputs = make([]float64, iter)
-	)
-	for i := 0; i < iter; i++ {
-		inputs[i] = float64(i)
-		l.Pushback(&Sample{value: float64(i)})
-	}
-	validateList(t, &l, inputs)
-}
-
-func TestSampleListInsertBefore(t *testing.T) {
-	var (
-		l      sampleList
-		iter   = 10
-		inputs = make([]float64, iter)
-	)
-	var prev *Sample
-	for i := iter - 1; i >= 0; i-- {
-		inputs[i] = float64(i)
-		sample := &Sample{value: float64(i)}
-		if i == iter-1 {
-			l.Pushback(sample)
-		} else {
-			l.InsertBefore(sample, prev)
-		}
-		prev = sample
-	}
-	validateList(t, &l, inputs)
-}
-
-func TestSampleListRemove(t *testing.T) {
-	var (
-		l      sampleList
-		iter   = 10
-		inputs = make([]float64, iter)
-	)
-	for i := 0; i < iter; i++ {
-		inputs[i] = float64(i)
-		l.Pushback(&Sample{value: float64(i)})
-	}
-	for i := 0; i < iter; i++ {
-		l.Remove(l.Front())
-		validateList(t, &l, inputs[i+1:])
-	}
+	require.Equal(t, 100.0, g.Value())
 }

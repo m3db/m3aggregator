@@ -22,25 +22,25 @@ package cm
 
 import "github.com/m3db/m3x/pool"
 
-type samplePool struct {
+type streamPool struct {
 	pool pool.ObjectPool
 }
 
-// NewSamplePool creates a new pool for samples
-func NewSamplePool(opts pool.ObjectPoolOptions) SamplePool {
-	return &samplePool{pool: pool.NewObjectPool(opts)}
+// NewStreamPool creates a new pool for streams
+func NewStreamPool(opts pool.ObjectPoolOptions) StreamPool {
+	return &streamPool{pool: pool.NewObjectPool(opts)}
 }
 
-func (p *samplePool) Init() {
+func (p *streamPool) Init(alloc StreamAlloc) {
 	p.pool.Init(func() interface{} {
-		return newSample()
+		return alloc()
 	})
 }
 
-func (p *samplePool) Get() *Sample {
-	return p.pool.Get().(*Sample)
+func (p *streamPool) Get() Stream {
+	return p.pool.Get().(*stream)
 }
 
-func (p *samplePool) Put(sample *Sample) {
-	p.pool.Put(sample)
+func (p *streamPool) Put(value Stream) {
+	p.pool.Put(value)
 }

@@ -32,9 +32,10 @@ var (
 
 // stream represents a data stream
 type stream struct {
-	capacity   int        // stream capacity
 	eps        float64    // desired epsilon for errors
 	quantiles  []float64  // sorted target quantiles
+	capacity   int        // stream capacity
+	streamPool StreamPool // pool of streams
 	samplePool SamplePool // pool of samples
 	floatsPool FloatsPool // pool of float64 slices
 
@@ -49,18 +50,18 @@ type stream struct {
 }
 
 // NewStream creates a new sample stream
-// TODO(xichen): the stream object itself should be pooled too
 // TODO(xichen): add metrics
-func NewStream(capacity int, opts Options) Stream {
-	samplePool := opts.SamplePool()
-	floatsPool := opts.FloatsPool()
-
+func NewStream(opts Options) Stream {
+	if opts == nil {
+		opts = NewOptions()
+	}
 	s := &stream{
-		capacity:   capacity,
 		eps:        opts.Eps(),
 		quantiles:  opts.Quantiles(),
-		samplePool: samplePool,
-		floatsPool: floatsPool,
+		capacity:   opts.Capacity(),
+		streamPool: opts.StreamPool(),
+		samplePool: opts.SamplePool(),
+		floatsPool: opts.FloatsPool(),
 	}
 
 	s.Reset()
@@ -142,11 +143,24 @@ func (s *stream) Close() {
 		return
 	}
 	s.closed = true
+
+	// Returning resources back to pools
 	s.floatsPool.Put(s.bufLess)
 	s.floatsPool.Put(s.bufMore)
-	for sample := s.samples.Front(); sample != nil; sample = sample.next {
+	sample := s.samples.Front()
+	for sample != nil {
+		next := sample.next
 		s.samplePool.Put(sample)
+		sample = next
 	}
+
+	// Clear out slices/lists/pointer to reduce GC overhead
+	s.bufLess = nil
+	s.bufMore = nil
+	s.samples.Reset()
+	s.insertCursor = nil
+	s.compressCursor = nil
+	s.streamPool.Put(s)
 }
 
 // addToBuffer adds a new sample to the buffer
@@ -167,7 +181,7 @@ func (s *stream) insert() {
 		sample := s.samplePool.Get()
 		sample.reset()
 		sample.setData(s.bufMore.Pop(), 1, 0)
-		s.samples.Pushback(sample)
+		s.samples.PushBack(sample)
 		s.numValues++
 		s.insertCursor = s.samples.Front()
 		return
@@ -201,7 +215,7 @@ func (s *stream) insert() {
 		sample := s.samplePool.Get()
 		sample.reset()
 		sample.setData(s.bufMore.Pop(), 1, 0)
-		s.samples.Pushback(sample)
+		s.samples.PushBack(sample)
 		s.numValues++
 	}
 

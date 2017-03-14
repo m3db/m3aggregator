@@ -29,9 +29,6 @@ type Sample struct {
 	next     *Sample // next sample
 }
 
-// SampleAllocate allocates a new sample for a pool
-type SampleAllocate func() *Sample
-
 // SamplePool is a pool of samples
 type SamplePool interface {
 	// Init initializes the pool
@@ -80,6 +77,21 @@ type Stream interface {
 	Reset()
 }
 
+// StreamAlloc allocates a stream
+type StreamAlloc func() Stream
+
+// StreamPool provides a pool for streams
+type StreamPool interface {
+	// Init initializes the pool
+	Init(alloc StreamAlloc)
+
+	// Get provides a stream from the pool
+	Get() Stream
+
+	// Put returns a stream to the pool
+	Put(value Stream)
+}
+
 // Options represent various options for computing quantiles
 type Options interface {
 	// SetEps sets the desired epsilon for errors
@@ -93,6 +105,18 @@ type Options interface {
 
 	// Quantiles returns the quantiles to be computed
 	Quantiles() []float64
+
+	// SetCapacity sets the initial heap capacity
+	SetCapacity(value int) Options
+
+	// Capacity returns the initial heap capacity
+	Capacity() int
+
+	// SetStreamPool sets the stream pool
+	SetStreamPool(value StreamPool) Options
+
+	// StreamPool returns the stream pool
+	StreamPool() StreamPool
 
 	// SetSamplePool sets the sample pool
 	SetSamplePool(value SamplePool) Options
