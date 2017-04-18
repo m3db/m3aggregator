@@ -50,7 +50,6 @@ const (
 )
 
 type dialWithTimeoutFn func(protocol string, addr string, timeout time.Duration) (net.Conn, error)
-type tryConnectFn func(addr string) (*net.TCPConn, error)
 type writeToConnFn func(conn *net.TCPConn, data []byte) (int, error)
 
 type forwardHandler struct {
@@ -64,7 +63,6 @@ type forwardHandler struct {
 
 	bufCh             chan msgpack.Buffer
 	dialWithTimeoutFn dialWithTimeoutFn
-	tryConnectFn      tryConnectFn
 	writeToConnFn     writeToConnFn
 	wg                sync.WaitGroup
 	closed            bool
@@ -91,12 +89,11 @@ func NewForwardHandler(
 		dialWithTimeoutFn:   net.DialTimeout,
 		writeToConnFn:       writeToConn,
 	}
-	h.tryConnectFn = h.tryConnect
 
 	// Initiate the connections.
 	h.wg.Add(numServers)
 	for _, addr := range servers {
-		conn, err := h.tryConnectFn(addr)
+		conn, err := h.tryConnect(addr)
 		if err != nil {
 			h.log.WithFields(
 				xlog.NewLogField("address", addr),
@@ -182,7 +179,7 @@ func (h *forwardHandler) forwardToConn(addr string, conn *net.TCPConn) {
 		return !closed
 	}
 	connectFn := func() error {
-		conn, err = h.tryConnectFn(addr)
+		conn, err = h.tryConnect(addr)
 		return err
 	}
 
