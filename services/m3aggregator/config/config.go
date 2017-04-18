@@ -28,11 +28,11 @@ type Configuration struct {
 	Metrics instrument.MetricsConfiguration `yaml:"metrics"`
 
 	// Aggregator configuration.
-	Aggregator aggregatorConfiguration `yaml:"aggregator"`
+	Aggregator AggregatorConfiguration `yaml:"aggregator"`
 
 	// Msgpack server configuration.
-	Msgpack msgpackServerConfiguration `yaml:"msgpack"`
+	Msgpack MsgpackServerConfiguration `yaml:"msgpack"`
 
 	// HTTP server configuration.
-	HTTP httpServerConfiguration `yaml:"http"`
+	HTTP HTTPServerConfiguration `yaml:"http"`
 }

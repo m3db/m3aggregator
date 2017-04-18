@@ -32,8 +32,8 @@ import (
 	"github.com/m3db/m3x/retry"
 )
 
-// msgpackServerConfiguration contains msgpack server configuration.
-type msgpackServerConfiguration struct {
+// MsgpackServerConfiguration contains msgpack server configuration.
+type MsgpackServerConfiguration struct {
 	// Msgpack server listening address.
 	ListenAddress string `yaml:"listenAddress" validate:"nonzero"`
 
@@ -44,7 +44,8 @@ type msgpackServerConfiguration struct {
 	Iterator unaggregatedIteratorConfiguration `yaml:"iterator"`
 }
 
-func (c *msgpackServerConfiguration) NewMsgpackServerOptions(
+// NewMsgpackServerOptions create a new set of msgpack server options.
+func (c *MsgpackServerConfiguration) NewMsgpackServerOptions(
 	instrumentOpts instrument.Options,
 ) msgpack.Options {
 	opts := msgpack.NewOptions().SetInstrumentOptions(instrumentOpts)
@@ -105,8 +106,8 @@ func (c *unaggregatedIteratorConfiguration) NewUnaggregatedIteratorPool(
 	return iteratorPool
 }
 
-// httpServerConfiguration contains http server configuration.
-type httpServerConfiguration struct {
+// HTTPServerConfiguration contains http server configuration.
+type HTTPServerConfiguration struct {
 	// HTTP server listending address.
 	ListenAddress string `yaml:"listenAddress" validate:"nonzero"`
 
@@ -120,7 +121,8 @@ type httpServerConfiguration struct {
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 }
 
-func (c *httpServerConfiguration) NewHTTPServerOptions(
+// NewHTTPServerOptions create a new set of http server options.
+func (c *HTTPServerConfiguration) NewHTTPServerOptions(
 	instrumentOpts instrument.Options,
 ) http.Options {
 	opts := http.NewOptions()

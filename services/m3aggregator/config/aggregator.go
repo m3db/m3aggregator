@@ -41,8 +41,8 @@ var (
 	emptyPolicy                    policy.Policy
 )
 
-// aggregatorConfiguration contains aggregator configuration.
-type aggregatorConfiguration struct {
+// AggregatorConfiguration contains aggregator configuration.
+type AggregatorConfiguration struct {
 	// Common metric prefix.
 	MetricPrefix string `yaml:"metricPrefix"`
 
@@ -119,8 +119,8 @@ type aggregatorConfiguration struct {
 	BufferedEncoderPool pool.ObjectPoolConfiguration `yaml:"bufferedEncoderPool"`
 }
 
-// NewAggregatorOptions creates a new aggregator options.
-func (c *aggregatorConfiguration) NewAggregatorOptions(
+// NewAggregatorOptions creates a new set of aggregator options.
+func (c *AggregatorConfiguration) NewAggregatorOptions(
 	instrumentOpts instrument.Options,
 ) (aggregator.Options, error) {
 	opts := aggregator.NewOptions().SetInstrumentOptions(instrumentOpts)
@@ -217,7 +217,7 @@ func (c *aggregatorConfiguration) NewAggregatorOptions(
 }
 
 // parseTimerQuantileSuffixFn parses the quantile suffix function type.
-func (c *aggregatorConfiguration) parseTimerQuantileSuffixFn() (aggregator.QuantileSuffixFn, error) {
+func (c *AggregatorConfiguration) parseTimerQuantileSuffixFn() (aggregator.QuantileSuffixFn, error) {
 	fnType := defaultQuantileSuffixType
 	if c.TimerQuantileSuffixFnType != "" {
 		fnType = timerQuantileSuffixFnType(c.TimerQuantileSuffixFnType)
