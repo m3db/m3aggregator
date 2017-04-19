@@ -45,7 +45,7 @@ var (
 type dropType int
 
 const (
-	dropCurrent dropType = iota
+	dropCurrent dropType = iota + 1
 	dropOldestInQueue
 )
 
