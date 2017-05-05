@@ -50,7 +50,7 @@ type aggMetricFn func(
 	idPrefix []byte,
 	id metric.ID,
 	idSuffix []byte,
-	timestamp time.Time,
+	timeNanos int64,
 	value float64,
 	policy policy.Policy,
 )
@@ -72,7 +72,7 @@ type metricElem interface {
 	// Consume processes values before a given time and discards
 	// them afterwards, returning whether the element can be collected
 	// after discarding the values
-	Consume(earlierThan time.Time, fn aggMetricFn) bool
+	Consume(earlierThanNanos int64, fn aggMetricFn) bool
 
 	// MarkAsTombstoned marks an element as tombstoned, which means this element
 	// will be deleted once its aggregated values have been flushed
@@ -93,18 +93,18 @@ type elemBase struct {
 }
 
 type timedCounter struct {
-	timeNs  int64
-	counter aggregation.Counter
+	timeNanos int64
+	counter   aggregation.Counter
 }
 
 type timedTimer struct {
-	timeNs int64
-	timer  aggregation.Timer
+	timeNanos int64
+	timer     aggregation.Timer
 }
 
 type timedGauge struct {
-	timeNs int64
-	gauge  aggregation.Gauge
+	timeNanos int64
+	gauge     aggregation.Gauge
 }
 
 // CounterElem is the counter element
@@ -184,8 +184,7 @@ func (e *CounterElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion
 // Consume processes values before a given time and discards
 // them afterwards, returning whether the element can be collected
 // after discarding the values
-func (e *CounterElem) Consume(earlierThan time.Time, fn aggMetricFn) bool {
-	earlierThanNs := earlierThan.UnixNano()
+func (e *CounterElem) Consume(earlierThanNanos int64, fn aggMetricFn) bool {
 	e.Lock()
 	if e.closed {
 		e.Unlock()
@@ -194,11 +193,11 @@ func (e *CounterElem) Consume(earlierThan time.Time, fn aggMetricFn) bool {
 	idx := 0
 	for range e.values {
 		// Bail as soon as the timestamp is no later than the target time
-		if e.values[idx].timeNs >= earlierThanNs {
+		if e.values[idx].timeNanos >= earlierThanNanos {
 			break
 		}
-		endAt := time.Unix(0, e.values[idx].timeNs).Add(e.policy.Resolution().Window)
-		e.processValue(endAt, e.values[idx].counter, fn)
+		endAtNanos := e.values[idx].timeNanos + int64(e.policy.Resolution().Window)
+		e.processValue(endAtNanos, e.values[idx].counter, fn)
 		idx++
 	}
 	if idx > 0 {
@@ -234,7 +233,7 @@ func (e *CounterElem) Close() {
 func (e *CounterElem) findOrInsertWithLock(alignedStart int64) int {
 	numValues := len(e.values)
 	// Optimize for the common case
-	if numValues > 0 && e.values[numValues-1].timeNs == alignedStart {
+	if numValues > 0 && e.values[numValues-1].timeNanos == alignedStart {
 		return numValues - 1
 	}
 	// Binary search for the unusual case. We intentionally do not
@@ -243,7 +242,7 @@ func (e *CounterElem) findOrInsertWithLock(alignedStart int64) int {
 	left, right := 0, numValues
 	for left < right {
 		mid := left + (right-left)/2 // avoid overflow
-		if e.values[mid].timeNs < alignedStart {
+		if e.values[mid].timeNanos < alignedStart {
 			left = mid + 1
 		} else {
 			right = mid
@@ -251,7 +250,7 @@ func (e *CounterElem) findOrInsertWithLock(alignedStart int64) int {
 	}
 	// If the current timestamp is equal to or larger than the target time,
 	// return the index as is
-	if left < numValues && e.values[left].timeNs == alignedStart {
+	if left < numValues && e.values[left].timeNanos == alignedStart {
 		return left
 	}
 	// Otherwise we need to insert a new item
@@ -259,14 +258,14 @@ func (e *CounterElem) findOrInsertWithLock(alignedStart int64) int {
 	// NB(xichen): it is ok if the source and the destination overlap
 	copy(e.values[left+1:numValues+1], e.values[left:numValues])
 	e.values[left] = timedCounter{
-		timeNs:  alignedStart,
-		counter: aggregation.NewCounter(),
+		timeNanos: alignedStart,
+		counter:   aggregation.NewCounter(),
 	}
 	return left
 }
 
-func (e *CounterElem) processValue(timestamp time.Time, agg aggregation.Counter, fn aggMetricFn) {
-	fn(e.opts.FullCounterPrefix(), e.id, nil, timestamp, float64(agg.Sum()), e.policy)
+func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn aggMetricFn) {
+	fn(e.opts.FullCounterPrefix(), e.id, nil, timeNanos, float64(agg.Sum()), e.policy)
 }
 
 // NewTimerElem creates a new timer element
@@ -297,8 +296,7 @@ func (e *TimerElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion) 
 // Consume processes values before a given time and discards
 // them afterwards, returning whether the element can be collected
 // after discarding the values
-func (e *TimerElem) Consume(earlierThan time.Time, fn aggMetricFn) bool {
-	earlierThanNs := earlierThan.UnixNano()
+func (e *TimerElem) Consume(earlierThanNanos int64, fn aggMetricFn) bool {
 	e.Lock()
 	if e.closed {
 		e.Unlock()
@@ -307,11 +305,11 @@ func (e *TimerElem) Consume(earlierThan time.Time, fn aggMetricFn) bool {
 	idx := 0
 	for range e.values {
 		// Bail as soon as the timestamp is no later than the target time
-		if e.values[idx].timeNs >= earlierThanNs {
+		if e.values[idx].timeNanos >= earlierThanNanos {
 			break
 		}
-		endAt := time.Unix(0, e.values[idx].timeNs).Add(e.policy.Resolution().Window)
-		e.processValue(endAt, e.values[idx].timer, fn)
+		endAtNanos := e.values[idx].timeNanos + int64(e.policy.Resolution().Window)
+		e.processValue(endAtNanos, e.values[idx].timer, fn)
 		// Close the timer after it's processed
 		e.values[idx].timer.Close()
 		idx++
@@ -358,7 +356,7 @@ func (e *TimerElem) Close() {
 func (e *TimerElem) findOrInsertWithLock(alignedStart int64) int {
 	numValues := len(e.values)
 	// Optimize for the common case
-	if numValues > 0 && e.values[numValues-1].timeNs == alignedStart {
+	if numValues > 0 && e.values[numValues-1].timeNanos == alignedStart {
 		return numValues - 1
 	}
 	// Binary search for the unusual case. We intentionally do not
@@ -367,7 +365,7 @@ func (e *TimerElem) findOrInsertWithLock(alignedStart int64) int {
 	left, right := 0, numValues
 	for left < right {
 		mid := left + (right-left)/2 // avoid overflow
-		if e.values[mid].timeNs < alignedStart {
+		if e.values[mid].timeNanos < alignedStart {
 			left = mid + 1
 		} else {
 			right = mid
@@ -375,7 +373,7 @@ func (e *TimerElem) findOrInsertWithLock(alignedStart int64) int {
 	}
 	// If the current timestamp is equal to or larger than the target time,
 	// return the index as is
-	if left < numValues && e.values[left].timeNs == alignedStart {
+	if left < numValues && e.values[left].timeNanos == alignedStart {
 		return left
 	}
 	// Otherwise we need to insert a new item
@@ -383,13 +381,13 @@ func (e *TimerElem) findOrInsertWithLock(alignedStart int64) int {
 	// NB(xichen): it is ok if the source and the destination overlap
 	copy(e.values[left+1:numValues+1], e.values[left:numValues])
 	e.values[left] = timedTimer{
-		timeNs: alignedStart,
-		timer:  aggregation.NewTimer(e.opts.StreamOptions()),
+		timeNanos: alignedStart,
+		timer:     aggregation.NewTimer(e.opts.StreamOptions()),
 	}
 	return left
 }
 
-func (e *TimerElem) processValue(timestamp time.Time, agg aggregation.Timer, fn aggMetricFn) {
+func (e *TimerElem) processValue(timeNanos int64, agg aggregation.Timer, fn aggMetricFn) {
 	var (
 		fullTimerPrefix   = e.opts.FullTimerPrefix()
 		timerSumSuffix    = e.opts.TimerSumSuffix()
@@ -403,19 +401,19 @@ func (e *TimerElem) processValue(timestamp time.Time, agg aggregation.Timer, fn 
 		quantiles         = e.opts.TimerQuantiles()
 		quantileSuffixes  = e.opts.TimerQuantileSuffixes()
 	)
-	fn(fullTimerPrefix, e.id, timerSumSuffix, timestamp, agg.Sum(), e.policy)
-	fn(fullTimerPrefix, e.id, timerSumSqSuffix, timestamp, agg.SumSq(), e.policy)
-	fn(fullTimerPrefix, e.id, timerMeanSuffix, timestamp, agg.Mean(), e.policy)
-	fn(fullTimerPrefix, e.id, timerLowerSuffix, timestamp, agg.Min(), e.policy)
-	fn(fullTimerPrefix, e.id, timerUpperSuffix, timestamp, agg.Max(), e.policy)
-	fn(fullTimerPrefix, e.id, timerCountSuffix, timestamp, float64(agg.Count()), e.policy)
-	fn(fullTimerPrefix, e.id, timerStdevSuffix, timestamp, agg.Stdev(), e.policy)
+	fn(fullTimerPrefix, e.id, timerSumSuffix, timeNanos, agg.Sum(), e.policy)
+	fn(fullTimerPrefix, e.id, timerSumSqSuffix, timeNanos, agg.SumSq(), e.policy)
+	fn(fullTimerPrefix, e.id, timerMeanSuffix, timeNanos, agg.Mean(), e.policy)
+	fn(fullTimerPrefix, e.id, timerLowerSuffix, timeNanos, agg.Min(), e.policy)
+	fn(fullTimerPrefix, e.id, timerUpperSuffix, timeNanos, agg.Max(), e.policy)
+	fn(fullTimerPrefix, e.id, timerCountSuffix, timeNanos, float64(agg.Count()), e.policy)
+	fn(fullTimerPrefix, e.id, timerStdevSuffix, timeNanos, agg.Stdev(), e.policy)
 	for idx, q := range quantiles {
 		v := agg.Quantile(q)
 		if q == 0.5 {
-			fn(fullTimerPrefix, e.id, timerMedianSuffix, timestamp, v, e.policy)
+			fn(fullTimerPrefix, e.id, timerMedianSuffix, timeNanos, v, e.policy)
 		}
-		fn(fullTimerPrefix, e.id, quantileSuffixes[idx], timestamp, v, e.policy)
+		fn(fullTimerPrefix, e.id, quantileSuffixes[idx], timeNanos, v, e.policy)
 	}
 }
 
@@ -447,8 +445,7 @@ func (e *GaugeElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion) 
 // Consume processes values before a given time and discards
 // them afterwards, returning whether the element can be collected
 // after discarding the values
-func (e *GaugeElem) Consume(earlierThan time.Time, fn aggMetricFn) bool {
-	earlierThanNs := earlierThan.UnixNano()
+func (e *GaugeElem) Consume(earlierThanNanos int64, fn aggMetricFn) bool {
 	e.Lock()
 	if e.closed {
 		e.Unlock()
@@ -457,11 +454,11 @@ func (e *GaugeElem) Consume(earlierThan time.Time, fn aggMetricFn) bool {
 	idx := 0
 	for range e.values {
 		// Bail as soon as the timestamp is no later than the target time
-		if e.values[idx].timeNs >= earlierThanNs {
+		if e.values[idx].timeNanos >= earlierThanNanos {
 			break
 		}
-		endAt := time.Unix(0, e.values[idx].timeNs).Add(e.policy.Resolution().Window)
-		e.processValue(endAt, e.values[idx].gauge, fn)
+		endAtNanos := e.values[idx].timeNanos + int64(e.policy.Resolution().Window)
+		e.processValue(endAtNanos, e.values[idx].gauge, fn)
 		idx++
 	}
 	if idx > 0 {
@@ -497,7 +494,7 @@ func (e *GaugeElem) Close() {
 func (e *GaugeElem) findOrInsertWithLock(alignedStart int64) int {
 	numValues := len(e.values)
 	// Optimize for the common case
-	if numValues > 0 && e.values[numValues-1].timeNs == alignedStart {
+	if numValues > 0 && e.values[numValues-1].timeNanos == alignedStart {
 		return numValues - 1
 	}
 	// Binary search for the unusual case. We intentionally do not
@@ -506,7 +503,7 @@ func (e *GaugeElem) findOrInsertWithLock(alignedStart int64) int {
 	left, right := 0, numValues
 	for left < right {
 		mid := left + (right-left)/2 // avoid overflow
-		if e.values[mid].timeNs < alignedStart {
+		if e.values[mid].timeNanos < alignedStart {
 			left = mid + 1
 		} else {
 			right = mid
@@ -514,7 +511,7 @@ func (e *GaugeElem) findOrInsertWithLock(alignedStart int64) int {
 	}
 	// If the current timestamp is equal to or larger than the target time,
 	// return the index as is
-	if left < numValues && e.values[left].timeNs == alignedStart {
+	if left < numValues && e.values[left].timeNanos == alignedStart {
 		return left
 	}
 	// Otherwise we need to insert a new item
@@ -522,12 +519,12 @@ func (e *GaugeElem) findOrInsertWithLock(alignedStart int64) int {
 	// NB(xichen): it is ok if the source and the destination overlap
 	copy(e.values[left+1:numValues+1], e.values[left:numValues])
 	e.values[left] = timedGauge{
-		timeNs: alignedStart,
-		gauge:  aggregation.NewGauge(),
+		timeNanos: alignedStart,
+		gauge:     aggregation.NewGauge(),
 	}
 	return left
 }
 
-func (e *GaugeElem) processValue(timestamp time.Time, agg aggregation.Gauge, fn aggMetricFn) {
-	fn(e.opts.FullGaugePrefix(), e.id, nil, timestamp, agg.Value(), e.policy)
+func (e *GaugeElem) processValue(timeNanos int64, agg aggregation.Gauge, fn aggMetricFn) {
+	fn(e.opts.FullGaugePrefix(), e.id, nil, timeNanos, agg.Value(), e.policy)
 }

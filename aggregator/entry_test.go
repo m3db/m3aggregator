@@ -85,10 +85,13 @@ func TestEntryResetSetData(t *testing.T) {
 	e, lists, now := testEntry()
 
 	require.False(t, e.closed)
+	require.False(t, e.hasDefaultPoliciesList)
+	require.False(t, e.useDefaultPolicies)
+	require.Equal(t, int64(uninitializedCutoverNanos), e.cutoverNanos)
+	require.False(t, e.tombstoned)
 	require.Equal(t, lists, e.lists)
-	require.Equal(t, policy.InitPolicyVersion, e.version)
 	require.Equal(t, int32(0), e.numWriters)
-	require.Equal(t, now.UnixNano(), e.lastAccessInNs)
+	require.Equal(t, now.UnixNano(), e.lastAccessNanos)
 }
 
 func TestEntryAddBatchTimerWithPoolAlloc(t *testing.T) {
@@ -141,7 +144,7 @@ func TestEntryHasPolicyChangesWithLockSameLengthSamePolicies(t *testing.T) {
 	require.False(t, e.hasPolicyChangesWithLock(testPolicies))
 }
 
-func TestEntryAddMetricWithPoliciesNoPolicyUpdate(t *testing.T) {
+func TestEntryAddMetricWithPoliciesListNoPolicyUpdate(t *testing.T) {
 	var lists *metricLists
 	preAddFn := func(e *Entry) { lists = e.lists }
 	postAddFn := func(t *testing.T) {
@@ -153,10 +156,10 @@ func TestEntryAddMetricWithPoliciesNoPolicyUpdate(t *testing.T) {
 			checkElemTombstoned(t, list.aggregations.Front().Value.(metricElem), nil)
 		}
 	}
-	testEntryAddMetricWithPolicies(t, testPoliciesVersion, true, false, preAddFn, postAddFn, testPolicies)
+	testEntryAddMetricWithPoliciesList(t, true, false, preAddFn, postAddFn, testPolicies)
 }
 
-func TestEntryAddMetricWithPoliciesWithPolicyUpdateNoPolicyChanges(t *testing.T) {
+func TestEntryAddMetricWithPoliciesListWithPolicyUpdateNoPolicyChanges(t *testing.T) {
 	var lists *metricLists
 	preAddFn := func(e *Entry) { lists = e.lists }
 	postAddFn := func(t *testing.T) {
@@ -168,10 +171,10 @@ func TestEntryAddMetricWithPoliciesWithPolicyUpdateNoPolicyChanges(t *testing.T)
 			checkElemTombstoned(t, list.aggregations.Front().Value.(metricElem), nil)
 		}
 	}
-	testEntryAddMetricWithPolicies(t, testPoliciesVersion+1, true, false, preAddFn, postAddFn, testPolicies)
+	testEntryAddMetricWithPoliciesList(t, true, false, preAddFn, postAddFn, testPolicies)
 }
 
-func TestEntryAddMetricWithPoliciesWithPolicyUpdateIDNotOwnedReuseElemID(t *testing.T) {
+func TestEntryAddMetricWithPoliciesListWithPolicyUpdateIDNotOwnedReuseElemID(t *testing.T) {
 	var lists *metricLists
 	deletedPolicies := make(map[policy.Policy]struct{})
 	deletedPolicies[testPolicies[1]] = struct{}{}
@@ -192,10 +195,10 @@ func TestEntryAddMetricWithPoliciesWithPolicyUpdateIDNotOwnedReuseElemID(t *test
 			}
 		}
 	}
-	testEntryAddMetricWithPolicies(t, testPoliciesVersion+1, true, false, preAddFn, postAddFn, testNewPolicies)
+	testEntryAddMetricWithPoliciesList(t, true, false, preAddFn, postAddFn, testNewPolicies)
 }
 
-func TestEntryAddMetricWithPoliciesWithPolicyUpdateIDNotOwnedCopyID(t *testing.T) {
+func TestEntryAddMetricWithPoliciesListWithPolicyUpdateIDNotOwnedCopyID(t *testing.T) {
 	var lists *metricLists
 	preAddFn := func(e *Entry) { lists = e.lists }
 	postAddFn := func(t *testing.T) {
@@ -210,10 +213,10 @@ func TestEntryAddMetricWithPoliciesWithPolicyUpdateIDNotOwnedCopyID(t *testing.T
 			}
 		}
 	}
-	testEntryAddMetricWithPolicies(t, testPoliciesVersion+1, false, false, preAddFn, postAddFn, testPolicies)
+	testEntryAddMetricWithPoliciesList(t, false, false, preAddFn, postAddFn, testPolicies)
 }
 
-func TestEntryAddMetricWithPoliciesWithPolicyUpdateIDOwnsID(t *testing.T) {
+func TestEntryAddMetricWithPoliciesListWithPolicyUpdateIDOwnsID(t *testing.T) {
 	var lists *metricLists
 	preAddFn := func(e *Entry) { lists = e.lists }
 	postAddFn := func(t *testing.T) {
@@ -228,38 +231,24 @@ func TestEntryAddMetricWithPoliciesWithPolicyUpdateIDOwnsID(t *testing.T) {
 			}
 		}
 	}
-	testEntryAddMetricWithPolicies(t, testPoliciesVersion+1, false, true, preAddFn, postAddFn, testPolicies)
+	testEntryAddMetricWithPoliciesList(t, false, true, preAddFn, postAddFn, testPolicies)
 }
 
-func TestEntryAddMetricsWithPolicyError(t *testing.T) {
-	e, lists, now := testEntry()
-	e.version = testPoliciesVersion
-	versionedPolicies := policy.CustomVersionedPolicies(
-		testPoliciesVersion+1,
-		now.Add(-time.Second),
-		testNewPolicies,
-	)
+func TestEntryAddMetricsWithPoliciesListError(t *testing.T) {
+	e, lists, _ := testEntry()
+	policiesList := policy.PoliciesList{policy.NewStagedPolicies(0, false, testPolicies)}
 
 	// Add an invalid metric should result in an error.
-	require.Error(t, e.AddMetricWithPolicies(
-		testInvalidMetric,
-		versionedPolicies,
-	))
+	require.Error(t, e.AddMetricWithPoliciesList(testInvalidMetric, policiesList))
 
 	// Add a metric to a closed entry should result in an error.
 	e.closed = true
-	require.Equal(t, errEntryClosed, e.AddMetricWithPolicies(
-		testCounter,
-		versionedPolicies,
-	))
+	require.Equal(t, errEntryClosed, e.AddMetricWithPoliciesList(testCounter, policiesList))
 
 	// Add a metric with closed lists should result in an error.
 	e.closed = false
 	lists.closed = true
-	require.Error(t, e.AddMetricWithPolicies(
-		testCounter,
-		versionedPolicies,
-	))
+	require.Error(t, e.AddMetricWithPoliciesList(testCounter, policiesList))
 }
 
 func TestEntryMaybeExpireNoExpiry(t *testing.T) {
@@ -305,20 +294,45 @@ func TestEntryMaybeExpireWithExpiry(t *testing.T) {
 
 func TestShouldUpdatePoliciesWithLock(t *testing.T) {
 	e := NewEntry(nil, testOptions())
+	currTimeNanos := time.Now().UnixNano()
+	inputs := []struct {
+		cutoverNanos int64
+		tombstoned   bool
+		sp           policy.StagedPolicies
+		expected     bool
+	}{
+		{
+			cutoverNanos: uninitializedCutoverNanos,
+			tombstoned:   false,
+			sp:           policy.NewStagedPolicies(currTimeNanos-100, false, nil),
+			expected:     true,
+		},
+		{
+			cutoverNanos: currTimeNanos - 100,
+			tombstoned:   false,
+			sp:           policy.NewStagedPolicies(currTimeNanos, false, nil),
+			expected:     true,
+		},
+		{
+			cutoverNanos: currTimeNanos,
+			tombstoned:   false,
+			sp:           policy.NewStagedPolicies(currTimeNanos, true, nil),
+			expected:     true,
+		},
+		{
+			cutoverNanos: currTimeNanos,
+			tombstoned:   false,
+			sp:           policy.NewStagedPolicies(currTimeNanos-100, true, nil),
+			expected:     false,
+		},
+	}
 
-	// If entry version is the init version, we should update.
-	currTime := time.Now()
-	cutover := currTime.Add(-time.Second)
-	require.True(t, e.shouldUpdatePoliciesWithLock(currTime, -100, cutover))
+	for _, input := range inputs {
+		e.cutoverNanos = input.cutoverNanos
+		e.tombstoned = input.tombstoned
+		require.Equal(t, input.expected, e.shouldUpdatePoliciesWithLock(time.Unix(0, currTimeNanos), input.sp))
+	}
 
-	// If the current version is older than the incoming version,
-	// and we've surpassed the cutover, we should update the policies.
-	e.version = 2
-	require.True(t, e.shouldUpdatePoliciesWithLock(currTime, 3, cutover))
-
-	// Otherwise we shouldn't update.
-	require.False(t, e.shouldUpdatePoliciesWithLock(currTime, 2, cutover))
-	require.False(t, e.shouldUpdatePoliciesWithLock(currTime, 3, currTime.Add(time.Second)))
 }
 
 func testEntry() (*Entry, *metricLists, time.Time) {
@@ -399,9 +413,8 @@ func checkElemTombstoned(t *testing.T, elem metricElem, deleted map[policy.Polic
 	}
 }
 
-func testEntryAddMetricWithPolicies(
+func testEntryAddMetricWithPoliciesList(
 	t *testing.T,
-	newPoliciesVersion int,
 	withPrePopulation bool,
 	ownsID bool,
 	preAddFn testPreProcessFn,
@@ -416,7 +429,7 @@ func testEntryAddMetricWithPolicies(
 				require.Equal(t, testCounterID, id)
 				aggregations := elem.Value.(*CounterElem).values
 				require.Equal(t, 1, len(aggregations))
-				require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNs)
+				require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNanos)
 				require.Equal(t, int64(1234), aggregations[0].counter.Sum())
 			},
 		},
@@ -427,7 +440,7 @@ func testEntryAddMetricWithPolicies(
 				require.Equal(t, testBatchTimerID, id)
 				aggregations := elem.Value.(*TimerElem).values
 				require.Equal(t, 1, len(aggregations))
-				require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNs)
+				require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNanos)
 				require.Equal(t, 18.0, aggregations[0].timer.Sum())
 			},
 		},
@@ -438,7 +451,7 @@ func testEntryAddMetricWithPolicies(
 				require.Equal(t, testGaugeID, id)
 				aggregations := elem.Value.(*GaugeElem).values
 				require.Equal(t, 1, len(aggregations))
-				require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNs)
+				require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNanos)
 				require.Equal(t, 123.456, aggregations[0].gauge.Value())
 			},
 		},
@@ -448,31 +461,28 @@ func testEntryAddMetricWithPolicies(
 		input.mu.OwnsID = ownsID
 
 		e, _, now := testEntry()
-		e.version = testPoliciesVersion
-
 		if withPrePopulation {
 			populateTestAggregations(t, e, input.mu.Type)
 		}
 
 		preAddFn(e)
-
-		require.NoError(t, e.AddMetricWithPolicies(
+		cutoverNanos := now.Add(-time.Second).UnixNano()
+		require.NoError(t, e.AddMetricWithPoliciesList(
 			input.mu,
-			policy.CustomVersionedPolicies(
-				newPoliciesVersion,
-				now.Add(-time.Second),
-				expectedPolicies,
-			),
+			policy.PoliciesList{
+				policy.NewStagedPolicies(cutoverNanos, false, expectedPolicies),
+			},
 		))
 
-		require.Equal(t, now.UnixNano(), e.lastAccessInNs)
+		require.Equal(t, now.UnixNano(), e.lastAccessNanos)
 		require.Equal(t, len(expectedPolicies), len(e.aggregations))
 		for _, p := range expectedPolicies {
 			elem, exists := e.aggregations[p]
 			require.True(t, exists)
 			input.fn(t, elem, now.Truncate(p.Resolution().Window))
 		}
-		require.Equal(t, newPoliciesVersion, e.version)
+		require.Equal(t, cutoverNanos, e.cutoverNanos)
+		require.False(t, e.tombstoned)
 
 		postAddFn(t)
 	}

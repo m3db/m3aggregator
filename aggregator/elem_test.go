@@ -44,8 +44,8 @@ var (
 	testTimestamps   = []time.Time{
 		time.Unix(216, 0), time.Unix(217, 0), time.Unix(221, 0),
 	}
-	testAlignedStarts = []time.Time{
-		time.Unix(210, 0), time.Unix(220, 0), time.Unix(230, 0),
+	testAlignedStarts = []int64{
+		time.Unix(210, 0).UnixNano(), time.Unix(220, 0).UnixNano(), time.Unix(230, 0).UnixNano(),
 	}
 	testCounter = unaggregated.MetricUnion{
 		Type:       unaggregated.CounterType,
@@ -106,21 +106,21 @@ func TestCounterElemAddMetric(t *testing.T) {
 	// Add a counter metric
 	require.NoError(t, e.AddMetric(testTimestamps[0], testCounter))
 	require.Equal(t, 1, len(e.values))
-	require.Equal(t, testAlignedStarts[0].UnixNano(), e.values[0].timeNs)
+	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
 	require.Equal(t, testCounter.CounterVal, e.values[0].counter.Sum())
 
 	// Add the counter metric at slightly different time
 	// but still within the same aggregation interval
 	require.NoError(t, e.AddMetric(testTimestamps[1], testCounter))
 	require.Equal(t, 1, len(e.values))
-	require.Equal(t, testAlignedStarts[0].UnixNano(), e.values[0].timeNs)
+	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
 	require.Equal(t, 2*testCounter.CounterVal, e.values[0].counter.Sum())
 
 	// Add the counter metric in the next aggregation interval
 	require.NoError(t, e.AddMetric(testTimestamps[2], testCounter))
 	require.Equal(t, 2, len(e.values))
 	for i := 0; i < len(e.values); i++ {
-		require.Equal(t, testAlignedStarts[i].UnixNano(), e.values[i].timeNs)
+		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
 	require.Equal(t, testCounter.CounterVal, e.values[1].counter.Sum())
 
@@ -134,7 +134,7 @@ func TestCounterElemReadAndDiscard(t *testing.T) {
 
 	// Read and discard values before an early-enough time
 	fn, res := testAggMetricFn()
-	require.False(t, e.Consume(time.Unix(0, 0), fn))
+	require.False(t, e.Consume(0, fn))
 	require.Equal(t, 0, len(*res))
 	require.Equal(t, 2, len(e.values))
 
@@ -194,7 +194,7 @@ func TestCounterFindOrInsert(t *testing.T) {
 		res := e.findOrInsertWithLock(input)
 		var times []int64
 		for _, v := range e.values {
-			times = append(times, v.timeNs)
+			times = append(times, v.timeNanos)
 		}
 		require.Equal(t, expected[idx].index, res)
 		require.Equal(t, expected[idx].data, times)
@@ -210,7 +210,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 	// Add a timer metric
 	require.NoError(t, e.AddMetric(testTimestamps[0], testBatchTimer))
 	require.Equal(t, 1, len(e.values))
-	require.Equal(t, testAlignedStarts[0].UnixNano(), e.values[0].timeNs)
+	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
 	timer := e.values[0].timer
 	require.Equal(t, int64(5), timer.Count())
 	require.Equal(t, 18.0, timer.Sum())
@@ -222,7 +222,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 	// but still within the same aggregation interval
 	require.NoError(t, e.AddMetric(testTimestamps[1], testBatchTimer))
 	require.Equal(t, 1, len(e.values))
-	require.Equal(t, testAlignedStarts[0].UnixNano(), e.values[0].timeNs)
+	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
 	timer = e.values[0].timer
 	require.Equal(t, int64(10), timer.Count())
 	require.Equal(t, 36.0, timer.Sum())
@@ -234,7 +234,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[2], testBatchTimer))
 	require.Equal(t, 2, len(e.values))
 	for i := 0; i < len(e.values); i++ {
-		require.Equal(t, testAlignedStarts[i].UnixNano(), e.values[i].timeNs)
+		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
 	timer = e.values[1].timer
 	require.Equal(t, int64(5), timer.Count())
@@ -259,7 +259,7 @@ func TestTimerElemReadAndDiscard(t *testing.T) {
 
 	// Read and discard values before an early-enough time
 	fn, res := testAggMetricFn()
-	require.False(t, e.Consume(time.Unix(0, 0), fn))
+	require.False(t, e.Consume(0, fn))
 	require.Equal(t, 0, len(*res))
 	require.Equal(t, 2, len(e.values))
 
@@ -332,7 +332,7 @@ func TestTimerFindOrInsert(t *testing.T) {
 		res := e.findOrInsertWithLock(input)
 		var times []int64
 		for _, v := range e.values {
-			times = append(times, v.timeNs)
+			times = append(times, v.timeNanos)
 		}
 		require.Equal(t, expected[idx].index, res)
 		require.Equal(t, expected[idx].data, times)
@@ -348,21 +348,21 @@ func TestGaugeElemAddMetric(t *testing.T) {
 	// Add a gauge metric
 	require.NoError(t, e.AddMetric(testTimestamps[0], testGauge))
 	require.Equal(t, 1, len(e.values))
-	require.Equal(t, testAlignedStarts[0].UnixNano(), e.values[0].timeNs)
+	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
 	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Value())
 
 	// Add the gauge metric at slightly different time
 	// but still within the same aggregation interval
 	require.NoError(t, e.AddMetric(testTimestamps[1], testGauge))
 	require.Equal(t, 1, len(e.values))
-	require.Equal(t, testAlignedStarts[0].UnixNano(), e.values[0].timeNs)
+	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
 	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Value())
 
 	// Add the gauge metric in the next aggregation interval
 	require.NoError(t, e.AddMetric(testTimestamps[2], testGauge))
 	require.Equal(t, 2, len(e.values))
 	for i := 0; i < len(e.values); i++ {
-		require.Equal(t, testAlignedStarts[i].UnixNano(), e.values[i].timeNs)
+		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
 	require.Equal(t, testGauge.GaugeVal, e.values[1].gauge.Value())
 
@@ -376,7 +376,7 @@ func TestGaugeElemReadAndDiscard(t *testing.T) {
 
 	// Read and discard values before an early-enough time
 	fn, res := testAggMetricFn()
-	require.False(t, e.Consume(time.Unix(0, 0), fn))
+	require.False(t, e.Consume(0, fn))
 	require.Equal(t, 0, len(*res))
 	require.Equal(t, 2, len(e.values))
 
@@ -437,7 +437,7 @@ func TestGaugeFindOrInsert(t *testing.T) {
 		res := e.findOrInsertWithLock(input)
 		var times []int64
 		for _, v := range e.values {
-			times = append(times, v.timeNs)
+			times = append(times, v.timeNanos)
 		}
 		require.Equal(t, expected[idx].index, res)
 		require.Equal(t, expected[idx].data, times)
@@ -458,19 +458,16 @@ type testAggMetric struct {
 	idPrefix  []byte
 	id        metric.ID
 	idSuffix  []byte
-	timestamp time.Time
+	timeNanos int64
 	value     float64
 	policy    policy.Policy
 }
 
 type testAggMetricsByTimeAscending []testAggMetric
 
-func (m testAggMetricsByTimeAscending) Len() int      { return len(m) }
-func (m testAggMetricsByTimeAscending) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
-
-func (m testAggMetricsByTimeAscending) Less(i, j int) bool {
-	return m[i].timestamp.Before(m[j].timestamp)
-}
+func (m testAggMetricsByTimeAscending) Len() int           { return len(m) }
+func (m testAggMetricsByTimeAscending) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
+func (m testAggMetricsByTimeAscending) Less(i, j int) bool { return m[i].timeNanos < m[j].timeNanos }
 
 func testAggMetricFn() (aggMetricFn, *[]testAggMetric) {
 	var result []testAggMetric
@@ -478,7 +475,7 @@ func testAggMetricFn() (aggMetricFn, *[]testAggMetric) {
 		idPrefix []byte,
 		id metric.ID,
 		idSuffix []byte,
-		timestamp time.Time,
+		timeNanos int64,
 		value float64,
 		policy policy.Policy,
 	) {
@@ -486,7 +483,7 @@ func testAggMetricFn() (aggMetricFn, *[]testAggMetric) {
 			idPrefix:  idPrefix,
 			id:        id,
 			idSuffix:  idSuffix,
-			timestamp: timestamp,
+			timeNanos: timeNanos,
 			value:     value,
 			policy:    policy,
 		})
@@ -511,8 +508,8 @@ func testCounterElem() *CounterElem {
 		counter := aggregation.NewCounter()
 		counter.Add(testCounter.CounterVal)
 		e.values = append(e.values, timedCounter{
-			timeNs:  aligned.UnixNano(),
-			counter: counter,
+			timeNanos: aligned,
+			counter:   counter,
 		})
 	}
 	return e
@@ -524,8 +521,8 @@ func testTimerElem(opts Options) *TimerElem {
 		timer := aggregation.NewTimer(opts.StreamOptions())
 		timer.AddBatch(testBatchTimer.BatchTimerVal)
 		e.values = append(e.values, timedTimer{
-			timeNs: aligned.UnixNano(),
-			timer:  timer,
+			timeNanos: aligned,
+			timer:     timer,
 		})
 	}
 	return e
@@ -537,15 +534,15 @@ func testGaugeElem() *GaugeElem {
 		gauge := aggregation.NewGauge()
 		gauge.Set(testGauge.GaugeVal)
 		e.values = append(e.values, timedGauge{
-			timeNs: aligned.UnixNano(),
-			gauge:  gauge,
+			timeNanos: aligned,
+			gauge:     gauge,
 		})
 	}
 	return e
 }
 
 func expectedAggMetricsForCounter(
-	timestamp time.Time,
+	timeNanos int64,
 	policy policy.Policy,
 ) []testAggMetric {
 	return []testAggMetric{
@@ -553,7 +550,7 @@ func expectedAggMetricsForCounter(
 			idPrefix:  []byte("stats.counts."),
 			id:        testCounterID,
 			idSuffix:  nil,
-			timestamp: timestamp,
+			timeNanos: timeNanos,
 			value:     float64(testCounter.CounterVal),
 			policy:    policy,
 		},
@@ -561,7 +558,7 @@ func expectedAggMetricsForCounter(
 }
 
 func expectedAggMetricsForTimer(
-	timestamp time.Time,
+	timeNanos int64,
 	policy policy.Policy,
 ) []testAggMetric {
 	data := []testSuffixAndValue{
@@ -583,7 +580,7 @@ func expectedAggMetricsForTimer(
 			idPrefix:  []byte("stats.timers."),
 			id:        testBatchTimerID,
 			idSuffix:  d.suffix,
-			timestamp: timestamp,
+			timeNanos: timeNanos,
 			value:     d.value,
 			policy:    policy,
 		})
@@ -592,7 +589,7 @@ func expectedAggMetricsForTimer(
 }
 
 func expectedAggMetricsForGauge(
-	timestamp time.Time,
+	timeNanos int64,
 	policy policy.Policy,
 ) []testAggMetric {
 	return []testAggMetric{
@@ -600,7 +597,7 @@ func expectedAggMetricsForGauge(
 			idPrefix:  []byte("stats.gauges."),
 			id:        testGaugeID,
 			idSuffix:  nil,
-			timestamp: timestamp,
+			timeNanos: timeNanos,
 			value:     float64(testGauge.GaugeVal),
 			policy:    policy,
 		},

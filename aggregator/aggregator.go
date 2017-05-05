@@ -39,40 +39,37 @@ var (
 )
 
 type aggregatorMetrics struct {
-	addMetricWithPolicies instrument.MethodMetrics
-	tickDuration          tally.Timer
-	tickExpired           tally.Counter
+	addMetricWithPoliciesList instrument.MethodMetrics
+	tickDuration              tally.Timer
+	tickExpired               tally.Counter
 }
 
 func newAggregatorMetrics(scope tally.Scope, samplingRate float64) aggregatorMetrics {
 	tickScope := scope.SubScope("tick")
 	return aggregatorMetrics{
-		addMetricWithPolicies: instrument.NewMethodMetrics(scope, "addMetricWithPolicies", samplingRate),
-		tickDuration:          tickScope.Timer("duration"),
-		tickExpired:           tickScope.Counter("expired"),
+		addMetricWithPoliciesList: instrument.NewMethodMetrics(scope, "addMetricWithPoliciesList", samplingRate),
+		tickDuration:              tickScope.Timer("duration"),
+		tickExpired:               tickScope.Counter("expired"),
 	}
 }
 
-type addMetricWithPoliciesFn func(
-	mu unaggregated.MetricUnion,
-	policies policy.VersionedPolicies,
-) error
+type addMetricWithPoliciesListFn func(mu unaggregated.MetricUnion, pl policy.PoliciesList) error
 
 type waitForFn func(d time.Duration) <-chan time.Time
 
 // aggregator stores aggregations of different types of metrics (e.g., counter,
 // timer, gauges) and periodically flushes them out.
 type aggregator struct {
-	opts                    Options
-	nowFn                   clock.NowFn
-	checkInterval           time.Duration
-	closed                  int32
-	doneCh                  chan struct{}
-	wg                      sync.WaitGroup
-	metricMap               *metricMap
-	addMetricWithPoliciesFn addMetricWithPoliciesFn
-	waitForFn               waitForFn
-	metrics                 aggregatorMetrics
+	opts                        Options
+	nowFn                       clock.NowFn
+	checkInterval               time.Duration
+	closed                      int32
+	doneCh                      chan struct{}
+	wg                          sync.WaitGroup
+	metricMap                   *metricMap
+	addMetricWithPoliciesListFn addMetricWithPoliciesListFn
+	waitForFn                   waitForFn
+	metrics                     aggregatorMetrics
 }
 
 // NewAggregator creates a new aggregator.
@@ -87,7 +84,7 @@ func NewAggregator(opts Options) Aggregator {
 		metricMap:     newMetricMap(opts),
 		metrics:       newAggregatorMetrics(iOpts.MetricsScope(), iOpts.MetricsSamplingRate()),
 	}
-	agg.addMetricWithPoliciesFn = agg.metricMap.AddMetricWithPolicies
+	agg.addMetricWithPoliciesListFn = agg.metricMap.AddMetricWithPoliciesList
 	agg.waitForFn = time.After
 
 	if agg.checkInterval > 0 {
@@ -101,17 +98,17 @@ func NewAggregator(opts Options) Aggregator {
 	return agg
 }
 
-func (agg *aggregator) AddMetricWithPolicies(
+func (agg *aggregator) AddMetricWithPoliciesList(
 	mu unaggregated.MetricUnion,
-	policies policy.VersionedPolicies,
+	pl policy.PoliciesList,
 ) error {
 	callStart := agg.nowFn()
 	if atomic.LoadInt32(&agg.closed) == 1 {
-		agg.metrics.addMetricWithPolicies.ReportError(agg.nowFn().Sub(callStart))
+		agg.metrics.addMetricWithPoliciesList.ReportError(agg.nowFn().Sub(callStart))
 		return errAggregatorClosed
 	}
-	err := agg.addMetricWithPoliciesFn(mu, policies)
-	agg.metrics.addMetricWithPolicies.ReportSuccessOrError(err, agg.nowFn().Sub(callStart))
+	err := agg.addMetricWithPoliciesListFn(mu, pl)
+	agg.metrics.addMetricWithPoliciesList.ReportSuccessOrError(err, agg.nowFn().Sub(callStart))
 	return err
 }
 

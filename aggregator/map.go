@@ -88,12 +88,12 @@ func newMetricMap(opts Options) *metricMap {
 	}
 }
 
-func (m *metricMap) AddMetricWithPolicies(
+func (m *metricMap) AddMetricWithPoliciesList(
 	mu unaggregated.MetricUnion,
-	policies policy.VersionedPolicies,
+	pl policy.PoliciesList,
 ) error {
 	e := m.findOrCreate(mu.ID)
-	err := e.AddMetricWithPolicies(mu, policies)
+	err := e.AddMetricWithPoliciesList(mu, pl)
 	e.DecWriter()
 	return err
 }

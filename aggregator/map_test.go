@@ -30,29 +30,33 @@ import (
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/clock"
+	"github.com/m3db/m3x/time"
 
 	"github.com/stretchr/testify/require"
 )
 
 var (
-	testDefaultVersionedPolicies = policy.DefaultVersionedPolicies(
-		1,
-		time.Now(),
-	)
-	testCustomVersionedPolicies = policy.CustomVersionedPolicies(
-		1,
-		time.Now(),
-		testPolicies,
-	)
+	testDefaultPoliciesList = policy.DefaultPoliciesList
+	testCustomPoliciesList  = policy.PoliciesList{
+		policy.NewStagedPolicies(
+			time.Now().UnixNano(),
+			false,
+			[]policy.Policy{
+				policy.NewPolicy(10*time.Second, xtime.Second, 6*time.Hour),
+				policy.NewPolicy(time.Minute, xtime.Minute, 2*24*time.Hour),
+				policy.NewPolicy(10*time.Minute, xtime.Minute, 30*24*time.Hour),
+			},
+		),
+	}
 )
 
-func TestMetricMapAddMetricWithPolicies(t *testing.T) {
+func TestMetricMapAddMetricWithPoliciesList(t *testing.T) {
 	opts := testOptions()
 	m := newMetricMap(opts)
-	policies := testDefaultVersionedPolicies
+	policies := testDefaultPoliciesList
 
 	// Add a counter metric and assert there is one entry afterwards.
-	require.NoError(t, m.AddMetricWithPolicies(testCounter, policies))
+	require.NoError(t, m.AddMetricWithPoliciesList(testCounter, policies))
 	require.Equal(t, 1, len(m.entries))
 	require.Equal(t, 1, m.entryList.Len())
 	idHash := id.HashFn(testCounterID)
@@ -64,7 +68,7 @@ func TestMetricMapAddMetricWithPolicies(t *testing.T) {
 	require.Equal(t, 2, m.metricLists.Len())
 
 	// Add the same counter and assert there is still one entry.
-	require.NoError(t, m.AddMetricWithPolicies(testCounter, policies))
+	require.NoError(t, m.AddMetricWithPoliciesList(testCounter, policies))
 	require.Equal(t, 1, len(m.entries))
 	require.Equal(t, 1, m.entryList.Len())
 	elem2, exists := m.entries[idHash]
@@ -75,13 +79,13 @@ func TestMetricMapAddMetricWithPolicies(t *testing.T) {
 	require.Equal(t, 2, m.metricLists.Len())
 
 	// Add a different metric and assert there are now two entries.
-	require.NoError(t, m.AddMetricWithPolicies(
+	require.NoError(t, m.AddMetricWithPoliciesList(
 		unaggregated.MetricUnion{
 			Type:     unaggregated.GaugeType,
 			ID:       []byte("bar"),
 			GaugeVal: 123.456,
 		},
-		testCustomVersionedPolicies,
+		testCustomPoliciesList,
 	))
 	require.Equal(t, 2, len(m.entries))
 	require.Equal(t, 2, m.entryList.Len())
