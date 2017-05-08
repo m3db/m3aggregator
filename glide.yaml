@@ -5,13 +5,13 @@ import:
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
 
 - package: github.com/m3db/m3metrics
-  version: 07771ef4963017aac6b62e09ffab3cd19122ba5a
+  version: e4b5731be90296905fcac5a517f98d740c0a1412
 
 - package: google.golang.org/appengine
   version: 2e4a801b39fc199db615bfca7d0b9f8cd9580599
 
 - package: github.com/m3db/m3x
-  version: 1d5e58270a2083a8517e8ebf894feebcaaf4d823
+  version: 2a4b2eeb25be253ed5c57255e1c72bde13257d34
 
 - package: github.com/uber-go/tally
   version: 3.0.0
