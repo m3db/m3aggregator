@@ -42,25 +42,25 @@ const (
 )
 
 var (
-	errNoPolicyReceived = errors.New("no policy received")
-	errEntryClosed      = errors.New("entry is closed")
+	errEmptyPoliciesList = errors.New("empty policies list")
+	errEntryClosed       = errors.New("entry is closed")
 )
 
 type entryMetrics struct {
-	noPolicyErrors   tally.Counter
-	stalePolicy      tally.Counter
-	futurePolicy     tally.Counter
-	tombstonedPolicy tally.Counter
-	policyUpdates    tally.Counter
+	emptyPoliciesList tally.Counter
+	stalePolicy       tally.Counter
+	futurePolicy      tally.Counter
+	tombstonedPolicy  tally.Counter
+	policyUpdates     tally.Counter
 }
 
 func newEntryMetrics(scope tally.Scope) entryMetrics {
 	return entryMetrics{
-		noPolicyErrors:   scope.Counter("no-policy-errors"),
-		stalePolicy:      scope.Counter("stale-policy"),
-		futurePolicy:     scope.Counter("future-policy"),
-		tombstonedPolicy: scope.Counter("tombstoned-policy"),
-		policyUpdates:    scope.Counter("policy-updates"),
+		emptyPoliciesList: scope.Counter("empty-policies-list"),
+		stalePolicy:       scope.Counter("stale-policy"),
+		futurePolicy:      scope.Counter("future-policy"),
+		tombstonedPolicy:  scope.Counter("tombstoned-policy"),
+		policyUpdates:     scope.Counter("policy-updates"),
 	}
 }
 
@@ -248,8 +248,8 @@ func (e *Entry) activeStagedPoliciesWithLock(
 ) (policy.StagedPolicies, error) {
 	// If we have no policy to apply, simply bail.
 	if len(pl) == 0 {
-		e.metrics.noPolicyErrors.Inc(1)
-		return policy.DefaultStagedPolicies, errNoPolicyReceived
+		e.metrics.emptyPoliciesList.Inc(1)
+		return policy.DefaultStagedPolicies, errEmptyPoliciesList
 	}
 	timeNanos := t.UnixNano()
 	for idx := len(pl) - 1; idx >= 0; idx-- {
@@ -278,6 +278,10 @@ func (e *Entry) shouldUpdatePoliciesWithLock(currTime time.Time, sp policy.Stage
 	}
 	if e.tombstoned != sp.Tombstoned || e.cutoverNanos != sp.CutoverNanos {
 		return true
+	}
+	// If the policies have been tombstoned, there is no need to compare the actual policies.
+	if e.tombstoned {
+		return false
 	}
 	policies, useDefaultPolicies := sp.Policies()
 	if e.useDefaultPolicies && useDefaultPolicies {
@@ -308,9 +312,15 @@ func (e *Entry) updatePoliciesWithLock(
 	hasDefaultPoliciesList bool,
 	sp policy.StagedPolicies,
 ) error {
-	policies, useDefaultPolicies := sp.Policies()
-	if useDefaultPolicies {
-		policies = e.opts.DefaultPolicies()
+	var (
+		policies           []policy.Policy
+		useDefaultPolicies bool
+	)
+	if !sp.Tombstoned {
+		policies, useDefaultPolicies = sp.Policies()
+		if useDefaultPolicies {
+			policies = e.opts.DefaultPolicies()
+		}
 	}
 
 	// Fast path to exit in case the policies didn't change.
