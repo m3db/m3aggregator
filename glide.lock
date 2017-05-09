@@ -1,5 +1,5 @@
-hash: 66a6b6aaaccc4e79caff2da66109d7242143d4224d8a1f1c650dcbc308bd8967
-updated: 2017-05-07T22:20:24.68875488-04:00
+hash: c8ebd2e48a7723869bcba7ecbbe0fde7cf66fdc09d88e0a67a745396be5a8701
+updated: 2017-05-09T16:04:21.665971913-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -29,7 +29,7 @@ imports:
   - policy
   - protocol/msgpack
 - name: github.com/m3db/m3x
-  version: 2a4b2eeb25be253ed5c57255e1c72bde13257d34
+  version: ee84f27b0ca683260981a21fad4d11f11c5fb021
   subpackages:
   - checked
   - clock
@@ -40,6 +40,7 @@ imports:
   - net
   - pool
   - pprof
+  - process
   - retry
   - sync
   - time
