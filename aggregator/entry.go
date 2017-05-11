@@ -23,13 +23,12 @@ package aggregator
 import (
 	"container/list"
 	"errors"
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/m3db/m3metrics/metric"
+	metricID "github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/errors"
@@ -307,7 +306,7 @@ func (e *Entry) hasPolicyChangesWithLock(newPolicies []policy.Policy) bool {
 
 func (e *Entry) updatePoliciesWithLock(
 	typ unaggregated.Type,
-	id metric.ID,
+	id metricID.RawID,
 	ownsID bool,
 	hasDefaultPoliciesList bool,
 	sp policy.StagedPolicies,
@@ -345,7 +344,7 @@ func (e *Entry) updatePoliciesWithLock(
 		} else {
 			// Otherwise this is a new id so it is necessary to make a
 			// copy because it's not owned by us.
-			elemID = make(metric.ID, len(id))
+			elemID = make(metricID.RawID, len(id))
 			copy(elemID, id)
 		}
 	}
@@ -365,7 +364,7 @@ func (e *Entry) updatePoliciesWithLock(
 			case unaggregated.GaugeType:
 				newElem = e.opts.GaugeElemPool().Get()
 			default:
-				return fmt.Errorf("unrecognized element type:%v", typ)
+				return errInvalidMetricType
 			}
 			newElem.ResetSetData(elemID, policy)
 			list, err := e.lists.FindOrCreate(policy.Resolution().Window)

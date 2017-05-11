@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3aggregator/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/clock"
+	xid "github.com/m3db/m3x/id"
 	"github.com/m3db/m3x/time"
 
 	"github.com/stretchr/testify/require"
@@ -59,7 +59,7 @@ func TestMetricMapAddMetricWithPoliciesList(t *testing.T) {
 	require.NoError(t, m.AddMetricWithPoliciesList(testCounter, policies))
 	require.Equal(t, 1, len(m.entries))
 	require.Equal(t, 1, m.entryList.Len())
-	idHash := id.HashFn(testCounterID)
+	idHash := xid.HashFn(testCounterID)
 	elem, exists := m.entries[idHash]
 	require.True(t, exists)
 	entry := elem.Value.(hashedEntry)
@@ -126,7 +126,7 @@ func TestMetricMapDeleteExpired(t *testing.T) {
 	// Insert some live entries and some expired entries.
 	numEntries := 100
 	for i := 0; i < numEntries; i++ {
-		idHash := id.HashFn([]byte(fmt.Sprintf("%d", i)))
+		idHash := xid.HashFn([]byte(fmt.Sprintf("%d", i)))
 		if i%2 == 0 {
 			m.entries[idHash] = m.entryList.PushBack(hashedEntry{
 				idHash: idHash,

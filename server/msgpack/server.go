@@ -190,7 +190,8 @@ func (s *server) handleConnection(conn net.Conn) {
 
 	// Iterate over the incoming metrics stream and queue up metrics
 	for it.Next() {
-		metric, policiesList := it.Value()
+		metric := it.Metric()
+		policiesList := it.PoliciesList()
 		if err := s.aggregator.AddMetricWithPoliciesList(metric, policiesList); err != nil {
 			s.log.WithFields(
 				xlog.NewLogField("metric", metric.String()),

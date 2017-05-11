@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/m3db/m3metrics/metric"
 	"github.com/m3db/m3metrics/metric/aggregated"
+	metricID "github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
@@ -243,7 +243,7 @@ func (l *metricList) flushInternal() {
 
 func (l *metricList) processAggregatedMetric(
 	idPrefix []byte,
-	id metric.ID,
+	id metricID.RawID,
 	idSuffix []byte,
 	timeNanos int64,
 	value float64,
@@ -254,7 +254,7 @@ func (l *metricList) processAggregatedMetric(
 	sizeBefore := buffer.Len()
 	if err := l.encodeFn(aggregated.ChunkedMetricWithPolicy{
 		ChunkedMetric: aggregated.ChunkedMetric{
-			ChunkedID: metric.ChunkedID{
+			ChunkedID: metricID.ChunkedID{
 				Prefix: idPrefix,
 				Data:   []byte(id),
 				Suffix: idSuffix,

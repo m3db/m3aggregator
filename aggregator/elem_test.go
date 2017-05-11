@@ -26,7 +26,7 @@ import (
 
 	"github.com/m3db/m3aggregator/aggregation"
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
-	"github.com/m3db/m3metrics/metric"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/pool"
@@ -36,10 +36,9 @@ import (
 )
 
 var (
-	testCounterID    = metric.ID("testCounter")
-	testBatchTimerID = metric.ID("testBatchTimer")
-	testGaugeID      = metric.ID("testGauge")
-	testInvalidID    = metric.ID("testInvalid")
+	testCounterID    = id.RawID("testCounter")
+	testBatchTimerID = id.RawID("testBatchTimer")
+	testGaugeID      = id.RawID("testGauge")
 	testPolicy       = policy.NewPolicy(10*time.Second, xtime.Second, 6*time.Hour)
 	testTimestamps   = []time.Time{
 		time.Unix(216, 0), time.Unix(217, 0), time.Unix(221, 0),
@@ -61,10 +60,6 @@ var (
 		Type:     unaggregated.GaugeType,
 		ID:       testGaugeID,
 		GaugeVal: 123.456,
-	}
-	testInvalidMetric = unaggregated.MetricUnion{
-		Type: unaggregated.UnknownType,
-		ID:   testInvalidID,
 	}
 )
 
@@ -99,9 +94,6 @@ func TestElemBaseMarkAsTombStoned(t *testing.T) {
 
 func TestCounterElemAddMetric(t *testing.T) {
 	e := NewCounterElem(testCounterID, testPolicy, testOptions())
-
-	// Add an invalid metric
-	require.Equal(t, errInvalidMetricType, e.AddMetric(testTimestamps[0], testInvalidMetric))
 
 	// Add a counter metric
 	require.NoError(t, e.AddMetric(testTimestamps[0], testCounter))
@@ -203,9 +195,6 @@ func TestCounterFindOrInsert(t *testing.T) {
 
 func TestTimerElemAddMetric(t *testing.T) {
 	e := NewTimerElem(testBatchTimerID, testPolicy, testOptions())
-
-	// Add an invalid metric
-	require.Equal(t, errInvalidMetricType, e.AddMetric(testTimestamps[0], testInvalidMetric))
 
 	// Add a timer metric
 	require.NoError(t, e.AddMetric(testTimestamps[0], testBatchTimer))
@@ -342,9 +331,6 @@ func TestTimerFindOrInsert(t *testing.T) {
 func TestGaugeElemAddMetric(t *testing.T) {
 	e := NewGaugeElem(testGaugeID, testPolicy, testOptions())
 
-	// Add an invalid metric
-	require.Equal(t, errInvalidMetricType, e.AddMetric(testTimestamps[0], testInvalidMetric))
-
 	// Add a gauge metric
 	require.NoError(t, e.AddMetric(testTimestamps[0], testGauge))
 	require.Equal(t, 1, len(e.values))
@@ -456,7 +442,7 @@ type testSuffixAndValue struct {
 
 type testAggMetric struct {
 	idPrefix  []byte
-	id        metric.ID
+	id        id.RawID
 	idSuffix  []byte
 	timeNanos int64
 	value     float64
@@ -473,7 +459,7 @@ func testAggMetricFn() (aggMetricFn, *[]testAggMetric) {
 	var result []testAggMetric
 	return func(
 		idPrefix []byte,
-		id metric.ID,
+		id id.RawID,
 		idSuffix []byte,
 		timeNanos int64,
 		value float64,

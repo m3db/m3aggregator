@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3metrics/metric"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/clock"
@@ -52,6 +52,11 @@ var (
 	testDefaultPolicies = []policy.Policy{
 		policy.NewPolicy(10*time.Second, xtime.Second, 48*time.Hour),
 		policy.NewPolicy(time.Minute, xtime.Minute, 720*time.Hour),
+	}
+	testInvalidID     = id.RawID("testInvalid")
+	testInvalidMetric = unaggregated.MetricUnion{
+		Type: unaggregated.UnknownType,
+		ID:   testInvalidID,
 	}
 )
 
@@ -675,7 +680,7 @@ func populateTestAggregations(
 	for _, policy := range policies {
 		var (
 			newElem metricElem
-			testID  metric.ID
+			testID  id.RawID
 		)
 		switch typ {
 		case unaggregated.CounterType:

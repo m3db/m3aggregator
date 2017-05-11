@@ -1,5 +1,5 @@
-hash: c8ebd2e48a7723869bcba7ecbbe0fde7cf66fdc09d88e0a67a745396be5a8701
-updated: 2017-05-09T16:04:21.665971913-04:00
+hash: 8dbe61fa8b0166cd53c2b397916b22e723a515708e58533ccb9f2e4ee38ce110
+updated: 2017-05-11T09:06:17.03711491-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -20,16 +20,17 @@ imports:
   subpackages:
   - proto
 - name: github.com/m3db/m3metrics
-  version: e4b5731be90296905fcac5a517f98d740c0a1412
+  version: 5a4ec9a107763207c0e077c04a56e73119208408
   subpackages:
   - generated/proto/schema
   - metric
   - metric/aggregated
+  - metric/id
   - metric/unaggregated
   - policy
   - protocol/msgpack
 - name: github.com/m3db/m3x
-  version: ee84f27b0ca683260981a21fad4d11f11c5fb021
+  version: bd6be18ffb184691512eb442561b16a59c15d797
   subpackages:
   - checked
   - clock

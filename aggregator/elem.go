@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation"
-	"github.com/m3db/m3metrics/metric"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 )
@@ -40,7 +40,6 @@ var (
 	emptyTimedTimer   timedTimer
 	emptyTimedGauge   timedGauge
 
-	errInvalidMetricType = errors.New("invalid metric type")
 	errCounterElemClosed = errors.New("counter element is closed")
 	errTimerElemClosed   = errors.New("timer element is closed")
 	errGaugeElemClosed   = errors.New("gauge element is closed")
@@ -48,7 +47,7 @@ var (
 
 type aggMetricFn func(
 	idPrefix []byte,
-	id metric.ID,
+	id id.RawID,
 	idSuffix []byte,
 	timeNanos int64,
 	value float64,
@@ -60,10 +59,10 @@ type newMetricElemFn func() metricElem
 // metricElem is the common interface for metric elements
 type metricElem interface {
 	// ID returns the metric id.
-	ID() metric.ID
+	ID() id.RawID
 
 	// ResetSetData resets the counter and sets data
-	ResetSetData(id metric.ID, policy policy.Policy)
+	ResetSetData(id id.RawID, policy policy.Policy)
 
 	// AddMetric adds a new metric value
 	// TODO(xichen): a value union would suffice here
@@ -86,7 +85,7 @@ type elemBase struct {
 	sync.Mutex
 
 	opts       Options
-	id         metric.ID
+	id         id.RawID
 	policy     policy.Policy
 	tombstoned bool
 	closed     bool
@@ -129,7 +128,7 @@ type GaugeElem struct {
 }
 
 // ResetSetData resets the counter and sets data.
-func (e *elemBase) ResetSetData(id metric.ID, policy policy.Policy) {
+func (e *elemBase) ResetSetData(id id.RawID, policy policy.Policy) {
 	e.id = id
 	e.policy = policy
 	e.tombstoned = false
@@ -137,7 +136,7 @@ func (e *elemBase) ResetSetData(id metric.ID, policy policy.Policy) {
 }
 
 // ID returns the metric id.
-func (e *elemBase) ID() metric.ID {
+func (e *elemBase) ID() id.RawID {
 	e.Lock()
 	id := e.id
 	e.Unlock()
@@ -157,7 +156,7 @@ func (e *elemBase) MarkAsTombstoned() {
 }
 
 // NewCounterElem creates a new counter element
-func NewCounterElem(id metric.ID, policy policy.Policy, opts Options) *CounterElem {
+func NewCounterElem(id id.RawID, policy policy.Policy, opts Options) *CounterElem {
 	return &CounterElem{
 		elemBase: elemBase{opts: opts, id: id, policy: policy},
 		values:   make([]timedCounter, 0, defaultNumValues), // in most cases values will have two entries
@@ -166,9 +165,6 @@ func NewCounterElem(id metric.ID, policy policy.Policy, opts Options) *CounterEl
 
 // AddMetric adds a new counter value
 func (e *CounterElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion) error {
-	if mu.Type != unaggregated.CounterType {
-		return errInvalidMetricType
-	}
 	alignedStart := timestamp.Truncate(e.policy.Resolution().Window).UnixNano()
 	e.Lock()
 	if e.closed {
@@ -269,7 +265,7 @@ func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn 
 }
 
 // NewTimerElem creates a new timer element
-func NewTimerElem(id metric.ID, policy policy.Policy, opts Options) *TimerElem {
+func NewTimerElem(id id.RawID, policy policy.Policy, opts Options) *TimerElem {
 	return &TimerElem{
 		elemBase: elemBase{opts: opts, id: id, policy: policy},
 		values:   make([]timedTimer, 0, defaultNumValues), // in most cases values will have two entries
@@ -278,9 +274,6 @@ func NewTimerElem(id metric.ID, policy policy.Policy, opts Options) *TimerElem {
 
 // AddMetric adds a new batch of timer values
 func (e *TimerElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion) error {
-	if mu.Type != unaggregated.BatchTimerType {
-		return errInvalidMetricType
-	}
 	alignedStart := timestamp.Truncate(e.policy.Resolution().Window).UnixNano()
 	e.Lock()
 	if e.closed {
@@ -418,7 +411,7 @@ func (e *TimerElem) processValue(timeNanos int64, agg aggregation.Timer, fn aggM
 }
 
 // NewGaugeElem creates a new gauge element
-func NewGaugeElem(id metric.ID, policy policy.Policy, opts Options) *GaugeElem {
+func NewGaugeElem(id id.RawID, policy policy.Policy, opts Options) *GaugeElem {
 	return &GaugeElem{
 		elemBase: elemBase{opts: opts, id: id, policy: policy},
 		values:   make([]timedGauge, 0, defaultNumValues), // in most cases values will have two entries
@@ -427,9 +420,6 @@ func NewGaugeElem(id metric.ID, policy policy.Policy, opts Options) *GaugeElem {
 
 // AddMetric adds a new gauge value
 func (e *GaugeElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion) error {
-	if mu.Type != unaggregated.GaugeType {
-		return errInvalidMetricType
-	}
 	alignedStart := timestamp.Truncate(e.policy.Resolution().Window).UnixNano()
 	e.Lock()
 	if e.closed {

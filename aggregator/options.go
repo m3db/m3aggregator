@@ -53,7 +53,7 @@ var (
 	defaultEntryCheckBatchPercent = 0.01
 	defaultDefaultPolicies        = []policy.Policy{
 		policy.NewPolicy(10*time.Second, xtime.Second, 2*24*time.Hour),
-		policy.NewPolicy(time.Minute, xtime.Minute, 30*24*time.Hour),
+		policy.NewPolicy(time.Minute, xtime.Minute, 40*24*time.Hour),
 	}
 )
 

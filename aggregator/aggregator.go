@@ -35,21 +35,30 @@ import (
 )
 
 var (
-	errAggregatorClosed = errors.New("aggregator is closed")
+	errAggregatorClosed  = errors.New("aggregator is closed")
+	errInvalidMetricType = errors.New("invalid metric type")
 )
 
 type aggregatorMetrics struct {
-	addMetricWithPoliciesList instrument.MethodMetrics
 	tickDuration              tally.Timer
 	tickExpired               tally.Counter
+	counters                  tally.Counter
+	timers                    tally.Counter
+	gauges                    tally.Counter
+	invalidMetricTypes        tally.Counter
+	addMetricWithPoliciesList instrument.MethodMetrics
 }
 
 func newAggregatorMetrics(scope tally.Scope, samplingRate float64) aggregatorMetrics {
 	tickScope := scope.SubScope("tick")
 	return aggregatorMetrics{
-		addMetricWithPoliciesList: instrument.NewMethodMetrics(scope, "addMetricWithPoliciesList", samplingRate),
 		tickDuration:              tickScope.Timer("duration"),
 		tickExpired:               tickScope.Counter("expired"),
+		counters:                  scope.Counter("counters"),
+		timers:                    scope.Counter("timers"),
+		gauges:                    scope.Counter("gauges"),
+		invalidMetricTypes:        scope.Counter("invalid-metric-types"),
+		addMetricWithPoliciesList: instrument.NewMethodMetrics(scope, "addMetricWithPoliciesList", samplingRate),
 	}
 }
 
@@ -106,6 +115,18 @@ func (agg *aggregator) AddMetricWithPoliciesList(
 	if atomic.LoadInt32(&agg.closed) == 1 {
 		agg.metrics.addMetricWithPoliciesList.ReportError(agg.nowFn().Sub(callStart))
 		return errAggregatorClosed
+	}
+	switch mu.Type {
+	case unaggregated.CounterType:
+		agg.metrics.counters.Inc(1)
+	case unaggregated.BatchTimerType:
+		agg.metrics.timers.Inc(1)
+	case unaggregated.GaugeType:
+		agg.metrics.gauges.Inc(1)
+	default:
+		agg.metrics.invalidMetricTypes.Inc(1)
+		agg.metrics.addMetricWithPoliciesList.ReportError(agg.nowFn().Sub(callStart))
+		return errInvalidMetricType
 	}
 	err := agg.addMetricWithPoliciesListFn(mu, pl)
 	agg.metrics.addMetricWithPoliciesList.ReportSuccessOrError(err, agg.nowFn().Sub(callStart))

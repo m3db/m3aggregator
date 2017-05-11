@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/m3db/m3metrics/metric"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 )
@@ -116,7 +116,7 @@ func (agg *mockAggregator) Snapshot() SnapshotResult {
 func cloneMetric(m unaggregated.MetricUnion) unaggregated.MetricUnion {
 	mu := m
 	if !m.OwnsID {
-		clonedID := make(metric.ID, len(m.ID))
+		clonedID := make(id.RawID, len(m.ID))
 		copy(clonedID, m.ID)
 		mu.ID = clonedID
 		mu.OwnsID = true

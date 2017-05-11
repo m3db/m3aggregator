@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/m3db/m3metrics/metric"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 
@@ -34,22 +34,22 @@ import (
 var (
 	testCounter = unaggregated.MetricUnion{
 		Type:       unaggregated.CounterType,
-		ID:         metric.ID("testCounter"),
+		ID:         id.RawID("testCounter"),
 		CounterVal: 1234,
 	}
 	testBatchTimer = unaggregated.MetricUnion{
 		Type:          unaggregated.BatchTimerType,
-		ID:            metric.ID("testCounter"),
+		ID:            id.RawID("testCounter"),
 		BatchTimerVal: []float64{1.0, 3.5, 2.2, 6.5, 4.8},
 	}
 	testGauge = unaggregated.MetricUnion{
 		Type:     unaggregated.GaugeType,
-		ID:       metric.ID("testCounter"),
+		ID:       id.RawID("testCounter"),
 		GaugeVal: 123.456,
 	}
 	testInvalid = unaggregated.MetricUnion{
 		Type: unaggregated.UnknownType,
-		ID:   metric.ID("invalid"),
+		ID:   id.RawID("invalid"),
 	}
 	testDefaultPoliciesList = policy.DefaultPoliciesList
 )
