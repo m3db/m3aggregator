@@ -127,9 +127,6 @@ type AggregatorConfiguration struct {
 	// Default policies.
 	DefaultPolicies []policy.Policy `yaml:"defaultPolicies" validate:"nonzero"`
 
-	// Pool of entries.
-	EntryPool pool.ObjectPoolConfiguration `yaml:"entryPool"`
-
 	// Pool of counter elements.
 	CounterElemPool pool.ObjectPoolConfiguration `yaml:"counterElemPool"`
 
@@ -138,6 +135,9 @@ type AggregatorConfiguration struct {
 
 	// Pool of gauge elements.
 	GaugeElemPool pool.ObjectPoolConfiguration `yaml:"gaugeElemPool"`
+
+	// Pool of entries.
+	EntryPool pool.ObjectPoolConfiguration `yaml:"entryPool"`
 
 	// Pool of buffered encoders.
 	BufferedEncoderPool pool.ObjectPoolConfiguration `yaml:"bufferedEncoderPool"`
@@ -244,13 +244,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	sort.Sort(policy.ByResolutionAsc(policies))
 	opts = opts.SetDefaultPolicies(policies)
 
-	// Set entry pool.
-	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("entry-pool"))
-	entryPoolOpts := c.EntryPool.NewObjectPoolOptions(iOpts)
-	entryPool := aggregator.NewEntryPool(entryPoolOpts)
-	opts = opts.SetEntryPool(entryPool)
-	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, opts) })
-
 	// Set counter elem pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("counter-elem-pool"))
 	counterElemPoolOpts := c.CounterElemPool.NewObjectPoolOptions(iOpts)
@@ -271,6 +264,13 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	gaugeElemPool := aggregator.NewGaugeElemPool(gaugeElemPoolOpts)
 	opts = opts.SetGaugeElemPool(gaugeElemPool)
 	gaugeElemPool.Init(func() *aggregator.GaugeElem { return aggregator.NewGaugeElem(nil, emptyPolicy, opts) })
+
+	// Set entry pool.
+	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("entry-pool"))
+	entryPoolOpts := c.EntryPool.NewObjectPoolOptions(iOpts)
+	entryPool := aggregator.NewEntryPool(entryPoolOpts)
+	opts = opts.SetEntryPool(entryPool)
+	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, opts) })
 
 	// Set buffered encoder pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("buffered-encoder-pool"))

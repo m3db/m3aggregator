@@ -56,13 +56,13 @@ aggregator:
   defaultPolicies:
     - 10s:2d
     - 1m:40d
-  entryPool:
-    size: 4096
   counterElemPool:
     size: 4096
   timerElemPool:
     size: 4096
   gaugeElemPool:
+    size: 4096
+  entryPool:
     size: 4096
   bufferedEncoderPool:
     size: 4096
