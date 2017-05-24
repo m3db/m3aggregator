@@ -86,12 +86,14 @@ func (m aggregatorTickMetrics) Report(tickResult tickResult, duration time.Durat
 type aggregatorShardMetrics struct {
 	add   tally.Counter
 	close tally.Counter
+	owned tally.Gauge
 }
 
 func newAggregatorShardMetrics(scope tally.Scope) aggregatorShardMetrics {
 	return aggregatorShardMetrics{
 		add:   scope.Counter("add"),
 		close: scope.Counter("close"),
+		owned: scope.Gauge("owned"),
 	}
 }
 
@@ -412,6 +414,7 @@ func (agg *aggregator) tick() {
 func (agg *aggregator) tickInternal() {
 	ownedShards := agg.ownedShards()
 	numShards := len(ownedShards)
+	agg.metrics.shards.owned.Update(float64(numShards))
 	if numShards == 0 {
 		return
 	}

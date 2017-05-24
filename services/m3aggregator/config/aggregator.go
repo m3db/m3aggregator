@@ -188,7 +188,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	opts = opts.SetInstanceID(instanceID)
 
 	// Create kv client.
-	iOpts = instrumentOpts.SetMetricsScope(instrumentOpts.MetricsScope().SubScope("kvClient"))
+	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("kvClient"))
 	client, err := c.KVClient.NewKVClient(iOpts)
 	if err != nil {
 		return nil, err
