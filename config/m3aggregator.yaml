@@ -87,7 +87,7 @@ aggregator:
   flushManager:
     checkEvery: 1s
     jitterEnabled: true
-    numWorkersPerCPU: 0.25
+    numWorkersPerCPU: 0.125
   minFlushInterval: 5s
   maxFlushSize: 1440
   flush:

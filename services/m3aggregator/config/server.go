@@ -103,7 +103,7 @@ func (c *unaggregatedIteratorConfiguration) NewUnaggregatedIteratorPool(
 	largeFloatsPool.Init()
 
 	// Set iterator pool.
-	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("unaggreagted-iterator-pool"))
+	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("unaggregated-iterator-pool"))
 	iteratorPoolOpts := c.IteratorPool.NewObjectPoolOptions(iOpts)
 	iteratorPool := msgpackp.NewUnaggregatedIteratorPool(iteratorPoolOpts)
 	opts = opts.SetIteratorPool(iteratorPool)

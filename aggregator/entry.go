@@ -93,6 +93,8 @@ func (e *Entry) IncWriter() { atomic.AddInt32(&e.numWriters, 1) }
 func (e *Entry) DecWriter() { atomic.AddInt32(&e.numWriters, -1) }
 
 // ResetSetData resets the entry and sets initial data.
+// NB(xichen): we need to reset the options here to use the correct
+// time lock contained in the options.
 func (e *Entry) ResetSetData(lists *metricLists, opts Options) {
 	e.closed = false
 	e.opts = opts
