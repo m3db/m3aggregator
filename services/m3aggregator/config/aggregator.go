@@ -325,6 +325,9 @@ type streamConfiguration struct {
 	// Initial heap capacity for quantile computation.
 	Capacity int `yaml:"capacity"`
 
+	// Flush frequency.
+	FlushEvery int `yaml:"flushEvery"`
+
 	// Pool of streams.
 	StreamPool pool.ObjectPoolConfiguration `yaml:"streamPool"`
 
@@ -341,6 +344,10 @@ func (c *streamConfiguration) NewStreamOptions(instrumentOpts instrument.Options
 		SetEps(c.Eps).
 		SetQuantiles(c.Quantiles).
 		SetCapacity(c.Capacity)
+
+	if c.FlushEvery != 0 {
+		opts = opts.SetFlushEvery(c.FlushEvery)
+	}
 
 	if c.SamplePool != nil {
 		iOpts := instrumentOpts.SetMetricsScope(scope.SubScope("sample-pool"))
