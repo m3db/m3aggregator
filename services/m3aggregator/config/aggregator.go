@@ -46,6 +46,10 @@ import (
 	"github.com/spaolacci/murmur3"
 )
 
+const (
+	initialBufferSizeGrowthFactor = 2
+)
+
 var (
 	errUnknownQuantileSuffixFnType   = errors.New("unknown quantile suffix function type")
 	errUnknownFlushHandlerType       = errors.New("unknown flush handler type")
@@ -282,11 +286,16 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, opts) })
 
 	// Set buffered encoder pool.
+	// NB(xichen): we preallocate a bit over the maximum flush size as a safety measure
+	// because we might write past the max flush size and rewind it during flushing.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("buffered-encoder-pool"))
 	bufferedEncoderPoolOpts := c.BufferedEncoderPool.NewObjectPoolOptions(iOpts)
 	bufferedEncoderPool := msgpack.NewBufferedEncoderPool(bufferedEncoderPoolOpts)
 	opts = opts.SetBufferedEncoderPool(bufferedEncoderPool)
-	bufferedEncoderPool.Init(func() msgpack.BufferedEncoder { return msgpack.NewPooledBufferedEncoder(bufferedEncoderPool) })
+	initialBufferSize := c.MaxFlushSize * initialBufferSizeGrowthFactor
+	bufferedEncoderPool.Init(func() msgpack.BufferedEncoder {
+		return msgpack.NewPooledBufferedEncoderSize(bufferedEncoderPool, initialBufferSize)
+	})
 
 	return opts, nil
 }
