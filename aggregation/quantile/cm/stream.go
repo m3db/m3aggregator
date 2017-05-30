@@ -45,13 +45,15 @@ type stream struct {
 	eps             float64         // desired epsilon for errors
 	quantiles       []float64       // sorted target quantiles
 	capacity        int             // stream capacity
+	flushEvery      int             // stream flushing frequency
 	streamPool      StreamPool      // pool of streams
 	floatsPool      pool.FloatsPool // pool of float64 slices
 	acquireSampleFn acquireSampleFn // function to acquire samples
 	releaseSampleFn releaseSampleFn // function to release samples
 
 	closed          bool       // whether the stream is closed
-	numValues       int64      // number of values
+	numAdded        int        // number of values added
+	numValues       int64      // number of values inserted into the sorted stream
 	bufLess         minHeap    // sample buffer whose value is less than that at the insertion cursor
 	bufMore         minHeap    // sample buffer whose value is more than that at the insertion cursor
 	samples         sampleList // sample list
@@ -88,6 +90,7 @@ func NewStream(opts Options) Stream {
 		eps:             opts.Eps(),
 		quantiles:       opts.Quantiles(),
 		capacity:        opts.Capacity(),
+		flushEvery:      opts.FlushEvery(),
 		streamPool:      opts.StreamPool(),
 		floatsPool:      opts.FloatsPool(),
 		acquireSampleFn: acquireSampleFn,
@@ -102,6 +105,13 @@ func (s *stream) Add(value float64) {
 	s.addToBuffer(value)
 	s.insert()
 	s.compress()
+	s.numAdded++
+
+	// Flush the stream if we have accumulated enough data points.
+	if s.numAdded == s.flushEvery {
+		s.Flush()
+		s.numAdded = 0
+	}
 }
 
 func (s *stream) Flush() {
@@ -159,6 +169,7 @@ func (s *stream) Quantile(q float64) float64 {
 
 func (s *stream) Reset() {
 	s.closed = false
+	s.numAdded = 0
 	s.numValues = 0
 	s.bufLess = minHeap(s.floatsPool.Get(s.capacity))
 	s.bufMore = minHeap(s.floatsPool.Get(s.capacity))

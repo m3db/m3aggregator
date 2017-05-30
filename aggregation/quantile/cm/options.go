@@ -28,12 +28,13 @@ import (
 )
 
 const (
-	minEps          = 0.0
-	maxEps          = 0.5
-	minQuantile     = 0.0
-	maxQuantile     = 1.0
-	defaultEps      = 1e-3
-	defaultCapacity = 16
+	minEps            = 0.0
+	maxEps            = 0.5
+	minQuantile       = 0.0
+	maxQuantile       = 1.0
+	defaultEps        = 1e-3
+	defaultCapacity   = 16
+	defaultFlushEvery = 0
 )
 
 var (
@@ -52,6 +53,7 @@ type options struct {
 	eps        float64
 	quantiles  []float64
 	capacity   int
+	flushEvery int
 	streamPool StreamPool
 	samplePool SamplePool
 	floatsPool pool.FloatsPool
@@ -60,9 +62,10 @@ type options struct {
 // NewOptions creates a new options
 func NewOptions() Options {
 	o := &options{
-		eps:       defaultEps,
-		quantiles: defaultQuantiles,
-		capacity:  defaultCapacity,
+		eps:        defaultEps,
+		quantiles:  defaultQuantiles,
+		capacity:   defaultCapacity,
+		flushEvery: defaultFlushEvery,
 	}
 
 	o.initPools()
@@ -97,6 +100,16 @@ func (o *options) SetCapacity(value int) Options {
 
 func (o *options) Capacity() int {
 	return o.capacity
+}
+
+func (o *options) SetFlushEvery(value int) Options {
+	opts := *o
+	opts.flushEvery = value
+	return &opts
+}
+
+func (o *options) FlushEvery() int {
+	return o.flushEvery
 }
 
 func (o *options) SetStreamPool(value StreamPool) Options {
