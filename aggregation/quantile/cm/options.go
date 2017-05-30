@@ -44,7 +44,6 @@ var (
 
 	errInvalidEps       = fmt.Errorf("epsilon value must be between %f and %f", minEps, maxEps)
 	errInvalidQuantiles = fmt.Errorf("quantiles must be nonempty and between %f and %f", minQuantile, maxQuantile)
-	errNoSamplePool     = errors.New("no sample pool set")
 	errNoFloatsPool     = errors.New("no floats pool set")
 	errNoStreamPool     = errors.New("no stream pool set")
 )
@@ -140,9 +139,6 @@ func (o *options) Validate() error {
 	if o.streamPool == nil {
 		return errNoStreamPool
 	}
-	if o.samplePool == nil {
-		return errNoSamplePool
-	}
 	if o.floatsPool == nil {
 		return errNoFloatsPool
 	}
@@ -155,9 +151,6 @@ func (o *options) Validate() error {
 }
 
 func (o *options) initPools() {
-	o.samplePool = NewSamplePool(nil)
-	o.samplePool.Init()
-
 	o.floatsPool = pool.NewFloatsPool(defaultBuckets, nil)
 	o.floatsPool.Init()
 

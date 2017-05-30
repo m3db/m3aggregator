@@ -53,11 +53,6 @@ func TestOptionsValidateInvalidQuantiles(t *testing.T) {
 	require.Equal(t, errInvalidQuantiles, opts.Validate())
 }
 
-func TestOptionsValidateNoSamplePool(t *testing.T) {
-	opts := testOpts.SetSamplePool(nil)
-	require.Equal(t, errNoSamplePool, opts.Validate())
-}
-
 func TestOptionsValidateNoFloatsPool(t *testing.T) {
 	opts := testOpts.SetFloatsPool(nil)
 	require.Equal(t, errNoFloatsPool, opts.Validate())

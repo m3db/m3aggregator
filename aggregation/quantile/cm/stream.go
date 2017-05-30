@@ -34,14 +34,21 @@ var (
 	nan = math.NaN()
 )
 
+// acquireSampleFn acquires a new sample.
+type acquireSampleFn func() *Sample
+
+// releaseSampleFn releases a sample.
+type releaseSampleFn func(*Sample)
+
 // stream represents a data stream
 type stream struct {
-	eps        float64         // desired epsilon for errors
-	quantiles  []float64       // sorted target quantiles
-	capacity   int             // stream capacity
-	streamPool StreamPool      // pool of streams
-	samplePool SamplePool      // pool of samples
-	floatsPool pool.FloatsPool // pool of float64 slices
+	eps             float64         // desired epsilon for errors
+	quantiles       []float64       // sorted target quantiles
+	capacity        int             // stream capacity
+	streamPool      StreamPool      // pool of streams
+	floatsPool      pool.FloatsPool // pool of float64 slices
+	acquireSampleFn acquireSampleFn // function to acquire samples
+	releaseSampleFn releaseSampleFn // function to release samples
 
 	closed          bool       // whether the stream is closed
 	numValues       int64      // number of values
@@ -59,13 +66,32 @@ func NewStream(opts Options) Stream {
 	if opts == nil {
 		opts = NewOptions()
 	}
+	var (
+		acquireSampleFn acquireSampleFn
+		releaseSampleFn releaseSampleFn
+	)
+	if samplePool := opts.SamplePool(); samplePool != nil {
+		acquireSampleFn = func() *Sample {
+			sample := samplePool.Get()
+			sample.reset()
+			return sample
+		}
+		releaseSampleFn = func(sample *Sample) {
+			samplePool.Put(sample)
+		}
+	} else {
+		acquireSampleFn = newSample
+		releaseSampleFn = func(*Sample) {}
+	}
+
 	s := &stream{
-		eps:        opts.Eps(),
-		quantiles:  opts.Quantiles(),
-		capacity:   opts.Capacity(),
-		streamPool: opts.StreamPool(),
-		samplePool: opts.SamplePool(),
-		floatsPool: opts.FloatsPool(),
+		eps:             opts.Eps(),
+		quantiles:       opts.Quantiles(),
+		capacity:        opts.Capacity(),
+		streamPool:      opts.StreamPool(),
+		floatsPool:      opts.FloatsPool(),
+		acquireSampleFn: acquireSampleFn,
+		releaseSampleFn: releaseSampleFn,
 	}
 
 	s.Reset()
@@ -154,7 +180,7 @@ func (s *stream) Close() {
 	sample := s.samples.Front()
 	for sample != nil {
 		next := sample.next
-		s.samplePool.Put(sample)
+		s.releaseSampleFn(sample)
 		sample = next
 	}
 
@@ -182,8 +208,7 @@ func (s *stream) insert() {
 		if s.bufMore.Len() == 0 {
 			return
 		}
-		sample := s.samplePool.Get()
-		sample.reset()
+		sample := s.acquireSampleFn()
 		sample.setData(s.bufMore.Pop(), 1, 0)
 		s.samples.PushBack(sample)
 		s.numValues++
@@ -198,8 +223,7 @@ func (s *stream) insert() {
 	incrementSize := s.cursorIncrement()
 	for i := 0; i < incrementSize && s.insertCursor != nil; i++ {
 		for s.bufMore.Len() > 0 && s.bufMore.Min() <= s.insertPointValue() {
-			sample := s.samplePool.Get()
-			sample.reset()
+			sample := s.acquireSampleFn()
 			sample.setData(s.bufMore.Pop(), 1, s.insertCursor.numRanks+s.insertCursor.delta-1)
 			s.samples.InsertBefore(sample, s.insertCursor)
 			s.numValues++
@@ -216,8 +240,7 @@ func (s *stream) insert() {
 	}
 
 	for s.bufMore.Len() > 0 && s.bufMore.Min() > s.samples.Back().value {
-		sample := s.samplePool.Get()
-		sample.reset()
+		sample := s.acquireSampleFn()
 		sample.setData(s.bufMore.Pop(), 1, 0)
 		s.samples.PushBack(sample)
 		s.numValues++
@@ -256,7 +279,7 @@ func (s *stream) compress() {
 
 			prev := s.compressCursor.prev
 			s.samples.Remove(s.compressCursor)
-			s.samplePool.Put(s.compressCursor)
+			s.releaseSampleFn(s.compressCursor)
 			s.compressCursor = prev
 		} else {
 			s.compressCursor = s.compressCursor.prev

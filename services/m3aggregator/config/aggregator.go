@@ -329,7 +329,7 @@ type streamConfiguration struct {
 	StreamPool pool.ObjectPoolConfiguration `yaml:"streamPool"`
 
 	// Pool of metric samples.
-	SamplePool pool.ObjectPoolConfiguration `yaml:"samplePool"`
+	SamplePool *pool.ObjectPoolConfiguration `yaml:"samplePool"`
 
 	// Pool of float slices.
 	FloatsPool pool.BucketizedPoolConfiguration `yaml:"floatsPool"`
@@ -342,13 +342,15 @@ func (c *streamConfiguration) NewStreamOptions(instrumentOpts instrument.Options
 		SetQuantiles(c.Quantiles).
 		SetCapacity(c.Capacity)
 
-	iOpts := instrumentOpts.SetMetricsScope(scope.SubScope("sample-pool"))
-	samplePoolOpts := c.SamplePool.NewObjectPoolOptions(iOpts)
-	samplePool := cm.NewSamplePool(samplePoolOpts)
-	opts = opts.SetSamplePool(samplePool)
-	samplePool.Init()
+	if c.SamplePool != nil {
+		iOpts := instrumentOpts.SetMetricsScope(scope.SubScope("sample-pool"))
+		samplePoolOpts := c.SamplePool.NewObjectPoolOptions(iOpts)
+		samplePool := cm.NewSamplePool(samplePoolOpts)
+		opts = opts.SetSamplePool(samplePool)
+		samplePool.Init()
+	}
 
-	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("floats-pool"))
+	iOpts := instrumentOpts.SetMetricsScope(scope.SubScope("floats-pool"))
 	floatsPoolOpts := c.FloatsPool.NewObjectPoolOptions(iOpts)
 	floatsPool := pool.NewFloatsPool(c.FloatsPool.NewBuckets(), floatsPoolOpts)
 	opts = opts.SetFloatsPool(floatsPool)
