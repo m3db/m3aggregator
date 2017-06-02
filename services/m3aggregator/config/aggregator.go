@@ -177,9 +177,8 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	if err != nil {
 		return nil, err
 	}
-	opts = opts.SetTimerQuantileSuffixFn(quantileSuffixFn)
+	opts = opts.SetTimerQuantileSuffixFn(quantileSuffixFn).SetTimerQuantiles(c.TimerQuantiles)
 
-	opts = opts.SetTimerQuantiles(c.TimerQuantiles)
 	// Set stream options.
 	iOpts := instrumentOpts.SetMetricsScope(scope.SubScope("stream"))
 	streamOpts, err := c.Stream.NewStreamOptions(iOpts)

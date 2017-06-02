@@ -176,6 +176,11 @@ func TestOptionsSetTimerMedianSuffix(t *testing.T) {
 	require.Equal(t, newMedianSuffix, o.TimerMedianSuffix())
 }
 
+func TestOptionsSetTimerQuantile(t *testing.T) {
+	o := NewOptions().SetTimerQuantiles([]float64{0.1, 0.5, 0.7})
+	validateQuantiles(t, o)
+}
+
 func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
 	fn := func(q float64) []byte { return []byte(fmt.Sprintf("%1.2f", q)) }
 	o := NewOptions().SetTimerQuantileSuffixFn(fn)

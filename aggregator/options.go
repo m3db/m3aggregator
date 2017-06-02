@@ -200,6 +200,17 @@ func (o *options) TimerPrefix() []byte {
 	return o.timerPrefix
 }
 
+func (o *options) SetTimerQuantiles(quantiles []float64) Options {
+	opts := *o
+	opts.timerQuantiles = quantiles
+	opts.computeTimerQuantilesSuffixes()
+	return &opts
+}
+
+func (o *options) TimerQuantiles() []float64 {
+	return o.timerQuantiles
+}
+
 func (o *options) SetTimerSumSuffix(value []byte) Options {
 	opts := *o
 	opts.timerSumSuffix = value
@@ -283,7 +294,7 @@ func (o *options) TimerMedianSuffix() []byte {
 func (o *options) SetTimerQuantileSuffixFn(value QuantileSuffixFn) Options {
 	opts := *o
 	opts.timerQuantileSuffixFn = value
-	opts.computeTimerQuantilesAndSuffixes()
+	opts.computeTimerQuantilesSuffixes()
 	return &opts
 }
 
@@ -514,17 +525,6 @@ func (o *options) FullGaugePrefix() []byte {
 	return o.fullGaugePrefix
 }
 
-func (o *options) SetTimerQuantiles(quantiles []float64) Options {
-	opts := *o
-	opts.timerQuantiles = quantiles
-	o.computeTimerQuantilesAndSuffixes()
-	return &opts
-}
-
-func (o *options) TimerQuantiles() []float64 {
-	return o.timerQuantiles
-}
-
 func (o *options) TimerQuantileSuffixes() [][]byte {
 	return o.timerQuantileSuffixes
 }
@@ -559,7 +559,7 @@ func (o *options) initPools() {
 
 func (o *options) computeAllDerived() {
 	o.computeFullPrefixes()
-	o.computeTimerQuantilesAndSuffixes()
+	o.computeTimerQuantilesSuffixes()
 }
 
 func (o *options) computeFullPrefixes() {
@@ -568,7 +568,7 @@ func (o *options) computeFullPrefixes() {
 	o.computeFullGaugePrefix()
 }
 
-func (o *options) computeTimerQuantilesAndSuffixes() {
+func (o *options) computeTimerQuantilesSuffixes() {
 	suffixes := make([][]byte, len(o.timerQuantiles))
 	for i, q := range o.timerQuantiles {
 		suffixes[i] = o.timerQuantileSuffixFn(q)
