@@ -250,7 +250,7 @@ func (s *stream) insert() {
 		return
 	}
 
-	for s.bufMore.Len() > 0 && s.bufMore.Min() > s.samples.Back().value {
+	for s.bufMore.Len() > 0 && s.bufMore.Min() >= s.samples.Back().value {
 		sample := s.acquireSampleFn()
 		sample.setData(s.bufMore.Pop(), 1, 0)
 		s.samples.PushBack(sample)
