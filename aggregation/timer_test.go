@@ -30,21 +30,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	testQuantiles = []float64{0.5, 0.95, 0.99}
+)
+
 func TestCreateTimerResetStream(t *testing.T) {
 	poolOpts := pool.NewObjectPoolOptions().SetSize(1)
 	streamPool := cm.NewStreamPool(poolOpts)
 	streamOpts := cm.NewOptions().SetStreamPool(streamPool)
-	streamPool.Init(func() cm.Stream { return cm.NewStream(streamOpts) })
+	streamPool.Init(func() cm.Stream { return cm.NewStream(nil, streamOpts) })
 
 	// Add a value to the timer and close the timer, which returns the
 	// underlying stream to the pool.
-	timer := NewTimer(streamOpts)
+	timer := NewTimer(testQuantiles, streamOpts)
 	timer.Add(1.0)
 	require.Equal(t, 1.0, timer.Min())
 	timer.Close()
 
 	// Create a new timer and assert the underlying stream has been closed.
-	timer = NewTimer(streamOpts)
+	timer = NewTimer(testQuantiles, streamOpts)
 	timer.Add(1.0)
 	require.Equal(t, 1.0, timer.Min())
 	timer.Close()
@@ -52,7 +56,7 @@ func TestCreateTimerResetStream(t *testing.T) {
 }
 
 func TestTimerAggregations(t *testing.T) {
-	timer := Timer{stream: cm.NewStream(cm.NewOptions())}
+	timer := Timer{stream: cm.NewStream(testQuantiles, cm.NewOptions())}
 
 	// Assert the state of an empty timer
 	require.Equal(t, int64(0), timer.Count())

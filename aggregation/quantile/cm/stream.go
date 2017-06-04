@@ -64,7 +64,7 @@ type stream struct {
 
 // NewStream creates a new sample stream
 // TODO(xichen): add metrics
-func NewStream(opts Options) Stream {
+func NewStream(quantiles []float64, opts Options) Stream {
 	if opts == nil {
 		opts = NewOptions()
 	}
@@ -88,7 +88,6 @@ func NewStream(opts Options) Stream {
 
 	s := &stream{
 		eps:             opts.Eps(),
-		quantiles:       opts.Quantiles(),
 		capacity:        opts.Capacity(),
 		flushEvery:      opts.FlushEvery(),
 		streamPool:      opts.StreamPool(),
@@ -97,7 +96,7 @@ func NewStream(opts Options) Stream {
 		releaseSampleFn: releaseSampleFn,
 	}
 
-	s.Reset()
+	s.ResetSetData(quantiles)
 	return s
 }
 
@@ -167,7 +166,8 @@ func (s *stream) Quantile(q float64) float64 {
 	return prev.value
 }
 
-func (s *stream) Reset() {
+func (s *stream) ResetSetData(quantiles []float64) {
+	s.quantiles = quantiles
 	s.closed = false
 	s.numAdded = 0
 	s.numValues = 0
