@@ -297,9 +297,7 @@ func (d *tDigest) upperBound(index int) float64 {
 func (d *tDigest) appendCentroid(centroids []Centroid, c Centroid) []Centroid {
 	if len(centroids) == cap(centroids) {
 		newCentroids := d.centroidsPool.Get(2 * len(centroids))
-		for i := 0; i < len(centroids); i++ {
-			newCentroids = append(newCentroids, centroids[i])
-		}
+		newCentroids = append(newCentroids, centroids...)
 		d.centroidsPool.Put(centroids)
 		centroids = newCentroids
 	}

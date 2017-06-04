@@ -345,9 +345,7 @@ func (s *stream) addToMinHeap(heap *minHeap, value float64) {
 	// and return the current heap to the pool
 	if len(curr) == cap(curr) {
 		newHeap := s.floatsPool.Get(2 * len(curr))
-		for i := 0; i < len(curr); i++ {
-			newHeap = append(newHeap, curr[i])
-		}
+		newHeap = append(newHeap, curr...)
 		s.floatsPool.Put(curr)
 		*heap = newHeap
 	}
