@@ -329,6 +329,9 @@ type streamConfiguration struct {
 	// Initial heap capacity for quantile computation.
 	Capacity int `yaml:"capacity"`
 
+	// Insertion and compression frequency.
+	InsertAndCompressEvery int `yaml:"insertAndCompressEvery"`
+
 	// Flush frequency.
 	FlushEvery int `yaml:"flushEvery"`
 
@@ -348,6 +351,9 @@ func (c *streamConfiguration) NewStreamOptions(instrumentOpts instrument.Options
 		SetEps(c.Eps).
 		SetCapacity(c.Capacity)
 
+	if c.InsertAndCompressEvery != 0 {
+		opts = opts.SetInsertAndCompressEvery(c.InsertAndCompressEvery)
+	}
 	if c.FlushEvery != 0 {
 		opts = opts.SetFlushEvery(c.FlushEvery)
 	}
