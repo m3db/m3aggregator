@@ -97,7 +97,7 @@ type forwardHandler struct {
 	bufCh              chan msgpack.Buffer
 	wg                 sync.WaitGroup
 	closed             bool
-	doneCh             chan struct{}
+	closedCh           chan struct{}
 	metrics            forwardHandlerMetrics
 	numOpenConnections int32
 	tryConnectFn       tryConnectFn
@@ -133,7 +133,7 @@ func (h *forwardHandler) Close() {
 	}
 	h.closed = true
 	close(h.bufCh)
-	close(h.doneCh)
+	close(h.closedCh)
 	h.Unlock()
 
 	// Wait for the queue to be drained.
@@ -268,7 +268,7 @@ func (h *forwardHandler) reportMetrics() {
 	t := time.NewTicker(h.reportInterval)
 	for {
 		select {
-		case <-h.doneCh:
+		case <-h.closedCh:
 			t.Stop()
 			return
 		case <-t.C:
@@ -292,7 +292,7 @@ func newForwardHandler(servers []string, opts ForwardHandlerOptions) (*forwardHa
 		reconnectRetrier:    opts.ReconnectRetrier(),
 		reportInterval:      instrumentOpts.ReportInterval(),
 		bufCh:               make(chan msgpack.Buffer, opts.QueueSize()),
-		doneCh:              make(chan struct{}),
+		closedCh:            make(chan struct{}),
 		metrics:             newForwardHandlerMetrics(instrumentOpts.MetricsScope()),
 		dialWithTimeoutFn:   net.DialTimeout,
 		writeToConnFn:       writeToConn,
