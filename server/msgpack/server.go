@@ -37,7 +37,7 @@ const (
 	unknownRemoteHostAddress = "<unknown>"
 )
 
-// NewServer creates a new msgpack server
+// NewServer creates a new msgpack server.
 func NewServer(address string, aggregator aggregator.Aggregator, opts Options) xserver.Server {
 	iOpts := opts.InstrumentOptions()
 	scope := iOpts.MetricsScope()
@@ -65,8 +65,6 @@ func newHandlerMetrics(scope tally.Scope) handlerMetrics {
 	}
 }
 
-// handler is a msgpack based handler that receives incoming connections containing
-// msgpack-encoded traffic and delegates to the processor to process incoming data
 type handler struct {
 	sync.Mutex
 
@@ -77,18 +75,16 @@ type handler struct {
 	metrics      handlerMetrics
 }
 
-// NewHandler creates a new msgpack handler
+// NewHandler creates a new msgpack handler.
 func NewHandler(aggregator aggregator.Aggregator, opts Options) xserver.Handler {
-	instrumentOpts := opts.InstrumentOptions()
-	s := &handler{
+	iOpts := opts.InstrumentOptions()
+	return &handler{
 		aggregator:   aggregator,
 		opts:         opts,
-		log:          instrumentOpts.Logger(),
+		log:          iOpts.Logger(),
 		iteratorPool: opts.IteratorPool(),
-		metrics:      newHandlerMetrics(instrumentOpts.MetricsScope()),
+		metrics:      newHandlerMetrics(iOpts.MetricsScope()),
 	}
-
-	return s
 }
 
 func (s *handler) Handle(conn net.Conn) {
@@ -96,7 +92,7 @@ func (s *handler) Handle(conn net.Conn) {
 	it.Reset(conn)
 	defer it.Close()
 
-	// Iterate over the incoming metrics stream and queue up metrics
+	// Iterate over the incoming metrics stream and queue up metrics.
 	for it.Next() {
 		metric := it.Metric()
 		policiesList := it.PoliciesList()
@@ -111,7 +107,7 @@ func (s *handler) Handle(conn net.Conn) {
 	}
 
 	// If there is an error during decoding, it's likely due to a broken connection
-	// and therefore we ignore the EOF error
+	// and therefore we ignore the EOF error.
 	if err := it.Err(); err != nil && err != io.EOF {
 		remoteAddress := unknownRemoteHostAddress
 		if remoteAddr := conn.RemoteAddr(); remoteAddr != nil {
