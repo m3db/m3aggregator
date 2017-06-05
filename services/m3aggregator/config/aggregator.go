@@ -136,7 +136,7 @@ type AggregatorConfiguration struct {
 	EntryCheckBatchPercent float64 `yaml:"entryCheckBatchPercent" validate:"min=0.0,max=1.0"`
 
 	// MaxTimerBatchSizePerWrite determines the maximum timer batch size for each batched write.
-	MaxTimerBatchSizePerWrite int `yaml:"maxTimerBatchSizePerWrite"`
+	MaxTimerBatchSizePerWrite int `yaml:"maxTimerBatchSizePerWrite" validate:"min=0"`
 
 	// Default policies.
 	DefaultPolicies []policy.Policy `yaml:"defaultPolicies" validate:"nonzero"`
