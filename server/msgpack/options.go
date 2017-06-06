@@ -49,7 +49,7 @@ type Options interface {
 
 type options struct {
 	instrumentOpts instrument.Options
-	rOpts          xretry.Options
+	retryOpts      xretry.Options
 	iteratorPool   msgpack.UnaggregatedIteratorPool
 }
 
@@ -63,7 +63,7 @@ func NewOptions() Options {
 
 	return &options{
 		instrumentOpts: instrument.NewOptions(),
-		rOpts:          xretry.NewOptions(),
+		retryOpts:      xretry.NewOptions(),
 		iteratorPool:   iteratorPool,
 	}
 }
@@ -80,12 +80,12 @@ func (o *options) InstrumentOptions() instrument.Options {
 
 func (o *options) SetRetryOptions(value xretry.Options) Options {
 	opts := *o
-	opts.rOpts = value
+	opts.retryOpts = value
 	return &opts
 }
 
 func (o *options) RetryOptions() xretry.Options {
-	return o.rOpts
+	return o.retryOpts
 }
 
 func (o *options) SetIteratorPool(value msgpack.UnaggregatedIteratorPool) Options {

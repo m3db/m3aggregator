@@ -41,16 +41,14 @@ const (
 func NewServer(address string, aggregator aggregator.Aggregator, opts Options) xserver.Server {
 	iOpts := opts.InstrumentOptions()
 	scope := iOpts.MetricsScope()
-	return xserver.NewServer(
-		address,
-		NewHandler(
-			aggregator,
-			opts.SetInstrumentOptions(iOpts.SetMetricsScope(scope.Tagged(map[string]string{"handler": "msgpack"}))),
-		),
-		xserver.NewOptions().
-			SetInstrumentOptions(iOpts.SetMetricsScope(scope.Tagged(map[string]string{"server": "msgpack"}))).
-			SetRetryOptions(opts.RetryOptions()),
-	)
+
+	handlerInstrumentOpts := iOpts.SetMetricsScope(scope.Tagged(map[string]string{"handler": "msgpack"}))
+	handler := NewHandler(aggregator, opts.SetInstrumentOptions(handlerInstrumentOpts))
+
+	serverInstrumentOpts := iOpts.SetMetricsScope(scope.Tagged(map[string]string{"server": "msgpack"}))
+	serverOpts := xserver.NewOptions().SetInstrumentOptions(serverInstrumentOpts).SetRetryOptions(opts.RetryOptions())
+
+	return xserver.NewServer(address, handler, serverOpts)
 }
 
 type handlerMetrics struct {
