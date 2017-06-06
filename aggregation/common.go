@@ -18,49 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package aggregation
 
-import (
-	"io"
+import "math"
 
-	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/metric/aggregated"
-	"github.com/m3db/m3metrics/policy"
-	"github.com/m3db/m3metrics/protocol/msgpack"
-)
-
-// HandleFunc handles an aggregated metric alongside the policy.
-type HandleFunc func(metric aggregated.Metric, policy policy.StoragePolicy) error
-
-type decodingHandler struct {
-	handle HandleFunc
-}
-
-// NewDecodingHandler creates a new decoding handler with a custom handle function.
-func NewDecodingHandler(handle HandleFunc) aggregator.Handler {
-	return decodingHandler{handle: handle}
-}
-
-func (h decodingHandler) Handle(buffer msgpack.Buffer) error {
-	defer buffer.Close()
-
-	iter := msgpack.NewAggregatedIterator(buffer.Buffer(), msgpack.NewAggregatedIteratorOptions())
-	defer iter.Close()
-
-	for iter.Next() {
-		rawMetric, sp := iter.Value()
-		metric, err := rawMetric.Metric()
-		if err != nil {
-			return err
-		}
-		if err := h.handle(metric, sp); err != nil {
-			return err
-		}
+func stdev(count, sumSq, sum float64) float64 {
+	div := count * (count - 1)
+	if div == 0 {
+		return 0.0
 	}
-	if err := iter.Err(); err != nil && err != io.EOF {
-		return err
-	}
-	return nil
+	num := count*sumSq - math.Pow(sum, 2)
+	return math.Sqrt(num / float64(div))
 }
-
-func (h decodingHandler) Close() {}

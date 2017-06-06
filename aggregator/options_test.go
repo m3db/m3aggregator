@@ -31,6 +31,7 @@ import (
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
+	"github.com/m3db/m3x/pool"
 
 	"github.com/stretchr/testify/require"
 )
@@ -73,14 +74,14 @@ func TestOptionsValidateDefault(t *testing.T) {
 	require.Equal(t, defaultMetricPrefix, o.MetricPrefix())
 	require.Equal(t, defaultCounterPrefix, o.CounterPrefix())
 	require.Equal(t, defaultTimerPrefix, o.TimerPrefix())
-	require.Equal(t, defaultTimerSumSuffix, o.TimerSumSuffix())
-	require.Equal(t, defaultTimerSumSqSuffix, o.TimerSumSqSuffix())
-	require.Equal(t, defaultTimerMeanSuffix, o.TimerMeanSuffix())
-	require.Equal(t, defaultTimerLowerSuffix, o.TimerLowerSuffix())
-	require.Equal(t, defaultTimerUpperSuffix, o.TimerUpperSuffix())
-	require.Equal(t, defaultTimerCountSuffix, o.TimerCountSuffix())
-	require.Equal(t, defaultTimerStdevSuffix, o.TimerStdevSuffix())
-	require.Equal(t, defaultTimerMedianSuffix, o.TimerMedianSuffix())
+	require.Equal(t, defaultAggregationSumSuffix, o.AggregationSumSuffix())
+	require.Equal(t, defaultAggregationSumSqSuffix, o.AggregationSumSqSuffix())
+	require.Equal(t, defaultAggregationMeanSuffix, o.AggregationMeanSuffix())
+	require.Equal(t, defaultAggregationLowerSuffix, o.AggregationLowerSuffix())
+	require.Equal(t, defaultAggregationUpperSuffix, o.AggregationUpperSuffix())
+	require.Equal(t, defaultAggregationCountSuffix, o.AggregationCountSuffix())
+	require.Equal(t, defaultAggregationStdevSuffix, o.AggregationStdevSuffix())
+	require.Equal(t, defaultAggregationMedianSuffix, o.AggregationMedianSuffix())
 	require.Equal(t, defaultGaugePrefix, o.GaugePrefix())
 	require.Equal(t, defaultMinFlushInterval, o.MinFlushInterval())
 	require.Equal(t, defaultMaxFlushSize, o.MaxFlushSize())
@@ -130,50 +131,50 @@ func TestOptionsSetTimerPrefix(t *testing.T) {
 
 func TestOptionsSetTimerSumSuffix(t *testing.T) {
 	newSumSuffix := []byte("testTimerSumSuffix")
-	o := NewOptions().SetTimerSumSuffix(newSumSuffix)
-	require.Equal(t, newSumSuffix, o.TimerSumSuffix())
+	o := NewOptions().SetAggregationSumSuffix(newSumSuffix)
+	require.Equal(t, newSumSuffix, o.AggregationSumSuffix())
 }
 
 func TestOptionsSetTimerSumSqSuffix(t *testing.T) {
 	newSumSqSuffix := []byte("testTimerSumSqSuffix")
-	o := NewOptions().SetTimerSumSqSuffix(newSumSqSuffix)
-	require.Equal(t, newSumSqSuffix, o.TimerSumSqSuffix())
+	o := NewOptions().SetAggregationSumSqSuffix(newSumSqSuffix)
+	require.Equal(t, newSumSqSuffix, o.AggregationSumSqSuffix())
 }
 
 func TestOptionsSetTimerMeanSuffix(t *testing.T) {
 	newMeanSuffix := []byte("testTimerMeanSuffix")
-	o := NewOptions().SetTimerMeanSuffix(newMeanSuffix)
-	require.Equal(t, newMeanSuffix, o.TimerMeanSuffix())
+	o := NewOptions().SetAggregationMeanSuffix(newMeanSuffix)
+	require.Equal(t, newMeanSuffix, o.AggregationMeanSuffix())
 }
 
 func TestOptionsSetTimerLowerSuffix(t *testing.T) {
 	newLowerSuffix := []byte("testTimerLowerSuffix")
-	o := NewOptions().SetTimerLowerSuffix(newLowerSuffix)
-	require.Equal(t, newLowerSuffix, o.TimerLowerSuffix())
+	o := NewOptions().SetAggregationLowerSuffix(newLowerSuffix)
+	require.Equal(t, newLowerSuffix, o.AggregationLowerSuffix())
 }
 
 func TestOptionsSetTimerUpperSuffix(t *testing.T) {
 	newUpperSuffix := []byte("testTimerUpperSuffix")
-	o := NewOptions().SetTimerUpperSuffix(newUpperSuffix)
-	require.Equal(t, newUpperSuffix, o.TimerUpperSuffix())
+	o := NewOptions().SetAggregationUpperSuffix(newUpperSuffix)
+	require.Equal(t, newUpperSuffix, o.AggregationUpperSuffix())
 }
 
 func TestOptionsSetTimerCountSuffix(t *testing.T) {
 	newCountSuffix := []byte("testTimerCountSuffix")
-	o := NewOptions().SetTimerCountSuffix(newCountSuffix)
-	require.Equal(t, newCountSuffix, o.TimerCountSuffix())
+	o := NewOptions().SetAggregationCountSuffix(newCountSuffix)
+	require.Equal(t, newCountSuffix, o.AggregationCountSuffix())
 }
 
 func TestOptionsSetTimerStdevSuffix(t *testing.T) {
 	newStdevSuffix := []byte("testTimerStdevSuffix")
-	o := NewOptions().SetTimerStdevSuffix(newStdevSuffix)
-	require.Equal(t, newStdevSuffix, o.TimerStdevSuffix())
+	o := NewOptions().SetAggregationStdevSuffix(newStdevSuffix)
+	require.Equal(t, newStdevSuffix, o.AggregationStdevSuffix())
 }
 
 func TestOptionsSetTimerMedianSuffix(t *testing.T) {
 	newMedianSuffix := []byte("testTimerMedianSuffix")
-	o := NewOptions().SetTimerMedianSuffix(newMedianSuffix)
-	require.Equal(t, newMedianSuffix, o.TimerMedianSuffix())
+	o := NewOptions().SetAggregationMedianSuffix(newMedianSuffix)
+	require.Equal(t, newMedianSuffix, o.AggregationMedianSuffix())
 }
 
 func TestOptionsSetTimerQuantile(t *testing.T) {
@@ -186,6 +187,19 @@ func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
 	o := NewOptions().SetTimerQuantileSuffixFn(fn)
 	require.Equal(t, []byte("0.96"), o.TimerQuantileSuffixFn()(0.9582))
 	validateQuantiles(t, o)
+}
+
+func TestOptionTimerQuantileSuffix(t *testing.T) {
+	o := NewOptions()
+	require.Equal(t, []byte(".p50"), o.TimerQuantileSuffixFn()(0.5))
+	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.9))
+	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.90))
+	require.Equal(t, []byte(".p909"), o.TimerQuantileSuffixFn()(0.909))
+	require.Equal(t, []byte(".p999"), o.TimerQuantileSuffixFn()(0.999))
+	require.Equal(t, []byte(".p999"), o.TimerQuantileSuffixFn()(0.9990))
+	require.Equal(t, []byte(".p9999"), o.TimerQuantileSuffixFn()(0.9999))
+	require.Equal(t, []byte(".p100"), o.TimerQuantileSuffixFn()(0.99999))
+	require.Equal(t, []byte(".p100"), o.TimerQuantileSuffixFn()(1))
 }
 
 func TestOptionsSetGaugePrefix(t *testing.T) {
@@ -291,4 +305,10 @@ func TestSetBufferedEncoderPool(t *testing.T) {
 	value := msgpack.NewBufferedEncoderPool(nil)
 	o := NewOptions().SetBufferedEncoderPool(value)
 	require.Equal(t, value, o.BufferedEncoderPool())
+}
+
+func TestSetQuantilesPool(t *testing.T) {
+	p := pool.NewFloatsPool(nil, nil)
+	o := NewOptions().SetQuantileFloatsPool(p)
+	require.Equal(t, p, o.QuantileFloatsPool())
 }

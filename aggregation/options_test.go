@@ -18,49 +18,37 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package aggregation
 
 import (
-	"io"
+	"testing"
 
-	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/policy"
-	"github.com/m3db/m3metrics/protocol/msgpack"
+	"github.com/stretchr/testify/require"
 )
 
-// HandleFunc handles an aggregated metric alongside the policy.
-type HandleFunc func(metric aggregated.Metric, policy policy.StoragePolicy) error
+func TestOptions(t *testing.T) {
+	o := NewOptions()
+	require.True(t, o.IsDefault)
+	require.False(t, o.IsExpensive)
 
-type decodingHandler struct {
-	handle HandleFunc
+	o.ResetSetData(nil)
+	require.True(t, o.IsDefault)
+	require.False(t, o.IsExpensive)
+
+	o.ResetSetData(policy.AggregationTypes{policy.Sum})
+	require.False(t, o.IsDefault)
+	require.False(t, o.IsExpensive)
+
+	o.ResetSetData(policy.AggregationTypes{policy.Sum, policy.SumSq})
+	require.False(t, o.IsDefault)
+	require.True(t, o.IsExpensive)
 }
 
-// NewDecodingHandler creates a new decoding handler with a custom handle function.
-func NewDecodingHandler(handle HandleFunc) aggregator.Handler {
-	return decodingHandler{handle: handle}
+func TestIsExpensive(t *testing.T) {
+	require.False(t, isExpensive(policy.AggregationTypes{}))
+	require.True(t, isExpensive(policy.AggregationTypes{policy.Sum, policy.SumSq}))
+	require.True(t, isExpensive(policy.AggregationTypes{policy.Stdev}))
+	require.False(t, isExpensive(policy.AggregationTypes{policy.Sum}))
+	require.False(t, isExpensive(policy.AggregationTypes{policy.Count, policy.P999}))
 }
-
-func (h decodingHandler) Handle(buffer msgpack.Buffer) error {
-	defer buffer.Close()
-
-	iter := msgpack.NewAggregatedIterator(buffer.Buffer(), msgpack.NewAggregatedIteratorOptions())
-	defer iter.Close()
-
-	for iter.Next() {
-		rawMetric, sp := iter.Value()
-		metric, err := rawMetric.Metric()
-		if err != nil {
-			return err
-		}
-		if err := h.handle(metric, sp); err != nil {
-			return err
-		}
-	}
-	if err := iter.Err(); err != nil && err != io.EOF {
-		return err
-	}
-	return nil
-}
-
-func (h decodingHandler) Close() {}

@@ -18,49 +18,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package aggregation
 
-import (
-	"io"
+import "github.com/m3db/m3metrics/policy"
 
-	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/metric/aggregated"
-	"github.com/m3db/m3metrics/policy"
-	"github.com/m3db/m3metrics/protocol/msgpack"
+var (
+	defaultOptions = Options{IsDefault: true, IsExpensive: false}
 )
 
-// HandleFunc handles an aggregated metric alongside the policy.
-type HandleFunc func(metric aggregated.Metric, policy policy.StoragePolicy) error
-
-type decodingHandler struct {
-	handle HandleFunc
+// Options is the options for aggregations.
+type Options struct {
+	// IsDefault means only default aggregation types are enabled.
+	IsDefault bool
+	// IsExpensive means expensive (multiplication／division)
+	// aggregation types are enabled.
+	IsExpensive bool
 }
 
-// NewDecodingHandler creates a new decoding handler with a custom handle function.
-func NewDecodingHandler(handle HandleFunc) aggregator.Handler {
-	return decodingHandler{handle: handle}
+// NewOptions creates a new aggregation options.
+func NewOptions() Options {
+	return defaultOptions
 }
 
-func (h decodingHandler) Handle(buffer msgpack.Buffer) error {
-	defer buffer.Close()
+// ResetSetData resets the aggregation options.
+func (o *Options) ResetSetData(aggTypes policy.AggregationTypes) {
+	o.IsDefault = aggTypes.IsDefault()
+	o.IsExpensive = isExpensive(aggTypes)
+}
 
-	iter := msgpack.NewAggregatedIterator(buffer.Buffer(), msgpack.NewAggregatedIteratorOptions())
-	defer iter.Close()
-
-	for iter.Next() {
-		rawMetric, sp := iter.Value()
-		metric, err := rawMetric.Metric()
-		if err != nil {
-			return err
-		}
-		if err := h.handle(metric, sp); err != nil {
-			return err
+func isExpensive(aggTypes policy.AggregationTypes) bool {
+	for _, aggType := range aggTypes {
+		if aggType == policy.SumSq || aggType == policy.Stdev {
+			return true
 		}
 	}
-	if err := iter.Err(); err != nil && err != io.EOF {
-		return err
-	}
-	return nil
+	return false
 }
-
-func (h decodingHandler) Close() {}

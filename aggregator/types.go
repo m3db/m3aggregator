@@ -31,6 +31,7 @@ import (
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
+	"github.com/m3db/m3x/pool"
 )
 
 // Aggregator aggregates different types of metrics.
@@ -148,64 +149,70 @@ type Options interface {
 	// TimerPrefix returns the prefix for timers
 	TimerPrefix() []byte
 
-	// SetTimerSumSuffix sets the sum suffix for timers
-	SetTimerSumSuffix(value []byte) Options
+	// SetAggregationLastSuffix sets the suffix for aggregation type last.
+	SetAggregationLastSuffix(value []byte) Options
 
-	// TimerSumSuffix returns the sum suffix for timers
-	TimerSumSuffix() []byte
+	// AggregationLastSuffix returns the suffix for aggregation type last.
+	AggregationLastSuffix() []byte
 
-	// SetTimerSumSqSuffix sets the sum square suffix for timers
-	SetTimerSumSqSuffix(value []byte) Options
+	// SetAggregationLowerSuffix sets the suffix for aggregation type lower.
+	SetAggregationLowerSuffix(value []byte) Options
 
-	// TimerSumSqSuffix returns the sum square suffix for timers
-	TimerSumSqSuffix() []byte
+	// AggregationLowerSuffix returns the suffix for aggregation type lower.
+	AggregationLowerSuffix() []byte
 
-	// SetTimerMeanSuffix sets the mean suffix for timers
-	SetTimerMeanSuffix(value []byte) Options
+	// SetAggregationUpperSuffix sets the suffix for aggregation type upper.
+	SetAggregationUpperSuffix(value []byte) Options
 
-	// TimerMeanSuffix returns the mean suffix for timers
-	TimerMeanSuffix() []byte
+	// AggregationUpperSuffix returns the suffix for aggregation type upper.
+	AggregationUpperSuffix() []byte
 
-	// SetTimerLowerSuffix sets the lower suffix for timers
-	SetTimerLowerSuffix(value []byte) Options
+	// SetAggregationMeanSuffix sets the suffix for aggregation type mean.
+	SetAggregationMeanSuffix(value []byte) Options
 
-	// TimerLowerSuffix returns the lower suffix for timers
-	TimerLowerSuffix() []byte
+	// AggregationMeanSuffix returns the suffix for aggregation type mean.
+	AggregationMeanSuffix() []byte
 
-	// SetTimerUpperSuffix sets the upper suffix for timers
-	SetTimerUpperSuffix(value []byte) Options
+	// SetAggregationMedianSuffix sets the suffix for aggregation type median.
+	SetAggregationMedianSuffix(value []byte) Options
 
-	// TimerUpperSuffix returns the upper suffix for timers
-	TimerUpperSuffix() []byte
+	// AggregationMedianSuffix returns the suffix for aggregation type median.
+	AggregationMedianSuffix() []byte
 
-	// SetTimerCountSuffix sets the count suffix for timers
-	SetTimerCountSuffix(value []byte) Options
+	// SetAggregationCountSuffix sets the suffix for aggregation type count.
+	SetAggregationCountSuffix(value []byte) Options
 
-	// TimerCountSuffix returns the count suffix for timers
-	TimerCountSuffix() []byte
+	// AggregationCountSuffix returns the suffix for aggregation type count.
+	AggregationCountSuffix() []byte
 
-	// SetTimerStdevSuffix sets the standard deviation suffix for timers
-	SetTimerStdevSuffix(value []byte) Options
+	// SetAggregationSumSuffix sets the suffix for aggregation type sum.
+	SetAggregationSumSuffix(value []byte) Options
 
-	// TimerStdevSuffix returns the standard deviation suffix for timers
-	TimerStdevSuffix() []byte
+	// AggregationSumSuffix returns the suffix for aggregation type sum.
+	AggregationSumSuffix() []byte
 
-	// SetTimerMedianSuffix sets the median suffix for timers
-	SetTimerMedianSuffix(value []byte) Options
+	// SetAggregationSumSqSuffix sets the suffix for aggregation type sum square.
+	SetAggregationSumSqSuffix(value []byte) Options
 
-	// TimerMedianSuffix returns the median suffix for timers
-	TimerMedianSuffix() []byte
+	// AggregationSumSqSuffix returns the suffix for aggregation type sum square.
+	AggregationSumSqSuffix() []byte
 
-	// SetTimerQuantiles sets the timer quantiles
+	// SetAggregationStdevSuffix sets the suffix for aggregation type standard deviation.
+	SetAggregationStdevSuffix(value []byte) Options
+
+	// AggregationStdevSuffix returns the suffix for aggregation type standard deviation.
+	AggregationStdevSuffix() []byte
+
+	// SetTimerQuantiles sets the timer quantiles.
 	SetTimerQuantiles(quantiles []float64) Options
 
-	// TimerQuantiles returns the quantiles for timers
+	// TimerQuantiles returns the quantiles for timers.
 	TimerQuantiles() []float64
 
-	// SetTimerQuantileSuffixFn sets the quantile suffix function for timers
+	// SetTimerQuantileSuffixFn sets the quantile suffix function for timers.
 	SetTimerQuantileSuffixFn(value QuantileSuffixFn) Options
 
-	// TimerQuantileSuffixFn returns the quantile suffix function for timers
+	// TimerQuantileSuffixFn returns the quantile suffix function for timers.
 	TimerQuantileSuffixFn() QuantileSuffixFn
 
 	// SetGaugePrefix sets the prefix for gauges
@@ -316,29 +323,41 @@ type Options interface {
 	// EntryPool returns the entry pool
 	EntryPool() EntryPool
 
-	// SetCounterElemPool sets the counter element pool
+	// SetCounterElemPool sets the counter element pool.
 	SetCounterElemPool(value CounterElemPool) Options
 
-	// CounterElemPool returns the counter element pool
+	// CounterElemPool returns the counter element pool.
 	CounterElemPool() CounterElemPool
 
-	// SetTimerElemPool sets the timer element pool
+	// SetTimerElemPool sets the timer element pool.
 	SetTimerElemPool(value TimerElemPool) Options
 
-	// TimerElemPool returns the timer element pool
+	// TimerElemPool returns the timer element pool.
 	TimerElemPool() TimerElemPool
 
-	// SetGaugeElemPool sets the gauge element pool
+	// SetGaugeElemPool sets the gauge element pool.
 	SetGaugeElemPool(value GaugeElemPool) Options
 
-	// GaugeElemPool returns the gauge element pool
+	// GaugeElemPool returns the gauge element pool.
 	GaugeElemPool() GaugeElemPool
 
-	// SetBufferedEncoderPool sets the buffered encoder pool
+	// SetBufferedEncoderPool sets the buffered encoder pool.
 	SetBufferedEncoderPool(value msgpack.BufferedEncoderPool) Options
 
-	// BufferedEncoderPool returns the buffered encoder pool
+	// BufferedEncoderPool returns the buffered encoder pool.
 	BufferedEncoderPool() msgpack.BufferedEncoderPool
+
+	// SetAggregationTypesPool sets the aggregation types pool.
+	SetAggregationTypesPool(pool policy.AggregationTypesPool) Options
+
+	// AggregationTypesPool returns the aggregation types pool.
+	AggregationTypesPool() policy.AggregationTypesPool
+
+	// SetQuantileFloatsPool sets the timer quantiles pool.
+	SetQuantileFloatsPool(pool pool.FloatsPool) Options
+
+	// QuantileFloatsPool returns the timer quantiles pool.
+	QuantileFloatsPool() pool.FloatsPool
 
 	/// Read-only derived options
 
