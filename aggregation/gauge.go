@@ -55,7 +55,7 @@ func NewGauge(opts Options) Gauge {
 // Update updates the gauge value.
 func (g *Gauge) Update(value float64) {
 	g.last = value
-	if g.IsDefault {
+	if g.UseDefaultAggregation {
 		return
 	}
 
@@ -68,7 +68,7 @@ func (g *Gauge) Update(value float64) {
 		g.min = value
 	}
 
-	if g.IsExpensive {
+	if g.HasExpensiveAggregations {
 		g.sumSq += value * value
 	}
 }
@@ -95,18 +95,14 @@ func (g *Gauge) Mean() float64 {
 
 // Stdev returns the standard deviation gauge value.
 func (g *Gauge) Stdev() float64 {
-	return stdev(float64(g.count), g.sumSq, g.sum)
+	return stdev(g.count, g.sumSq, g.sum)
 }
 
 // Min returns the minimum gauge value.
-func (g *Gauge) Min() float64 {
-	return g.min
-}
+func (g *Gauge) Min() float64 { return g.min }
 
 // Max returns the maximum gauge value.
-func (g *Gauge) Max() float64 {
-	return g.max
-}
+func (g *Gauge) Max() float64 { return g.max }
 
 // ValueOf returns the value for the aggregation type.
 func (g *Gauge) ValueOf(aggType policy.AggregationType) float64 {

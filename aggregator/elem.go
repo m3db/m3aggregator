@@ -349,7 +349,7 @@ func (e *CounterElem) indexOfWithLock(alignedStart int64) (int, bool) {
 }
 
 func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn aggMetricFn) {
-	if e.aggOpts.IsDefault {
+	if e.aggOpts.UseDefaultAggregation {
 		// No suffix for default aggregations.
 		fn(e.opts.FullCounterPrefix(), e.id, nil, timeNanos, float64(agg.Sum()), e.sp)
 		return
@@ -540,7 +540,7 @@ func (e *TimerElem) indexOfWithLock(alignedStart int64) (int, bool) {
 
 func (e *TimerElem) processValue(timeNanos int64, agg aggregation.Timer, fn aggMetricFn) {
 	fullTimerPrefix := e.opts.FullTimerPrefix()
-	if e.aggOpts.IsDefault {
+	if e.aggOpts.UseDefaultAggregation {
 		var (
 			quantiles        = e.opts.TimerQuantiles()
 			quantileSuffixes = e.opts.TimerQuantileSuffixes()
@@ -718,7 +718,7 @@ func (e *GaugeElem) indexOfWithLock(alignedStart int64) (int, bool) {
 }
 
 func (e *GaugeElem) processValue(timeNanos int64, agg aggregation.Gauge, fn aggMetricFn) {
-	if e.aggOpts.IsDefault {
+	if e.aggOpts.UseDefaultAggregation {
 		// No suffix for default aggregations.
 		fn(e.opts.FullGaugePrefix(), e.id, nil, timeNanos, agg.Last(), e.sp)
 		return

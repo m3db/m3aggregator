@@ -53,7 +53,7 @@ func (t *Timer) Add(value float64) {
 	t.sum += value
 	t.stream.Add(value)
 
-	if t.IsDefault || t.IsExpensive {
+	if t.UseDefaultAggregation || t.HasExpensiveAggregations {
 		t.sumSq += value * value
 	}
 }
@@ -102,7 +102,7 @@ func (t *Timer) Mean() float64 {
 
 // Stdev returns the standard deviation timer value.
 func (t *Timer) Stdev() float64 {
-	return stdev(float64(t.count), t.sumSq, t.sum)
+	return stdev(t.count, t.sumSq, t.sum)
 }
 
 // ValueOf returns the value for the aggregation type.

@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/m3db/m3metrics/policy"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,8 +41,8 @@ func TestCounterDefaultAggregationType(t *testing.T) {
 
 func TestCounterCustomAggregationType(t *testing.T) {
 	opts := NewOptions()
-	opts.IsDefault = false
-	opts.IsExpensive = true
+	opts.UseDefaultAggregation = false
+	opts.HasExpensiveAggregations = true
 
 	c := NewCounter(opts)
 

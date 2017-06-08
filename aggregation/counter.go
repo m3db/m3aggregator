@@ -50,7 +50,7 @@ func NewCounter(opts Options) Counter {
 // Update updates the counter value.
 func (c *Counter) Update(value int64) {
 	c.sum += value
-	if c.IsDefault {
+	if c.UseDefaultAggregation {
 		return
 	}
 
@@ -62,7 +62,7 @@ func (c *Counter) Update(value int64) {
 		c.min = value
 	}
 
-	if c.IsExpensive {
+	if c.HasExpensiveAggregations {
 		c.sumSq += value * value
 	}
 }
@@ -86,18 +86,14 @@ func (c *Counter) Mean() float64 {
 
 // Stdev returns the standard deviation counter value.
 func (c *Counter) Stdev() float64 {
-	return stdev(float64(c.count), float64(c.sumSq), float64(c.sum))
+	return stdev(c.count, float64(c.sumSq), float64(c.sum))
 }
 
 // Min returns the minimum counter value.
-func (c *Counter) Min() int64 {
-	return c.min
-}
+func (c *Counter) Min() int64 { return c.min }
 
 // Max returns the maximum counter value.
-func (c *Counter) Max() int64 {
-	return c.max
-}
+func (c *Counter) Max() int64 { return c.max }
 
 // ValueOf returns the value for the aggregation type.
 func (c *Counter) ValueOf(aggType policy.AggregationType) float64 {

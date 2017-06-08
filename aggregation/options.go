@@ -23,16 +23,16 @@ package aggregation
 import "github.com/m3db/m3metrics/policy"
 
 var (
-	defaultOptions = Options{IsDefault: true, IsExpensive: false}
+	defaultOptions = Options{UseDefaultAggregation: true, HasExpensiveAggregations: false}
 )
 
 // Options is the options for aggregations.
 type Options struct {
-	// IsDefault means only default aggregation types are enabled.
-	IsDefault bool
-	// IsExpensive means expensive (multiplication／division)
+	// UseDefaultAggregation means only default aggregation types are enabled.
+	UseDefaultAggregation bool
+	// HasExpensiveAggregations means expensive (multiplication／division)
 	// aggregation types are enabled.
-	IsExpensive bool
+	HasExpensiveAggregations bool
 }
 
 // NewOptions creates a new aggregation options.
@@ -42,15 +42,6 @@ func NewOptions() Options {
 
 // ResetSetData resets the aggregation options.
 func (o *Options) ResetSetData(aggTypes policy.AggregationTypes) {
-	o.IsDefault = aggTypes.IsDefault()
-	o.IsExpensive = isExpensive(aggTypes)
-}
-
-func isExpensive(aggTypes policy.AggregationTypes) bool {
-	for _, aggType := range aggTypes {
-		if aggType == policy.SumSq || aggType == policy.Stdev {
-			return true
-		}
-	}
-	return false
+	o.UseDefaultAggregation = aggTypes.IsDefault()
+	o.HasExpensiveAggregations = isExpensive(aggTypes)
 }

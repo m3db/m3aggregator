@@ -24,31 +24,24 @@ import (
 	"testing"
 
 	"github.com/m3db/m3metrics/policy"
+
 	"github.com/stretchr/testify/require"
 )
 
 func TestOptions(t *testing.T) {
 	o := NewOptions()
-	require.True(t, o.IsDefault)
-	require.False(t, o.IsExpensive)
+	require.True(t, o.UseDefaultAggregation)
+	require.False(t, o.HasExpensiveAggregations)
 
 	o.ResetSetData(nil)
-	require.True(t, o.IsDefault)
-	require.False(t, o.IsExpensive)
+	require.True(t, o.UseDefaultAggregation)
+	require.False(t, o.HasExpensiveAggregations)
 
 	o.ResetSetData(policy.AggregationTypes{policy.Sum})
-	require.False(t, o.IsDefault)
-	require.False(t, o.IsExpensive)
+	require.False(t, o.UseDefaultAggregation)
+	require.False(t, o.HasExpensiveAggregations)
 
 	o.ResetSetData(policy.AggregationTypes{policy.Sum, policy.SumSq})
-	require.False(t, o.IsDefault)
-	require.True(t, o.IsExpensive)
-}
-
-func TestIsExpensive(t *testing.T) {
-	require.False(t, isExpensive(policy.AggregationTypes{}))
-	require.True(t, isExpensive(policy.AggregationTypes{policy.Sum, policy.SumSq}))
-	require.True(t, isExpensive(policy.AggregationTypes{policy.Stdev}))
-	require.False(t, isExpensive(policy.AggregationTypes{policy.Sum}))
-	require.False(t, isExpensive(policy.AggregationTypes{policy.Count, policy.P999}))
+	require.False(t, o.UseDefaultAggregation)
+	require.True(t, o.HasExpensiveAggregations)
 }

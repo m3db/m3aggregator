@@ -20,13 +20,26 @@
 
 package aggregation
 
-import "math"
+import (
+	"math"
 
-func stdev(count, sumSq, sum float64) float64 {
+	"github.com/m3db/m3metrics/policy"
+)
+
+func stdev(count int64, sumSq, sum float64) float64 {
 	div := count * (count - 1)
 	if div == 0 {
 		return 0.0
 	}
-	num := count*sumSq - math.Pow(sum, 2)
+	num := float64(count)*sumSq - sum*sum
 	return math.Sqrt(num / float64(div))
+}
+
+func isExpensive(aggTypes policy.AggregationTypes) bool {
+	for _, aggType := range aggTypes {
+		if aggType == policy.SumSq || aggType == policy.Stdev {
+			return true
+		}
+	}
+	return false
 }

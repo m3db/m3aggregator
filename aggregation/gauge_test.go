@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/m3db/m3metrics/policy"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,8 +41,8 @@ func TestGaugeDefaultAggregationType(t *testing.T) {
 
 func TestGaugeCustomAggregationType(t *testing.T) {
 	opts := NewOptions()
-	opts.IsDefault = false
-	opts.IsExpensive = true
+	opts.UseDefaultAggregation = false
+	opts.HasExpensiveAggregations = true
 
 	g := NewGauge(opts)
 

@@ -109,8 +109,8 @@ func TestElemBaseResetSetData(t *testing.T) {
 	require.Equal(t, testStoragePolicy, e.sp)
 	require.False(t, e.tombstoned)
 	require.False(t, e.closed)
-	require.False(t, e.aggOpts.IsDefault)
-	require.False(t, e.aggOpts.IsExpensive)
+	require.False(t, e.aggOpts.UseDefaultAggregation)
+	require.False(t, e.aggOpts.HasExpensiveAggregations)
 }
 
 func TestCounterResetSetData(t *testing.T) {
@@ -124,8 +124,8 @@ func TestCounterResetSetData(t *testing.T) {
 	require.Equal(t, policy.AggregationTypes{policy.SumSq}, ce.aggTypes)
 	require.False(t, ce.tombstoned)
 	require.False(t, ce.closed)
-	require.False(t, ce.aggOpts.IsDefault)
-	require.True(t, ce.aggOpts.IsExpensive)
+	require.False(t, ce.aggOpts.UseDefaultAggregation)
+	require.True(t, ce.aggOpts.HasExpensiveAggregations)
 }
 
 func TestTimerResetSetData(t *testing.T) {
@@ -139,8 +139,8 @@ func TestTimerResetSetData(t *testing.T) {
 	require.Equal(t, policy.AggregationTypes{policy.Upper, policy.P999}, te.aggTypes)
 	require.False(t, te.tombstoned)
 	require.False(t, te.closed)
-	require.False(t, te.aggOpts.IsDefault)
-	require.False(t, te.aggOpts.IsExpensive)
+	require.False(t, te.aggOpts.UseDefaultAggregation)
+	require.False(t, te.aggOpts.HasExpensiveAggregations)
 	require.Equal(t, []float64{0.999}, te.quantiles)
 }
 
@@ -155,8 +155,8 @@ func TestGaugeResetSetData(t *testing.T) {
 	require.Equal(t, policy.DefaultAggregationTypes, ge.aggTypes)
 	require.False(t, ge.tombstoned)
 	require.False(t, ge.closed)
-	require.True(t, ge.aggOpts.IsDefault)
-	require.False(t, ge.aggOpts.IsExpensive)
+	require.True(t, ge.aggOpts.UseDefaultAggregation)
+	require.False(t, ge.aggOpts.HasExpensiveAggregations)
 }
 
 func TestElemBaseMarkAsTombStoned(t *testing.T) {
