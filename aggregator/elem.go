@@ -380,7 +380,7 @@ func (e *TimerElem) quantilesFromAggTypes(aggTypes policy.AggregationTypes) []fl
 	if aggTypes.IsDefault() {
 		return e.opts.TimerQuantiles()
 	}
-	return aggTypes.Quantiles(e.opts.QuantileFloatsPool())
+	return aggTypes.PooledQuantiles(e.opts.QuantileFloatsPool())
 }
 
 // AddMetric adds a new batch of timer values.
