@@ -336,8 +336,7 @@ func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn 
 }
 
 // NB(cw) suffix overrides default suffixes to not add
-// suffix of aggregation type: Sum for Counter metrics
-// for backward compatibility reasons.
+// suffix for default Counter metrics for backward compatibility reasons.
 func (e *CounterElem) suffix(aggType policy.AggregationType) []byte {
 	if aggType == policy.Sum {
 		return nil
@@ -359,7 +358,7 @@ func NewTimerElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.Aggregat
 func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes) {
 	if aggTypes.IsDefault() {
 		aggTypes = e.opts.DefaultTimerAggregationTypes()
-		e.quantiles = e.opts.TimerQuantiles()
+		e.quantiles, e.pooledQuantiles = e.opts.TimerQuantiles(), false
 	} else {
 		e.quantiles, e.pooledQuantiles = aggTypes.PooledQuantiles(e.opts.QuantilesPool())
 	}
@@ -694,8 +693,7 @@ func (e *GaugeElem) processValue(timeNanos int64, agg aggregation.Gauge, fn aggM
 }
 
 // NB(cw) suffix overrides default suffixes to not add
-// suffix of aggregation type: Last for Gauge metrics
-// for backward compatibility reasons.
+// suffix for default Gauge metrics for backward compatibility reasons.
 func (e *GaugeElem) suffix(aggType policy.AggregationType) []byte {
 	if aggType == policy.Last {
 		return nil
