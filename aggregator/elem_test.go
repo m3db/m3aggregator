@@ -89,13 +89,6 @@ var (
 	}
 )
 
-func TestElemSuffix(t *testing.T) {
-	e := newElemBase(NewOptions())
-	for aggType := range policy.ValidAggregationTypes {
-		require.Equal(t, expectSuffix(aggType), e.suffix(aggType))
-	}
-}
-
 func TestElemBaseID(t *testing.T) {
 	e := &elemBase{}
 	e.ResetSetData(testCounterID, testStoragePolicy, policy.DefaultAggregationTypes)
@@ -130,6 +123,7 @@ func TestCounterResetSetData(t *testing.T) {
 
 func TestTimerResetSetData(t *testing.T) {
 	te := NewTimerElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, NewOptions())
+	require.False(t, te.pooledQuantiles)
 
 	sp := policy.NewStoragePolicy(time.Second, xtime.Second, time.Hour)
 	te.ResetSetData(testBatchTimerID, sp, policy.AggregationTypes{policy.Upper, policy.P999})
@@ -142,6 +136,7 @@ func TestTimerResetSetData(t *testing.T) {
 	require.False(t, te.aggOpts.UseDefaultAggregation)
 	require.False(t, te.aggOpts.HasExpensiveAggregations)
 	require.Equal(t, []float64{0.999}, te.quantiles)
+	require.True(t, te.pooledQuantiles)
 }
 
 func TestGaugeResetSetData(t *testing.T) {
@@ -343,6 +338,10 @@ func TestCounterFindOrInsert(t *testing.T) {
 		require.Equal(t, e.values[expected[idx].index].counter, res)
 		require.Equal(t, expected[idx].data, times)
 	}
+}
+
+func TestCounterSuffix(t *testing.T) {
+	require.Nil(t, NewCounterElem(testCounterID, testStoragePolicy, policy.DefaultAggregationTypes, testOptions()).suffix(policy.Sum))
 }
 
 func TestTimerElemAddMetric(t *testing.T) {
@@ -700,6 +699,10 @@ func TestGaugeFindOrInsert(t *testing.T) {
 	}
 }
 
+func TestGaugeSuffix(t *testing.T) {
+	require.Nil(t, NewGaugeElem(testGaugeID, testStoragePolicy, policy.DefaultAggregationTypes, testOptions()).suffix(policy.Last))
+}
+
 type testIndexData struct {
 	index int
 	data  []int64
@@ -798,8 +801,16 @@ func testGaugeElem(aggTypes policy.AggregationTypes) *GaugeElem {
 	return e
 }
 
-func expectSuffix(aggType policy.AggregationType) []byte {
-	return suffixMap[aggType]
+func expectCounterSuffix(aggType policy.AggregationType) []byte {
+	return NewCounterElem(testCounterID, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, NewOptions()).suffix(aggType)
+}
+
+func expectTimerSuffix(aggType policy.AggregationType) []byte {
+	return NewOptions().Suffix(aggType)
+}
+
+func expectGaugeSuffix(aggType policy.AggregationType) []byte {
+	return NewGaugeElem(testGaugeID, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, NewOptions()).suffix(aggType)
 }
 
 func expectedAggMetricsForCounter(
@@ -813,7 +824,7 @@ func expectedAggMetricsForCounter(
 			res = append(res, testAggMetric{
 				idPrefix:  []byte("stats.counts."),
 				id:        testCounterID,
-				idSuffix:  expectSuffix(aggType),
+				idSuffix:  expectCounterSuffix(aggType),
 				timeNanos: timeNanos,
 				value:     float64(testCounter.CounterVal),
 				sp:        sp,
@@ -860,7 +871,7 @@ func expectedAggMetricsForTimer(
 					expected = append(expected, testAggMetric{
 						idPrefix:  []byte("stats.timers."),
 						id:        testBatchTimerID,
-						idSuffix:  expectSuffix(aggType),
+						idSuffix:  expectTimerSuffix(aggType),
 						timeNanos: timeNanos,
 						value:     d.value,
 						sp:        sp,
@@ -875,7 +886,7 @@ func expectedAggMetricsForTimer(
 		expected = append(expected, testAggMetric{
 			idPrefix:  []byte("stats.timers."),
 			id:        testBatchTimerID,
-			idSuffix:  expectSuffix(d.aggType),
+			idSuffix:  expectTimerSuffix(d.aggType),
 			timeNanos: timeNanos,
 			value:     d.value,
 			sp:        sp,
@@ -895,7 +906,7 @@ func expectedAggMetricsForGauge(
 			res = append(res, testAggMetric{
 				idPrefix:  []byte("stats.gauges."),
 				id:        testGaugeID,
-				idSuffix:  expectSuffix(aggType),
+				idSuffix:  expectGaugeSuffix(aggType),
 				timeNanos: timeNanos,
 				value:     float64(testGauge.GaugeVal),
 				sp:        sp,

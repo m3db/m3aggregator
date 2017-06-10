@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
+	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
@@ -48,22 +49,17 @@ func validateDerivedPrefix(
 	require.Equal(t, expected, full)
 }
 
-func TestOptionsValidateInvalidQuantiles(t *testing.T) {
-	opts := NewOptions().SetTimerQuantiles(nil)
-	require.Equal(t, errInvalidQuantiles, opts.Validate())
-
-	opts = opts.SetTimerQuantiles([]float64{minQuantile - 1})
-	require.Equal(t, errInvalidQuantiles, opts.Validate())
-
-	opts = opts.SetTimerQuantiles([]float64{maxQuantile + 1})
-	require.Equal(t, errInvalidQuantiles, opts.Validate())
-}
-
 func validateQuantiles(t *testing.T, o Options) {
 	suffixFn := o.TimerQuantileSuffixFn()
-	suffixes := o.TimerQuantileSuffixes()
-	for i, q := range o.TimerQuantiles() {
-		require.Equal(t, suffixFn(q), suffixes[i])
+	quantiles, _ := o.DefaultTimerAggregationTypes().PooledQuantiles(nil)
+	require.Equal(t, o.TimerQuantiles(), quantiles)
+
+	for _, aggType := range o.DefaultTimerAggregationTypes() {
+		q, ok := aggType.Quantile()
+		if !ok || aggType == policy.Median {
+			continue
+		}
+		require.Equal(t, suffixFn(q), o.Suffix(aggType))
 	}
 }
 
@@ -177,9 +173,11 @@ func TestOptionsSetTimerMedianSuffix(t *testing.T) {
 	require.Equal(t, newMedianSuffix, o.AggregationMedianSuffix())
 }
 
-func TestOptionsSetTimerQuantile(t *testing.T) {
-	o := NewOptions().SetTimerQuantiles([]float64{0.1, 0.5, 0.7})
-	validateQuantiles(t, o)
+func TestOptionsSetDefaultTimerAggregationTypes(t *testing.T) {
+	aggTypes := policy.AggregationTypes{policy.Mean, policy.SumSq, policy.P99, policy.P9999}
+	o := NewOptions().SetDefaultTimerAggregationTypes(aggTypes)
+	require.Equal(t, aggTypes, o.DefaultTimerAggregationTypes())
+	require.Equal(t, []float64{0.99, 0.9999}, o.TimerQuantiles())
 }
 
 func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
@@ -189,8 +187,22 @@ func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
 	validateQuantiles(t, o)
 }
 
+func TestOptionsNonQuantileSuffix(t *testing.T) {
+	o := NewOptions()
+	require.Equal(t, []byte(".last"), o.Suffix(policy.Last))
+	require.Equal(t, []byte(".lower"), o.Suffix(policy.Lower))
+	require.Equal(t, []byte(".upper"), o.Suffix(policy.Upper))
+	require.Equal(t, []byte(".mean"), o.Suffix(policy.Mean))
+	require.Equal(t, []byte(".median"), o.Suffix(policy.Median))
+	require.Equal(t, []byte(".count"), o.Suffix(policy.Count))
+	require.Equal(t, []byte(".sum"), o.Suffix(policy.Sum))
+	require.Equal(t, []byte(".sum_sq"), o.Suffix(policy.SumSq))
+	require.Equal(t, []byte(".stdev"), o.Suffix(policy.Stdev))
+}
+
 func TestOptionTimerQuantileSuffix(t *testing.T) {
 	o := NewOptions()
+	require.Equal(t, []byte(".p10"), o.TimerQuantileSuffixFn()(0.1))
 	require.Equal(t, []byte(".p50"), o.TimerQuantileSuffixFn()(0.5))
 	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.9))
 	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.90))
@@ -198,8 +210,7 @@ func TestOptionTimerQuantileSuffix(t *testing.T) {
 	require.Equal(t, []byte(".p999"), o.TimerQuantileSuffixFn()(0.999))
 	require.Equal(t, []byte(".p999"), o.TimerQuantileSuffixFn()(0.9990))
 	require.Equal(t, []byte(".p9999"), o.TimerQuantileSuffixFn()(0.9999))
-	require.Equal(t, []byte(".p100"), o.TimerQuantileSuffixFn()(0.99999))
-	require.Equal(t, []byte(".p100"), o.TimerQuantileSuffixFn()(1))
+	require.Equal(t, []byte(".p123456789"), o.TimerQuantileSuffixFn()(0.123456789))
 }
 
 func TestOptionsSetGaugePrefix(t *testing.T) {
@@ -309,6 +320,6 @@ func TestSetBufferedEncoderPool(t *testing.T) {
 
 func TestSetQuantilesPool(t *testing.T) {
 	p := pool.NewFloatsPool(nil, nil)
-	o := NewOptions().SetQuantileFloatsPool(p)
-	require.Equal(t, p, o.QuantileFloatsPool())
+	o := NewOptions().SetQuantilesPool(p)
+	require.Equal(t, p, o.QuantilesPool())
 }

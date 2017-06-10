@@ -301,24 +301,9 @@ func toAggregatedMetrics(
 	case aggregation.Counter:
 		fn(opts.FullCounterPrefix(), id, nil, timeNanos, float64(values.Sum()), p)
 	case aggregation.Timer:
-		var (
-			fullTimerPrefix  = opts.FullTimerPrefix()
-			quantiles        = opts.TimerQuantiles()
-			quantileSuffixes = opts.TimerQuantileSuffixes()
-		)
-		fn(fullTimerPrefix, id, opts.AggregationSumSuffix(), timeNanos, values.Sum(), p)
-		fn(fullTimerPrefix, id, opts.AggregationSumSqSuffix(), timeNanos, values.SumSq(), p)
-		fn(fullTimerPrefix, id, opts.AggregationMeanSuffix(), timeNanos, values.Mean(), p)
-		fn(fullTimerPrefix, id, opts.AggregationLowerSuffix(), timeNanos, values.Min(), p)
-		fn(fullTimerPrefix, id, opts.AggregationUpperSuffix(), timeNanos, values.Max(), p)
-		fn(fullTimerPrefix, id, opts.AggregationCountSuffix(), timeNanos, float64(values.Count()), p)
-		fn(fullTimerPrefix, id, opts.AggregationStdevSuffix(), timeNanos, values.Stdev(), p)
-		for idx, q := range quantiles {
-			v := values.Quantile(q)
-			if q == 0.5 {
-				fn(fullTimerPrefix, id, opts.AggregationMedianSuffix(), timeNanos, v, p)
-			}
-			fn(fullTimerPrefix, id, quantileSuffixes[idx], timeNanos, v, p)
+		var fullTimerPrefix = opts.FullTimerPrefix()
+		for _, aggType := range opts.DefaultTimerAggregationTypes() {
+			fn(fullTimerPrefix, id, opts.Suffix(aggType), timeNanos, values.ValueOf(aggType), p)
 		}
 	case aggregation.Gauge:
 		fn(opts.FullGaugePrefix(), id, nil, timeNanos, values.Last(), p)

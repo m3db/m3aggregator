@@ -120,7 +120,9 @@ type CounterElem struct {
 type TimerElem struct {
 	elemBase
 
-	quantiles []float64    // quantiles used in this timer element
+	quantiles       []float64
+	pooledQuantiles bool
+
 	values    []timedTimer // aggregated timers sorted by time in ascending order
 	toConsume []timedTimer
 }
@@ -168,33 +170,6 @@ func (e *elemBase) MarkAsTombstoned() {
 	}
 	e.tombstoned = true
 	e.Unlock()
-}
-
-func (e *elemBase) suffix(aggType policy.AggregationType) []byte {
-	switch aggType {
-	case policy.Last:
-		return e.opts.AggregationLastSuffix()
-	case policy.Lower:
-		return e.opts.AggregationLowerSuffix()
-	case policy.Upper:
-		return e.opts.AggregationUpperSuffix()
-	case policy.Mean:
-		return e.opts.AggregationMeanSuffix()
-	case policy.Median:
-		return e.opts.AggregationMedianSuffix()
-	case policy.Count:
-		return e.opts.AggregationCountSuffix()
-	case policy.Sum:
-		return e.opts.AggregationSumSuffix()
-	case policy.SumSq:
-		return e.opts.AggregationSumSqSuffix()
-	case policy.Stdev:
-		return e.opts.AggregationStdevSuffix()
-	}
-	if q, ok := aggType.Quantile(); ok {
-		return e.opts.TimerQuantileSuffixFn()(q)
-	}
-	return nil
 }
 
 // NewCounterElem creates a new counter element
@@ -270,12 +245,12 @@ func (e *CounterElem) Close() {
 	e.id = nil
 	e.values = e.values[:0]
 	e.toConsume = e.toConsume[:0]
-	pool := e.opts.CounterElemPool()
 	aggTypesPool := e.opts.AggregationTypesPool()
+	pool := e.opts.CounterElemPool()
 	e.Unlock()
 
-	pool.Put(e)
 	aggTypesPool.Put(e.aggTypes)
+	pool.Put(e)
 }
 
 // findOrCreate finds the counter for a given time, or creates one
@@ -360,6 +335,16 @@ func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn 
 	}
 }
 
+// NB(cw) suffix overrides default suffixes to not add
+// suffix of aggregation type: Sum for Counter metrics
+// for backward compatibility reasons.
+func (e *CounterElem) suffix(aggType policy.AggregationType) []byte {
+	if aggType == policy.Sum {
+		return nil
+	}
+	return e.opts.Suffix(aggType)
+}
+
 // NewTimerElem creates a new timer element.
 func NewTimerElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes, opts Options) *TimerElem {
 	e := &TimerElem{
@@ -372,15 +357,14 @@ func NewTimerElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.Aggregat
 
 // ResetSetData overrides elemBase.ResetData, to include quantile update for timer elements.
 func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes) {
-	e.elemBase.ResetSetData(id, sp, aggTypes)
-	e.quantiles = e.quantilesFromAggTypes(aggTypes)
-}
-
-func (e *TimerElem) quantilesFromAggTypes(aggTypes policy.AggregationTypes) []float64 {
 	if aggTypes.IsDefault() {
-		return e.opts.TimerQuantiles()
+		aggTypes = e.opts.DefaultTimerAggregationTypes()
+		e.quantiles = e.opts.TimerQuantiles()
+	} else {
+		e.quantiles, e.pooledQuantiles = aggTypes.PooledQuantiles(e.opts.QuantilesPool())
 	}
-	return aggTypes.PooledQuantiles(e.opts.QuantileFloatsPool())
+
+	e.elemBase.ResetSetData(id, sp, aggTypes)
 }
 
 // AddMetric adds a new batch of timer values.
@@ -457,14 +441,16 @@ func (e *TimerElem) Close() {
 	}
 	e.values = e.values[:0]
 	e.toConsume = e.toConsume[:0]
-	pool := e.opts.TimerElemPool()
+	quantileFloatsPool := e.opts.QuantilesPool()
 	aggTypesPool := e.opts.AggregationTypesPool()
-	quantileFloatsPool := e.opts.QuantileFloatsPool()
+	pool := e.opts.TimerElemPool()
 	e.Unlock()
 
-	pool.Put(e)
+	if e.pooledQuantiles {
+		quantileFloatsPool.Put(e.quantiles)
+	}
 	aggTypesPool.Put(e.aggTypes)
-	quantileFloatsPool.Put(e.quantiles)
+	pool.Put(e)
 }
 
 // findOrCreate finds the timer for a given time, or creates one
@@ -540,30 +526,8 @@ func (e *TimerElem) indexOfWithLock(alignedStart int64) (int, bool) {
 
 func (e *TimerElem) processValue(timeNanos int64, agg aggregation.Timer, fn aggMetricFn) {
 	fullTimerPrefix := e.opts.FullTimerPrefix()
-	if e.aggOpts.UseDefaultAggregation {
-		var (
-			quantiles        = e.opts.TimerQuantiles()
-			quantileSuffixes = e.opts.TimerQuantileSuffixes()
-		)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationSumSuffix(), timeNanos, agg.Sum(), e.sp)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationSumSqSuffix(), timeNanos, agg.SumSq(), e.sp)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationMeanSuffix(), timeNanos, agg.Mean(), e.sp)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationLowerSuffix(), timeNanos, agg.Min(), e.sp)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationUpperSuffix(), timeNanos, agg.Max(), e.sp)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationCountSuffix(), timeNanos, float64(agg.Count()), e.sp)
-		fn(fullTimerPrefix, e.id, e.opts.AggregationStdevSuffix(), timeNanos, agg.Stdev(), e.sp)
-		for idx, q := range quantiles {
-			v := agg.Quantile(q)
-			if q == 0.5 {
-				fn(fullTimerPrefix, e.id, e.opts.AggregationMedianSuffix(), timeNanos, v, e.sp)
-			}
-			fn(fullTimerPrefix, e.id, quantileSuffixes[idx], timeNanos, v, e.sp)
-		}
-		return
-	}
-
 	for _, aggType := range e.aggTypes {
-		fn(fullTimerPrefix, e.id, e.suffix(aggType), timeNanos, agg.ValueOf(aggType), e.sp)
+		fn(fullTimerPrefix, e.id, e.opts.Suffix(aggType), timeNanos, agg.ValueOf(aggType), e.sp)
 	}
 }
 
@@ -639,12 +603,12 @@ func (e *GaugeElem) Close() {
 	e.id = nil
 	e.values = e.values[:0]
 	e.toConsume = e.toConsume[:0]
-	pool := e.opts.GaugeElemPool()
 	aggTypesPool := e.opts.AggregationTypesPool()
+	pool := e.opts.GaugeElemPool()
 	e.Unlock()
 
-	pool.Put(e)
 	aggTypesPool.Put(e.aggTypes)
+	pool.Put(e)
 }
 
 // findOrCreate finds the gauge for a given time, or creates one
@@ -727,4 +691,14 @@ func (e *GaugeElem) processValue(timeNanos int64, agg aggregation.Gauge, fn aggM
 	for _, aggType := range e.aggTypes {
 		fn(e.opts.FullGaugePrefix(), e.id, e.suffix(aggType), timeNanos, agg.ValueOf(aggType), e.sp)
 	}
+}
+
+// NB(cw) suffix overrides default suffixes to not add
+// suffix of aggregation type: Last for Gauge metrics
+// for backward compatibility reasons.
+func (e *GaugeElem) suffix(aggType policy.AggregationType) []byte {
+	if aggType == policy.Last {
+		return nil
+	}
+	return e.opts.Suffix(aggType)
 }

@@ -39,11 +39,6 @@ import (
 	"github.com/spaolacci/murmur3"
 )
 
-const (
-	minQuantile = 0.0
-	maxQuantile = 1.0
-)
-
 var (
 	defaultMetricPrefix              = []byte("stats.")
 	defaultCounterPrefix             = []byte("counts.")
@@ -65,13 +60,26 @@ var (
 	defaultEntryCheckInterval        = time.Hour
 	defaultEntryCheckBatchPercent    = 0.01
 	defaultMaxTimerBatchSizePerWrite = 0
-	defaultPolicies                  = []policy.Policy{
+	defaultDefaultPolicies           = []policy.Policy{
 		policy.NewPolicy(policy.NewStoragePolicy(10*time.Second, xtime.Second, 2*24*time.Hour), policy.DefaultAggregationID),
 		policy.NewPolicy(policy.NewStoragePolicy(time.Minute, xtime.Minute, 40*24*time.Hour), policy.DefaultAggregationID),
 	}
-	defaultTimerQuantiles = []float64{0.5, 0.95, 0.99}
 
-	errInvalidQuantiles = fmt.Errorf("quantiles must be nonempty and between %f and %f", minQuantile, maxQuantile)
+	defaultTimerAggregationTypes = policy.AggregationTypes{
+		policy.Sum,
+		policy.SumSq,
+		policy.Mean,
+		policy.Lower,
+		policy.Upper,
+		policy.Count,
+		policy.Stdev,
+		policy.Median,
+		policy.P50,
+		policy.P95,
+		policy.P99,
+	}
+
+	defaultQuantilePrecision = 0.0000000001 // 9 zeros after 0.
 )
 
 type options struct {
@@ -88,6 +96,7 @@ type options struct {
 	countSuffix               []byte
 	stdevSuffix               []byte
 	medianSuffix              []byte
+	timerAggTypes             policy.AggregationTypes
 	timerQuantiles            []float64
 	timerQuantileSuffixFn     QuantileSuffixFn
 	gaugePrefix               []byte
@@ -116,10 +125,10 @@ type options struct {
 	quantilesPool             pool.FloatsPool
 
 	// Derived options.
-	fullCounterPrefix     []byte
-	fullTimerPrefix       []byte
-	fullGaugePrefix       []byte
-	timerQuantileSuffixes [][]byte
+	fullCounterPrefix []byte
+	fullTimerPrefix   []byte
+	fullGaugePrefix   []byte
+	suffixMap         map[policy.AggregationType][]byte
 }
 
 // NewOptions create a new set of options.
@@ -137,7 +146,7 @@ func NewOptions() Options {
 		countSuffix:               defaultAggregationCountSuffix,
 		stdevSuffix:               defaultAggregationStdevSuffix,
 		medianSuffix:              defaultAggregationMedianSuffix,
-		timerQuantiles:            defaultTimerQuantiles,
+		timerAggTypes:             defaultTimerAggregationTypes,
 		timerQuantileSuffixFn:     defaultTimerQuantileSuffixFn,
 		gaugePrefix:               defaultGaugePrefix,
 		timeLock:                  &sync.RWMutex{},
@@ -153,7 +162,7 @@ func NewOptions() Options {
 		entryCheckInterval:        defaultEntryCheckInterval,
 		entryCheckBatchPercent:    defaultEntryCheckBatchPercent,
 		maxTimerBatchSizePerWrite: defaultMaxTimerBatchSizePerWrite,
-		defaultPolicies:           defaultPolicies,
+		defaultPolicies:           defaultDefaultPolicies,
 	}
 
 	// Initialize pools.
@@ -163,18 +172,6 @@ func NewOptions() Options {
 	o.computeAllDerived()
 
 	return o
-}
-
-func (o *options) Validate() error {
-	if len(o.timerQuantiles) == 0 {
-		return errInvalidQuantiles
-	}
-	for _, quantile := range o.timerQuantiles {
-		if quantile <= minQuantile || quantile >= maxQuantile {
-			return errInvalidQuantiles
-		}
-	}
-	return nil
 }
 
 func (o *options) SetMetricPrefix(value []byte) Options {
@@ -300,21 +297,21 @@ func (o *options) AggregationMedianSuffix() []byte {
 	return o.medianSuffix
 }
 
-func (o *options) SetTimerQuantiles(quantiles []float64) Options {
+func (o *options) SetDefaultTimerAggregationTypes(aggTypes policy.AggregationTypes) Options {
 	opts := *o
-	opts.timerQuantiles = quantiles
-	opts.computeTimerQuantilesSuffixes()
+	opts.timerAggTypes = aggTypes
+	opts.computeQuantiles()
 	return &opts
 }
 
-func (o *options) TimerQuantiles() []float64 {
-	return o.timerQuantiles
+func (o *options) DefaultTimerAggregationTypes() policy.AggregationTypes {
+	return o.timerAggTypes
 }
 
 func (o *options) SetTimerQuantileSuffixFn(value QuantileSuffixFn) Options {
 	opts := *o
 	opts.timerQuantileSuffixFn = value
-	opts.computeTimerQuantilesSuffixes()
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -553,13 +550,13 @@ func (o *options) AggregationTypesPool() policy.AggregationTypesPool {
 	return o.aggTypesPool
 }
 
-func (o *options) SetQuantileFloatsPool(pool pool.FloatsPool) Options {
+func (o *options) SetQuantilesPool(pool pool.FloatsPool) Options {
 	opts := *o
 	opts.quantilesPool = pool
 	return &opts
 }
 
-func (o *options) QuantileFloatsPool() pool.FloatsPool {
+func (o *options) QuantilesPool() pool.FloatsPool {
 	return o.quantilesPool
 }
 
@@ -575,8 +572,12 @@ func (o *options) FullGaugePrefix() []byte {
 	return o.fullGaugePrefix
 }
 
-func (o *options) TimerQuantileSuffixes() [][]byte {
-	return o.timerQuantileSuffixes
+func (o *options) TimerQuantiles() []float64 {
+	return o.timerQuantiles
+}
+
+func (o *options) Suffix(aggtype policy.AggregationType) []byte {
+	return o.suffixMap[aggtype]
 }
 
 func (o *options) initPools() {
@@ -616,7 +617,8 @@ func (o *options) initPools() {
 
 func (o *options) computeAllDerived() {
 	o.computeFullPrefixes()
-	o.computeTimerQuantilesSuffixes()
+	o.computeQuantiles()
+	o.computeSuffixes()
 }
 
 func (o *options) computeFullPrefixes() {
@@ -625,12 +627,40 @@ func (o *options) computeFullPrefixes() {
 	o.computeFullGaugePrefix()
 }
 
-func (o *options) computeTimerQuantilesSuffixes() {
-	suffixes := make([][]byte, len(o.timerQuantiles))
-	for i, q := range o.timerQuantiles {
-		suffixes[i] = o.timerQuantileSuffixFn(q)
+func (o *options) computeQuantiles() {
+	o.timerQuantiles, _ = o.DefaultTimerAggregationTypes().PooledQuantiles(o.QuantilesPool())
+}
+
+func (o *options) computeSuffixes() {
+	o.suffixMap = make(map[policy.AggregationType][]byte, len(policy.ValidAggregationTypes))
+
+	for aggType := range policy.ValidAggregationTypes {
+		switch aggType {
+		case policy.Last:
+			o.suffixMap[policy.Last] = o.AggregationLastSuffix()
+		case policy.Lower:
+			o.suffixMap[policy.Lower] = o.AggregationLowerSuffix()
+		case policy.Upper:
+			o.suffixMap[policy.Upper] = o.AggregationUpperSuffix()
+		case policy.Mean:
+			o.suffixMap[policy.Mean] = o.AggregationMeanSuffix()
+		case policy.Median:
+			o.suffixMap[policy.Median] = o.AggregationMedianSuffix()
+		case policy.Count:
+			o.suffixMap[policy.Count] = o.AggregationCountSuffix()
+		case policy.Sum:
+			o.suffixMap[policy.Sum] = o.AggregationSumSuffix()
+		case policy.SumSq:
+			o.suffixMap[policy.SumSq] = o.AggregationSumSqSuffix()
+		case policy.Stdev:
+			o.suffixMap[policy.Stdev] = o.AggregationStdevSuffix()
+		default:
+			q, ok := aggType.Quantile()
+			if ok {
+				o.suffixMap[aggType] = o.timerQuantileSuffixFn(q)
+			}
+		}
 	}
-	o.timerQuantileSuffixes = suffixes
 }
 
 func (o *options) computeFullCounterPrefix() {
@@ -656,9 +686,15 @@ func (o *options) computeFullGaugePrefix() {
 
 // By default we use e.g. ".p50", ".p95", ".p99" for the 50th/95th/99th percentile.
 func defaultTimerQuantileSuffixFn(quantile float64) []byte {
-	s := fmt.Sprintf(".p%0.0f", quantile*10000)
-	// Trim 2 rightmost "0"s.
-	return []byte(strings.TrimSuffix(strings.TrimSuffix(s, "0"), "0"))
+	s := fmt.Sprintf("%0.0f", quantile/defaultQuantilePrecision)
+	return []byte(fmt.Sprintf(".p%s", trimQuantileSuffix(s)))
+}
+
+func trimQuantileSuffix(s string) string {
+	for strings.HasSuffix(s, "0") && len(s) > 2 {
+		s = strings.TrimSuffix(s, "0")
+	}
+	return s
 }
 
 func defaultShardFn(id []byte, numShards int) uint32 {

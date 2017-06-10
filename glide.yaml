@@ -6,7 +6,7 @@ import:
 - package: github.com/m3db/m3cluster
   version: b596a86b06f37c9150ea352d6ec1549ed19f304b
 - package: github.com/m3db/m3metrics
-  version: 27933961dba78cb60caf44c5a1bf83cd9fe6c75b
+  version: 36c2d6edf2ca9f5e6208b339f42e3782baf19907
 - package: google.golang.org/appengine
   version: 2e4a801b39fc199db615bfca7d0b9f8cd9580599
 - package: github.com/m3db/m3x
@@ -61,5 +61,7 @@ import:
   version: 1878d9fbb537119d24b21ca07effd591627cd160
 - package: github.com/spaolacci/murmur3
   version: 0d12bf811670bf6a1a63828dfbd003eded177fce
+- package: github.com/willf/bitset
+  version: 988f4f24992fc745de53c42df0da6581e42a6686
 - package: google.golang.org/grpc
   version: 777daa17ff9b5daef1cfdf915088a2ada3332bf0

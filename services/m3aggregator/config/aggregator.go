@@ -96,7 +96,7 @@ type AggregatorConfiguration struct {
 	AggregationMedianSuffix string `yaml:"aggregationMedianSuffix"`
 
 	// Target quantiles to compute.
-	TimerQuantiles []float64 `yaml:"timerQuantiles"`
+	TimerAggregationTypes policy.AggregationTypes `yaml:"timerAggregationTypes"`
 
 	// Timer quantile suffix function type.
 	TimerQuantileSuffixFnType string `yaml:"timerQuantileSuffixFnType"`
@@ -189,7 +189,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	opts = setMetricPrefixOrSuffix(opts, c.GaugePrefix, opts.SetGaugePrefix)
 
 	// Set timer quantiles and quantile suffix function.
-	opts = opts.SetTimerQuantiles(c.TimerQuantiles)
+	opts = opts.SetDefaultTimerAggregationTypes(c.TimerAggregationTypes)
 	quantileSuffixFn, err := c.parseTimerQuantileSuffixFn(opts)
 	if err != nil {
 		return nil, err
@@ -337,12 +337,8 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		c.QuantilesFloatsPool.NewBuckets(),
 		c.QuantilesFloatsPool.NewObjectPoolOptions(iOpts),
 	)
-	opts = opts.SetQuantileFloatsPool(quantileFloatsPool)
+	opts = opts.SetQuantilesPool(quantileFloatsPool)
 	quantileFloatsPool.Init()
-
-	if err := opts.Validate(); err != nil {
-		return nil, err
-	}
 
 	return opts, nil
 }
