@@ -120,8 +120,9 @@ type CounterElem struct {
 type TimerElem struct {
 	elemBase
 
+	isAggTypesPooled  bool
+	isQuantilesPooled bool
 	quantiles         []float64
-	isPooledQuantiles bool
 
 	values    []timedTimer // aggregated timers sorted by time in ascending order
 	toConsume []timedTimer
@@ -359,9 +360,13 @@ func NewTimerElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.Aggregat
 func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes) {
 	if aggTypes.IsDefault() {
 		aggTypes = e.opts.DefaultTimerAggregationTypes()
-		e.quantiles, e.isPooledQuantiles = e.opts.TimerQuantiles(), false
+		e.isAggTypesPooled = false
+
+		e.quantiles, e.isQuantilesPooled = e.opts.TimerQuantiles(), false
 	} else {
-		e.quantiles, e.isPooledQuantiles = aggTypes.PooledQuantiles(e.opts.QuantilesPool())
+		e.isAggTypesPooled = true
+
+		e.quantiles, e.isQuantilesPooled = aggTypes.PooledQuantiles(e.opts.QuantilesPool())
 	}
 
 	e.elemBase.ResetSetData(id, sp, aggTypes)
@@ -446,10 +451,12 @@ func (e *TimerElem) Close() {
 	pool := e.opts.TimerElemPool()
 	e.Unlock()
 
-	if e.isPooledQuantiles {
+	if e.isQuantilesPooled {
 		quantileFloatsPool.Put(e.quantiles)
 	}
-	aggTypesPool.Put(e.aggTypes)
+	if e.isAggTypesPooled {
+		aggTypesPool.Put(e.aggTypes)
+	}
 	pool.Put(e)
 }
 
