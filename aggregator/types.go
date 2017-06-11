@@ -370,6 +370,10 @@ type Options interface {
 	// TimerQuantiles returns the quantiles for timers.
 	TimerQuantiles() []float64
 
+	// DefaultTimerAggregationSuffixes returns the suffix for
+	// default timer aggregation types.
+	DefaultTimerAggregationSuffixes() [][]byte
+
 	// Suffix returns the suffix for the aggregation type
-	Suffix(aggtype policy.AggregationType) []byte
+	Suffix(aggType policy.AggregationType) []byte
 }

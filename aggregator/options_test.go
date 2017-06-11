@@ -178,6 +178,7 @@ func TestOptionsSetDefaultTimerAggregationTypes(t *testing.T) {
 	o := NewOptions().SetDefaultTimerAggregationTypes(aggTypes)
 	require.Equal(t, aggTypes, o.DefaultTimerAggregationTypes())
 	require.Equal(t, []float64{0.99, 0.9999}, o.TimerQuantiles())
+	require.Equal(t, [][]byte{[]byte(".mean"), []byte(".sum_sq"), []byte(".p99"), []byte(".p9999")}, o.DefaultTimerAggregationSuffixes())
 }
 
 func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
@@ -202,6 +203,7 @@ func TestOptionsNonQuantileSuffix(t *testing.T) {
 
 func TestOptionTimerQuantileSuffix(t *testing.T) {
 	o := NewOptions()
+	require.Equal(t, []byte(".p01"), o.TimerQuantileSuffixFn()(0.01))
 	require.Equal(t, []byte(".p10"), o.TimerQuantileSuffixFn()(0.1))
 	require.Equal(t, []byte(".p50"), o.TimerQuantileSuffixFn()(0.5))
 	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.9))
@@ -210,6 +212,7 @@ func TestOptionTimerQuantileSuffix(t *testing.T) {
 	require.Equal(t, []byte(".p999"), o.TimerQuantileSuffixFn()(0.999))
 	require.Equal(t, []byte(".p999"), o.TimerQuantileSuffixFn()(0.9990))
 	require.Equal(t, []byte(".p9999"), o.TimerQuantileSuffixFn()(0.9999))
+	require.Equal(t, []byte(".p00001"), o.TimerQuantileSuffixFn()(0.00001))
 	require.Equal(t, []byte(".p123456789"), o.TimerQuantileSuffixFn()(0.123456789))
 }
 

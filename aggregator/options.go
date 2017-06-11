@@ -21,8 +21,7 @@
 package aggregator
 
 import (
-	"fmt"
-	"strings"
+	"strconv"
 	"sync"
 	"time"
 
@@ -65,7 +64,7 @@ var (
 		policy.NewPolicy(policy.NewStoragePolicy(time.Minute, xtime.Minute, 40*24*time.Hour), policy.DefaultAggregationID),
 	}
 
-	defaultTimerAggregationTypes = policy.AggregationTypes{
+	defaultDefaultTimerAggregationTypes = policy.AggregationTypes{
 		policy.Sum,
 		policy.SumSq,
 		policy.Mean,
@@ -78,51 +77,50 @@ var (
 		policy.P95,
 		policy.P99,
 	}
-
-	defaultQuantilePrecision = 0.0000000001 // 9 zeros after 0.
 )
 
 type options struct {
 	// Base options.
-	metricPrefix              []byte
-	counterPrefix             []byte
-	timerPrefix               []byte
-	sumSuffix                 []byte
-	sumSqSuffix               []byte
-	meanSuffix                []byte
-	lastSuffix                []byte
-	lowerSuffix               []byte
-	upperSuffix               []byte
-	countSuffix               []byte
-	stdevSuffix               []byte
-	medianSuffix              []byte
-	timerAggTypes             policy.AggregationTypes
-	timerQuantiles            []float64
-	timerQuantileSuffixFn     QuantileSuffixFn
-	gaugePrefix               []byte
-	timeLock                  *sync.RWMutex
-	clockOpts                 clock.Options
-	instrumentOpts            instrument.Options
-	streamOpts                cm.Options
-	placementWatcherOpts      services.StagedPlacementWatcherOptions
-	instanceID                string
-	shardFn                   ShardFn
-	flushManager              FlushManager
-	minFlushInterval          time.Duration
-	maxFlushSize              int
-	flushHandler              Handler
-	entryTTL                  time.Duration
-	entryCheckInterval        time.Duration
-	entryCheckBatchPercent    float64
-	maxTimerBatchSizePerWrite int
-	defaultPolicies           []policy.Policy
-	entryPool                 EntryPool
-	counterElemPool           CounterElemPool
-	timerElemPool             TimerElemPool
-	gaugeElemPool             GaugeElemPool
-	bufferedEncoderPool       msgpack.BufferedEncoderPool
-	aggTypesPool              policy.AggregationTypesPool
-	quantilesPool             pool.FloatsPool
+	metricPrefix                    []byte
+	counterPrefix                   []byte
+	timerPrefix                     []byte
+	sumSuffix                       []byte
+	sumSqSuffix                     []byte
+	meanSuffix                      []byte
+	lastSuffix                      []byte
+	lowerSuffix                     []byte
+	upperSuffix                     []byte
+	countSuffix                     []byte
+	stdevSuffix                     []byte
+	medianSuffix                    []byte
+	defaultTimerAggregationTypes    policy.AggregationTypes
+	defaultTimerAggregationSuffixes [][]byte
+	timerQuantiles                  []float64
+	timerQuantileSuffixFn           QuantileSuffixFn
+	gaugePrefix                     []byte
+	timeLock                        *sync.RWMutex
+	clockOpts                       clock.Options
+	instrumentOpts                  instrument.Options
+	streamOpts                      cm.Options
+	placementWatcherOpts            services.StagedPlacementWatcherOptions
+	instanceID                      string
+	shardFn                         ShardFn
+	flushManager                    FlushManager
+	minFlushInterval                time.Duration
+	maxFlushSize                    int
+	flushHandler                    Handler
+	entryTTL                        time.Duration
+	entryCheckInterval              time.Duration
+	entryCheckBatchPercent          float64
+	maxTimerBatchSizePerWrite       int
+	defaultPolicies                 []policy.Policy
+	entryPool                       EntryPool
+	counterElemPool                 CounterElemPool
+	timerElemPool                   TimerElemPool
+	gaugeElemPool                   GaugeElemPool
+	bufferedEncoderPool             msgpack.BufferedEncoderPool
+	aggTypesPool                    policy.AggregationTypesPool
+	quantilesPool                   pool.FloatsPool
 
 	// Derived options.
 	fullCounterPrefix []byte
@@ -134,35 +132,35 @@ type options struct {
 // NewOptions create a new set of options.
 func NewOptions() Options {
 	o := &options{
-		metricPrefix:              defaultMetricPrefix,
-		counterPrefix:             defaultCounterPrefix,
-		timerPrefix:               defaultTimerPrefix,
-		lastSuffix:                defaultAggregationLastSuffix,
-		sumSuffix:                 defaultAggregationSumSuffix,
-		sumSqSuffix:               defaultAggregationSumSqSuffix,
-		meanSuffix:                defaultAggregationMeanSuffix,
-		lowerSuffix:               defaultAggregationLowerSuffix,
-		upperSuffix:               defaultAggregationUpperSuffix,
-		countSuffix:               defaultAggregationCountSuffix,
-		stdevSuffix:               defaultAggregationStdevSuffix,
-		medianSuffix:              defaultAggregationMedianSuffix,
-		timerAggTypes:             defaultTimerAggregationTypes,
-		timerQuantileSuffixFn:     defaultTimerQuantileSuffixFn,
-		gaugePrefix:               defaultGaugePrefix,
-		timeLock:                  &sync.RWMutex{},
-		clockOpts:                 clock.NewOptions(),
-		instrumentOpts:            instrument.NewOptions(),
-		streamOpts:                cm.NewOptions(),
-		placementWatcherOpts:      placement.NewStagedPlacementWatcherOptions(),
-		instanceID:                defaultInstanceID,
-		shardFn:                   defaultShardFn,
-		minFlushInterval:          defaultMinFlushInterval,
-		maxFlushSize:              defaultMaxFlushSize,
-		entryTTL:                  defaultEntryTTL,
-		entryCheckInterval:        defaultEntryCheckInterval,
-		entryCheckBatchPercent:    defaultEntryCheckBatchPercent,
-		maxTimerBatchSizePerWrite: defaultMaxTimerBatchSizePerWrite,
-		defaultPolicies:           defaultDefaultPolicies,
+		metricPrefix:                 defaultMetricPrefix,
+		counterPrefix:                defaultCounterPrefix,
+		timerPrefix:                  defaultTimerPrefix,
+		lastSuffix:                   defaultAggregationLastSuffix,
+		sumSuffix:                    defaultAggregationSumSuffix,
+		sumSqSuffix:                  defaultAggregationSumSqSuffix,
+		meanSuffix:                   defaultAggregationMeanSuffix,
+		lowerSuffix:                  defaultAggregationLowerSuffix,
+		upperSuffix:                  defaultAggregationUpperSuffix,
+		countSuffix:                  defaultAggregationCountSuffix,
+		stdevSuffix:                  defaultAggregationStdevSuffix,
+		medianSuffix:                 defaultAggregationMedianSuffix,
+		defaultTimerAggregationTypes: defaultDefaultTimerAggregationTypes,
+		timerQuantileSuffixFn:        defaultTimerQuantileSuffixFn,
+		gaugePrefix:                  defaultGaugePrefix,
+		timeLock:                     &sync.RWMutex{},
+		clockOpts:                    clock.NewOptions(),
+		instrumentOpts:               instrument.NewOptions(),
+		streamOpts:                   cm.NewOptions(),
+		placementWatcherOpts:         placement.NewStagedPlacementWatcherOptions(),
+		instanceID:                   defaultInstanceID,
+		shardFn:                      defaultShardFn,
+		minFlushInterval:             defaultMinFlushInterval,
+		maxFlushSize:                 defaultMaxFlushSize,
+		entryTTL:                     defaultEntryTTL,
+		entryCheckInterval:           defaultEntryCheckInterval,
+		entryCheckBatchPercent:       defaultEntryCheckBatchPercent,
+		maxTimerBatchSizePerWrite:    defaultMaxTimerBatchSizePerWrite,
+		defaultPolicies:              defaultDefaultPolicies,
 	}
 
 	// Initialize pools.
@@ -299,19 +297,21 @@ func (o *options) AggregationMedianSuffix() []byte {
 
 func (o *options) SetDefaultTimerAggregationTypes(aggTypes policy.AggregationTypes) Options {
 	opts := *o
-	opts.timerAggTypes = aggTypes
+	opts.defaultTimerAggregationTypes = aggTypes
 	opts.computeQuantiles()
+	opts.computeDefaultTimerAggregationSuffix()
 	return &opts
 }
 
 func (o *options) DefaultTimerAggregationTypes() policy.AggregationTypes {
-	return o.timerAggTypes
+	return o.defaultTimerAggregationTypes
 }
 
 func (o *options) SetTimerQuantileSuffixFn(value QuantileSuffixFn) Options {
 	opts := *o
 	opts.timerQuantileSuffixFn = value
 	opts.computeSuffixes()
+	opts.computeDefaultTimerAggregationSuffix()
 	return &opts
 }
 
@@ -576,8 +576,12 @@ func (o *options) TimerQuantiles() []float64 {
 	return o.timerQuantiles
 }
 
-func (o *options) Suffix(aggtype policy.AggregationType) []byte {
-	return o.suffixMap[aggtype]
+func (o *options) DefaultTimerAggregationSuffixes() [][]byte {
+	return o.defaultTimerAggregationSuffixes
+}
+
+func (o *options) Suffix(aggType policy.AggregationType) []byte {
+	return o.suffixMap[aggType]
 }
 
 func (o *options) initPools() {
@@ -619,6 +623,7 @@ func (o *options) computeAllDerived() {
 	o.computeFullPrefixes()
 	o.computeQuantiles()
 	o.computeSuffixes()
+	o.computeDefaultTimerAggregationSuffix()
 }
 
 func (o *options) computeFullPrefixes() {
@@ -663,6 +668,13 @@ func (o *options) computeSuffixes() {
 	}
 }
 
+func (o *options) computeDefaultTimerAggregationSuffix() {
+	o.defaultTimerAggregationSuffixes = make([][]byte, len(o.DefaultTimerAggregationTypes()))
+	for i, aggType := range o.DefaultTimerAggregationTypes() {
+		o.defaultTimerAggregationSuffixes[i] = o.Suffix(aggType)
+	}
+}
+
 func (o *options) computeFullCounterPrefix() {
 	fullCounterPrefix := make([]byte, len(o.metricPrefix)+len(o.counterPrefix))
 	n := copy(fullCounterPrefix, o.metricPrefix)
@@ -686,13 +698,13 @@ func (o *options) computeFullGaugePrefix() {
 
 // By default we use e.g. ".p50", ".p95", ".p99" for the 50th/95th/99th percentile.
 func defaultTimerQuantileSuffixFn(quantile float64) []byte {
-	s := fmt.Sprintf("%0.0f", quantile/defaultQuantilePrecision)
-	return []byte(fmt.Sprintf(".p%s", trimQuantileSuffix(s)))
+	return []byte(".p" + addSuffixZero(strconv.FormatFloat(quantile, 'f', -1, 64)[2:]))
 }
 
-func trimQuantileSuffix(s string) string {
-	for strings.HasSuffix(s, "0") && len(s) > 2 {
-		s = strings.TrimSuffix(s, "0")
+// Get .p10 rather than .p1 for 0.1
+func addSuffixZero(s string) string {
+	for len(s) < 2 {
+		s = s + "0"
 	}
 	return s
 }

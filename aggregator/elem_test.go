@@ -123,7 +123,7 @@ func TestCounterResetSetData(t *testing.T) {
 
 func TestTimerResetSetData(t *testing.T) {
 	te := NewTimerElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, NewOptions())
-	require.False(t, te.pooledQuantiles)
+	require.False(t, te.isPooledQuantiles)
 
 	sp := policy.NewStoragePolicy(time.Second, xtime.Second, time.Hour)
 	te.ResetSetData(testBatchTimerID, sp, policy.AggregationTypes{policy.Upper, policy.P999})
@@ -136,7 +136,7 @@ func TestTimerResetSetData(t *testing.T) {
 	require.False(t, te.aggOpts.UseDefaultAggregation)
 	require.False(t, te.aggOpts.HasExpensiveAggregations)
 	require.Equal(t, []float64{0.999}, te.quantiles)
-	require.True(t, te.pooledQuantiles)
+	require.True(t, te.isPooledQuantiles)
 }
 
 func TestGaugeResetSetData(t *testing.T) {
