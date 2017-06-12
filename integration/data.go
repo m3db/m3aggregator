@@ -61,6 +61,20 @@ var (
 			},
 		),
 	}
+
+	testDefaultTimerAggregationTypes = policy.AggregationTypes{
+		policy.Sum,
+		policy.SumSq,
+		policy.Mean,
+		policy.Lower,
+		policy.Upper,
+		policy.Count,
+		policy.Stdev,
+		policy.Median,
+		policy.P50,
+		policy.P95,
+		policy.P99,
+	}
 )
 
 type byTimeIDPolicyAscending []aggregated.MetricWithStoragePolicy
@@ -83,15 +97,19 @@ func (a byTimeIDPolicyAscending) Less(i, j int) bool {
 	return retention1 < retention2
 }
 
+type metricKey struct {
+	id  string
+	typ unaggregated.Type
+}
 type valuesByTime map[int64]interface{}
-type datapointsByID map[string]valuesByTime
+type datapointsByID map[metricKey]valuesByTime
 type dataForPolicy struct {
 	aggTypes policy.AggregationTypes
 	data     datapointsByID
 }
 type metricsByPolicy map[policy.Policy]*dataForPolicy
 
-type metricTypeFn func(idx int) unaggregated.Type
+type metricTypeFn func(ts time.Time, idx int) unaggregated.Type
 
 type testData struct {
 	timestamp time.Time
@@ -103,7 +121,7 @@ type testDatasetWithPoliciesList struct {
 	policiesList policy.PoliciesList
 }
 
-func roundRobinMetricTypeFn(idx int) unaggregated.Type {
+func roundRobinMetricTypeFn(_ time.Time, idx int) unaggregated.Type {
 	switch idx % 3 {
 	case 0:
 		return unaggregated.CounterType
@@ -115,7 +133,7 @@ func roundRobinMetricTypeFn(idx int) unaggregated.Type {
 }
 
 func constantMetryTypeFnFactory(typ unaggregated.Type) metricTypeFn {
-	return func(int) unaggregated.Type { return typ }
+	return func(time.Time, int) unaggregated.Type { return typ }
 }
 
 func generateTestIDs(prefix string, numIDs int) []string {
@@ -143,7 +161,7 @@ func generateTestData(
 		for i := 0; i < len(ids); i++ {
 			// Randomly generate metrics with slightly pertubrations to the values
 			var mu unaggregated.MetricUnion
-			metricType := typeFn(i)
+			metricType := typeFn(timestamp, i)
 			switch metricType {
 			case unaggregated.CounterType:
 				mu = unaggregated.MetricUnion{
@@ -220,10 +238,11 @@ func toExpectedResults(
 	for _, dataValues := range dsp.dataset {
 		for _, mu := range dataValues.metrics {
 			for policy, metrics := range byPolicy {
-				datapoints, exists := metrics.data[string(mu.ID)]
+				key := metricKey{id: string(mu.ID), typ: mu.Type}
+				datapoints, exists := metrics.data[key]
 				if !exists {
 					datapoints = make(valuesByTime)
-					metrics.data[string(mu.ID)] = datapoints
+					metrics.data[key] = datapoints
 				}
 				alignedStartNanos := dataValues.timestamp.Truncate(policy.Resolution().Window).UnixNano()
 				values, exists := datapoints[alignedStartNanos]
@@ -231,6 +250,18 @@ func toExpectedResults(
 				aggTypes, err := decompressor.Decompress(policy.AggregationID)
 				require.NoError(t, err)
 
+				if aggTypes.IsDefault() {
+					switch mu.Type {
+					case unaggregated.CounterType:
+						// TODO(cw) use default aggregation types for Counter
+					case unaggregated.BatchTimerType:
+						aggTypes = testDefaultTimerAggregationTypes
+					case unaggregated.GaugeType:
+						// TODO(cw) use default aggregation types for Gauge
+					default:
+						require.Fail(t, fmt.Sprintf("unrecognized metric type %v", mu.Type))
+					}
+				}
 				metrics.aggTypes = aggTypes
 				aggregationOpts := aggregation.NewOptions()
 				aggregationOpts.ResetSetData(aggTypes)
@@ -272,13 +303,13 @@ func toExpectedResults(
 	var expected []aggregated.MetricWithStoragePolicy
 	for policy, metrics := range byPolicy {
 		alignedCutoffNanos := now.Truncate(policy.Resolution().Window).UnixNano()
-		for id, datapoints := range metrics.data {
+		for key, datapoints := range metrics.data {
 			for timeNanos, values := range datapoints {
 				endAtNanos := timeNanos + int64(policy.Resolution().Window)
 				// The end time must be no later than the aligned cutoff time
 				// for the data to be flushed
 				if endAtNanos <= alignedCutoffNanos {
-					expected = append(expected, toAggregatedMetrics(t, id, endAtNanos, values, policy.StoragePolicy, metrics.aggTypes, opts)...)
+					expected = append(expected, toAggregatedMetrics(t, key, endAtNanos, values, policy.StoragePolicy, metrics.aggTypes, opts)...)
 				}
 			}
 		}
@@ -292,7 +323,7 @@ func toExpectedResults(
 
 func toAggregatedMetrics(
 	t *testing.T,
-	id string,
+	key metricKey,
 	timeNanos int64,
 	values interface{},
 	sp policy.StoragePolicy,
@@ -311,6 +342,7 @@ func toAggregatedMetrics(
 		})
 	}
 
+	id := key.id
 	switch values := values.(type) {
 	case aggregation.Counter:
 		var fullCounterPrefix = opts.FullCounterPrefix()
