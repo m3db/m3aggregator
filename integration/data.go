@@ -250,29 +250,24 @@ func toExpectedResults(
 				aggTypes, err := decompressor.Decompress(policy.AggregationID)
 				require.NoError(t, err)
 
-				if aggTypes.IsDefault() {
-					switch mu.Type {
-					case unaggregated.CounterType:
-						// TODO(cw) use default aggregation types for Counter
-					case unaggregated.BatchTimerType:
-						aggTypes = testDefaultTimerAggregationTypes
-					case unaggregated.GaugeType:
-						// TODO(cw) use default aggregation types for Gauge
-					default:
-						require.Fail(t, fmt.Sprintf("unrecognized metric type %v", mu.Type))
-					}
-				}
 				metrics.aggTypes = aggTypes
 				aggregationOpts := aggregation.NewOptions()
-				aggregationOpts.ResetSetData(aggTypes)
 
 				if !exists {
 					switch mu.Type {
 					case unaggregated.CounterType:
+						// TODO(cw) Get default aggregation types for Counter.
+						aggregationOpts.ResetSetData(aggTypes)
 						values = aggregation.NewCounter(aggregationOpts)
 					case unaggregated.BatchTimerType:
+						if aggTypes.IsDefault() {
+							aggTypes = opts.DefaultTimerAggregationTypes()
+						}
+						aggregationOpts.ResetSetData(aggTypes)
 						values = aggregation.NewTimer(opts.TimerQuantiles(), opts.StreamOptions(), aggregationOpts)
 					case unaggregated.GaugeType:
+						// TODO(cw) Get default aggregation types for Gauge.
+						aggregationOpts.ResetSetData(aggTypes)
 						values = aggregation.NewGauge(aggregationOpts)
 					default:
 						require.Fail(t, fmt.Sprintf("unrecognized metric type %v", mu.Type))
