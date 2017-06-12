@@ -333,12 +333,12 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 
 	// Set quantiles pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("quantile-pool"))
-	quantilePool := pool.NewFloatsPool(
+	quantilesPool := pool.NewFloatsPool(
 		c.QuantilesPool.NewBuckets(),
 		c.QuantilesPool.NewObjectPoolOptions(iOpts),
 	)
-	opts = opts.SetQuantilesPool(quantilePool)
-	quantilePool.Init()
+	opts = opts.SetQuantilesPool(quantilesPool)
+	quantilesPool.Init()
 
 	return opts, nil
 }
