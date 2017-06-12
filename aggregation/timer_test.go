@@ -57,7 +57,22 @@ func TestCreateTimerResetStream(t *testing.T) {
 }
 
 func TestTimerAggregations(t *testing.T) {
-	timer := NewTimer(testQuantiles, cm.NewOptions(), NewOptions())
+	opts := NewOptions()
+	opts.ResetSetData(policy.AggregationTypes{
+		policy.Sum,
+		policy.SumSq,
+		policy.Mean,
+		policy.Lower,
+		policy.Upper,
+		policy.Count,
+		policy.Stdev,
+		policy.Median,
+		policy.P50,
+		policy.P95,
+		policy.P99,
+	})
+
+	timer := NewTimer(testQuantiles, cm.NewOptions(), opts)
 
 	// Assert the state of an empty timer
 	require.Equal(t, int64(0), timer.Count())

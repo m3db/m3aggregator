@@ -126,7 +126,7 @@ type options struct {
 	fullCounterPrefix []byte
 	fullTimerPrefix   []byte
 	fullGaugePrefix   []byte
-	suffixMap         map[policy.AggregationType][]byte
+	suffixSlice       [][]byte
 }
 
 // NewOptions create a new set of options.
@@ -581,7 +581,7 @@ func (o *options) DefaultTimerAggregationSuffixes() [][]byte {
 }
 
 func (o *options) Suffix(aggType policy.AggregationType) []byte {
-	return o.suffixMap[aggType]
+	return o.suffixSlice[aggType.ID()]
 }
 
 func (o *options) initPools() {
@@ -637,32 +637,32 @@ func (o *options) computeQuantiles() {
 }
 
 func (o *options) computeSuffixes() {
-	o.suffixMap = make(map[policy.AggregationType][]byte, len(policy.ValidAggregationTypes))
+	o.suffixSlice = make([][]byte, policy.MaxAggregationTypeID+1)
 
 	for aggType := range policy.ValidAggregationTypes {
 		switch aggType {
 		case policy.Last:
-			o.suffixMap[policy.Last] = o.AggregationLastSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationLastSuffix()
 		case policy.Lower:
-			o.suffixMap[policy.Lower] = o.AggregationLowerSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationLowerSuffix()
 		case policy.Upper:
-			o.suffixMap[policy.Upper] = o.AggregationUpperSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationUpperSuffix()
 		case policy.Mean:
-			o.suffixMap[policy.Mean] = o.AggregationMeanSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationMeanSuffix()
 		case policy.Median:
-			o.suffixMap[policy.Median] = o.AggregationMedianSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationMedianSuffix()
 		case policy.Count:
-			o.suffixMap[policy.Count] = o.AggregationCountSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationCountSuffix()
 		case policy.Sum:
-			o.suffixMap[policy.Sum] = o.AggregationSumSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationSumSuffix()
 		case policy.SumSq:
-			o.suffixMap[policy.SumSq] = o.AggregationSumSqSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationSumSqSuffix()
 		case policy.Stdev:
-			o.suffixMap[policy.Stdev] = o.AggregationStdevSuffix()
+			o.suffixSlice[aggType.ID()] = o.AggregationStdevSuffix()
 		default:
 			q, ok := aggType.Quantile()
 			if ok {
-				o.suffixMap[aggType] = o.timerQuantileSuffixFn(q)
+				o.suffixSlice[aggType.ID()] = o.timerQuantileSuffixFn(q)
 			}
 		}
 	}
@@ -698,15 +698,7 @@ func (o *options) computeFullGaugePrefix() {
 
 // By default we use e.g. ".p50", ".p95", ".p99" for the 50th/95th/99th percentile.
 func defaultTimerQuantileSuffixFn(quantile float64) []byte {
-	return []byte(".p" + addSuffixZero(strconv.FormatFloat(quantile, 'f', -1, 64)[2:]))
-}
-
-// Get .p10 rather than .p1 for 0.1
-func addSuffixZero(s string) string {
-	for len(s) < 2 {
-		s = s + "0"
-	}
-	return s
+	return []byte(".p" + strconv.FormatFloat(quantile*100, 'f', -1, 64))
 }
 
 func defaultShardFn(id []byte, numShards int) uint32 {

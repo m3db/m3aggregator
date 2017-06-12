@@ -53,7 +53,7 @@ func (t *Timer) Add(value float64) {
 	t.sum += value
 	t.stream.Add(value)
 
-	if t.UseDefaultAggregation || t.HasExpensiveAggregations {
+	if t.HasExpensiveAggregations {
 		t.sumSq += value * value
 	}
 }

@@ -162,7 +162,7 @@ type AggregatorConfiguration struct {
 	AggregationTypesPool pool.ObjectPoolConfiguration `yaml:"aggregationTypesPool"`
 
 	// Pool of quantile slices.
-	QuantilesFloatsPool pool.BucketizedPoolConfiguration `yaml:"quantilesFloatsPool"`
+	QuantilesPool pool.BucketizedPoolConfiguration `yaml:"quantilesPool"`
 }
 
 // NewAggregatorOptions creates a new set of aggregator options.
@@ -331,14 +331,14 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		return make(policy.AggregationTypes, 0, len(policy.ValidAggregationTypes))
 	})
 
-	// Set quantile floats pool.
-	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("quantile-floats-pool"))
-	quantileFloatsPool := pool.NewFloatsPool(
-		c.QuantilesFloatsPool.NewBuckets(),
-		c.QuantilesFloatsPool.NewObjectPoolOptions(iOpts),
+	// Set quantiles pool.
+	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("quantile-pool"))
+	quantilePool := pool.NewFloatsPool(
+		c.QuantilesPool.NewBuckets(),
+		c.QuantilesPool.NewObjectPoolOptions(iOpts),
 	)
-	opts = opts.SetQuantilesPool(quantileFloatsPool)
-	quantileFloatsPool.Init()
+	opts = opts.SetQuantilesPool(quantilePool)
+	quantilePool.Init()
 
 	return opts, nil
 }

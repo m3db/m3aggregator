@@ -109,7 +109,7 @@ aggregator:
     size: 4096
   bufferedEncoderPool:
     size: 4096
-  quantilesFloatsPool:
+  quantilesPool:
     buckets:
       - count: 256
         capacity: 4

@@ -328,6 +328,7 @@ func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn 
 	var fullCounterPrefix = e.opts.FullCounterPrefix()
 	if e.aggOpts.UseDefaultAggregation {
 		// No suffix for default aggregations.
+		// TODO(cw) Make aggregation types for Counter configurable.
 		fn(fullCounterPrefix, e.id, e.suffix(policy.Sum), timeNanos, float64(agg.Sum()), e.sp)
 		return
 	}
@@ -361,11 +362,9 @@ func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes 
 	if aggTypes.IsDefault() {
 		aggTypes = e.opts.DefaultTimerAggregationTypes()
 		e.isAggTypesPooled = false
-
 		e.quantiles, e.isQuantilesPooled = e.opts.TimerQuantiles(), false
 	} else {
 		e.isAggTypesPooled = true
-
 		e.quantiles, e.isQuantilesPooled = aggTypes.PooledQuantiles(e.opts.QuantilesPool())
 	}
 
@@ -702,6 +701,7 @@ func (e *GaugeElem) processValue(timeNanos int64, agg aggregation.Gauge, fn aggM
 	var fullGaugePrefix = e.opts.FullGaugePrefix()
 	if e.aggOpts.UseDefaultAggregation {
 		// No suffix for default aggregations.
+		// TODO(cw) Make aggregation types for Gauge configurable.
 		fn(fullGaugePrefix, e.id, e.suffix(policy.Last), timeNanos, agg.Last(), e.sp)
 		return
 	}
