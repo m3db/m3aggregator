@@ -28,4 +28,5 @@ const (
 	BlackholeHandler Type = "blackhole"
 	LoggingHandler   Type = "logging"
 	ForwardHandler   Type = "forward"
+	Broadcast        Type = "broadcast"
 )
