@@ -126,7 +126,7 @@ type options struct {
 	fullCounterPrefix []byte
 	fullTimerPrefix   []byte
 	fullGaugePrefix   []byte
-	suffixSlice       [][]byte
+	suffixes          [][]byte
 }
 
 // NewOptions create a new set of options.
@@ -581,7 +581,7 @@ func (o *options) DefaultTimerAggregationSuffixes() [][]byte {
 }
 
 func (o *options) Suffix(aggType policy.AggregationType) []byte {
-	return o.suffixSlice[aggType.ID()]
+	return o.suffixes[aggType.ID()]
 }
 
 func (o *options) initPools() {
@@ -637,32 +637,32 @@ func (o *options) computeQuantiles() {
 }
 
 func (o *options) computeSuffixes() {
-	o.suffixSlice = make([][]byte, policy.MaxAggregationTypeID+1)
+	o.suffixes = make([][]byte, policy.MaxAggregationTypeID+1)
 
 	for aggType := range policy.ValidAggregationTypes {
 		switch aggType {
 		case policy.Last:
-			o.suffixSlice[aggType.ID()] = o.AggregationLastSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationLastSuffix()
 		case policy.Lower:
-			o.suffixSlice[aggType.ID()] = o.AggregationLowerSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationLowerSuffix()
 		case policy.Upper:
-			o.suffixSlice[aggType.ID()] = o.AggregationUpperSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationUpperSuffix()
 		case policy.Mean:
-			o.suffixSlice[aggType.ID()] = o.AggregationMeanSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationMeanSuffix()
 		case policy.Median:
-			o.suffixSlice[aggType.ID()] = o.AggregationMedianSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationMedianSuffix()
 		case policy.Count:
-			o.suffixSlice[aggType.ID()] = o.AggregationCountSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationCountSuffix()
 		case policy.Sum:
-			o.suffixSlice[aggType.ID()] = o.AggregationSumSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationSumSuffix()
 		case policy.SumSq:
-			o.suffixSlice[aggType.ID()] = o.AggregationSumSqSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationSumSqSuffix()
 		case policy.Stdev:
-			o.suffixSlice[aggType.ID()] = o.AggregationStdevSuffix()
+			o.suffixes[aggType.ID()] = o.AggregationStdevSuffix()
 		default:
 			q, ok := aggType.Quantile()
 			if ok {
-				o.suffixSlice[aggType.ID()] = o.timerQuantileSuffixFn(q)
+				o.suffixes[aggType.ID()] = o.timerQuantileSuffixFn(q)
 			}
 		}
 	}
