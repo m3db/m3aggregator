@@ -40,25 +40,24 @@ const (
 )
 
 func TestNewForwardHandlerEmptyServerList(t *testing.T) {
-	_, err := NewForwardHandler(nil, testForwardHandlerOptions())
+	_, err := newForwardHandler(nil, testForwardHandlerOptions())
 	require.Equal(t, errEmptyServerList, err)
 }
 
 func TestForwardHandlerHandleClosed(t *testing.T) {
-	h, err := NewForwardHandler([]string{testFakeServerAddr}, testForwardHandlerOptions())
+	h, err := newForwardHandler([]string{testFakeServerAddr}, testForwardHandlerOptions())
 	require.NoError(t, err)
 
 	h.Close()
-	require.Equal(t, errHandlerClosed, h.Handle(nil))
+	require.Equal(t, errHandlerClosed, h.Handle(testRefCountedBuffer()))
 }
 
 func TestForwardHandlerHandleQueueFull(t *testing.T) {
 	opts := testForwardHandlerOptions().SetQueueSize(3)
-	h, err := NewForwardHandler([]string{testFakeServerAddr}, opts)
+	handler, err := newForwardHandler([]string{testFakeServerAddr}, opts)
 	require.NoError(t, err)
 
 	// Fill up the queue.
-	handler := h.(*forwardHandler)
 	for i := 0; i < 10; i++ {
 		select {
 		case handler.bufCh <- testRefCountedBuffer():
@@ -72,10 +71,9 @@ func TestForwardHandlerHandleQueueFull(t *testing.T) {
 
 func TestForwardHandlerForwardToConnNoConnectionClosed(t *testing.T) {
 	opts := testForwardHandlerOptions().SetQueueSize(3)
-	h, err := NewForwardHandler([]string{testFakeServerAddr}, opts)
+	handler, err := newForwardHandler([]string{testFakeServerAddr}, opts)
 	require.NoError(t, err)
 	// Queue up a nil buffer and close the handler.
-	handler := h.(*forwardHandler)
 	handler.bufCh <- nil
 	handler.Close()
 }
@@ -224,16 +222,16 @@ func TestForwardHandlerForwardToConnReenqueueQueueFull(t *testing.T) {
 }
 
 func TestForwardHandlerClose(t *testing.T) {
-	h, err := NewForwardHandler([]string{testFakeServerAddr}, testForwardHandlerOptions())
+	handler, err := newForwardHandler([]string{testFakeServerAddr}, testForwardHandlerOptions())
 	require.NoError(t, err)
 
 	// Close the handler sets the flag.
-	h.Close()
-	require.True(t, h.(*forwardHandler).closed)
+	handler.Close()
+	require.True(t, handler.closed)
 
 	// Close the handler a second time is a no op.
-	h.Close()
-	require.True(t, h.(*forwardHandler).closed)
+	handler.Close()
+	require.True(t, handler.closed)
 }
 
 func TestTryConnectTimeout(t *testing.T) {

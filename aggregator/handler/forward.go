@@ -175,6 +175,7 @@ func (h *forwardHandler) enqueue(buffer *aggregator.RefCountedBuffer, dropType d
 	h.RLock()
 	if h.closed {
 		h.RUnlock()
+		buffer.DecRef()
 		h.metrics.enqueueErrors.Inc(1)
 		return errHandlerClosed
 	}
