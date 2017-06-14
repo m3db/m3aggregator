@@ -91,21 +91,7 @@ aggregator:
   minFlushInterval: 5s
   maxFlushSize: 1440
   flush:
-    type: broadcast
-    broadcast:
-      - type: logging
-      - type: forward
-        forward:
-          name: target1
-          servers:
-            - host1
-            - host2
-      - type: forward
-        forward:
-          name: target2
-          servers:
-            - host3
-            - host4
+    type: logging
   entryTTL: 6h
   entryCheckInterval: 10m
   defaultPolicies:
