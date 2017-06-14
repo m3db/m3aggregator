@@ -57,27 +57,20 @@ func (c *FlushHandlerConfiguration) NewHandler(
 	case BlackholeHandler:
 		return NewBlackholeHandler(), nil
 	case LoggingHandler:
-		scope = scope.SubScope("logging").Tagged(map[string]string{
-			"handler-type": "logging",
-		})
+		scope = scope.SubScope("logging")
 		return NewLoggingHandler(iOpts.SetMetricsScope(scope)), nil
 	case ForwardHandler:
 		if c.Forward == nil {
 			return nil, errNoForwardHandlerConfiguration
 		}
-		scope = scope.SubScope("forward").Tagged(map[string]string{
-			"handler-type":   "forward",
-			"forward-target": c.Forward.Name,
-		})
+		scope = scope.SubScope("forward").SubScope(c.Forward.Name)
 		logger := iOpts.Logger().WithFields(xlog.NewLogField("forward-target", c.Forward.Name))
 		return c.Forward.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
-	case Broadcast:
+	case BroadcastHandler:
 		if c.Broadcast == nil {
 			return nil, errNoBroadcastHandlerConfiguration
 		}
-		scope = scope.SubScope("broadcast").Tagged(map[string]string{
-			"handler-type": "broadcast",
-		})
+		scope = scope.SubScope("broadcast")
 		return c.Broadcast.NewHandler(iOpts.SetMetricsScope(scope))
 	default:
 		return nil, errUnknownFlushHandlerType

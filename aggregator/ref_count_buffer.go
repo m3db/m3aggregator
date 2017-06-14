@@ -41,22 +41,22 @@ func NewRefCountedBuffer(buffer msgpack.Buffer) *RefCountedBuffer {
 func (b *RefCountedBuffer) Buffer() msgpack.Buffer { return b.buf }
 
 // IncRef increments the refcount for the buffer.
-func (b *RefCountedBuffer) IncRef() int {
+func (b *RefCountedBuffer) IncRef() {
 	if n := int(atomic.AddInt32(&b.n, 1)); n > 0 {
-		return n
+		return
 	}
 	panic("invalid ref count")
 }
 
 // DecRef decrements the refcount for the buffer.
-func (b *RefCountedBuffer) DecRef() int {
+func (b *RefCountedBuffer) DecRef() {
 	if n := int(atomic.AddInt32(&b.n, -1)); n == 0 {
 		if b.buf != nil {
 			b.buf.Close()
 		}
-		return n
+		return
 	} else if n > 0 {
-		return n
+		return
 	}
 	panic("invalid ref count")
 }
