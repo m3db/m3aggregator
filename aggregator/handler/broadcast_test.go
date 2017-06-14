@@ -21,61 +21,63 @@
 package handler
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/instrument"
-	"github.com/m3db/m3x/pool"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestBroadcastHandler(t *testing.T) {
-	pool := msgpack.NewBufferedEncoderPool(pool.NewObjectPoolOptions().SetSize(1))
-	pool.Init(func() msgpack.BufferedEncoder {
-		return msgpack.NewPooledBufferedEncoder(pool)
-	})
-
-	be1 := pool.Get()
-
+	var numCloses int
+	mb := &mockBuffer{closeFn: func() { numCloses++ }}
+	buf := aggregator.NewRefCountedBuffer(mb)
 	bh := NewBroadcastHandler([]aggregator.Handler{NewBlackholeHandler()})
-
-	require.NoError(t, bh.Handle(be1))
-
-	be2 := pool.Get()
-	require.Equal(t, be1, be2)
+	require.NoError(t, bh.Handle(buf))
+	require.Equal(t, 1, numCloses)
 }
 
 func TestBroadcastHandlerWithHandlerError(t *testing.T) {
-	pool := msgpack.NewBufferedEncoderPool(pool.NewObjectPoolOptions().SetSize(1))
-	pool.Init(func() msgpack.BufferedEncoder {
-		return msgpack.NewPooledBufferedEncoder(pool)
+	var numCloses int
+	mb := &mockBuffer{
+		buf:     bytes.NewBuffer(nil),
+		closeFn: func() { numCloses++ },
+	}
+	_, err := mb.buf.Write([]byte{'a', 'b', 'c', 'd'})
+	require.NoError(t, err)
+	buf := aggregator.NewRefCountedBuffer(mb)
+
+	bh := NewBroadcastHandler([]aggregator.Handler{
+		NewLoggingHandler(instrument.NewOptions()),
+		NewBlackholeHandler(),
 	})
-
-	be1 := pool.Get()
-	be1.EncodeBytes([]byte{'a', 'b', 'c', 'd'})
-
-	bh := NewBroadcastHandler([]aggregator.Handler{NewLoggingHandler(instrument.NewOptions()), NewBlackholeHandler()})
-
-	require.Error(t, bh.Handle(be1))
-
-	be2 := pool.Get()
-	require.Equal(t, be1, be2)
+	require.Error(t, bh.Handle(buf))
+	require.Equal(t, 1, numCloses)
 }
 
 func TestBroadcastHandlerWithNoHandlers(t *testing.T) {
-	pool := msgpack.NewBufferedEncoderPool(pool.NewObjectPoolOptions().SetSize(1))
-	pool.Init(func() msgpack.BufferedEncoder {
-		return msgpack.NewPooledBufferedEncoder(pool)
-	})
-
-	be1 := pool.Get()
+	var numCloses int
+	mb := &mockBuffer{
+		buf:     bytes.NewBuffer(nil),
+		closeFn: func() { numCloses++ },
+	}
+	buf := aggregator.NewRefCountedBuffer(mb)
 
 	bh := NewBroadcastHandler(nil)
-
-	require.NoError(t, bh.Handle(be1))
-
-	be2 := pool.Get()
-	require.Equal(t, be1, be2)
+	require.NoError(t, bh.Handle(buf))
+	require.Equal(t, 1, numCloses)
 }
+
+type closeFn func()
+
+type mockBuffer struct {
+	buf     *bytes.Buffer
+	closeFn closeFn
+}
+
+func (mb *mockBuffer) Buffer() *bytes.Buffer { return mb.buf }
+func (mb *mockBuffer) Reset()                {}
+func (mb *mockBuffer) Bytes() []byte         { return mb.buf.Bytes() }
+func (mb *mockBuffer) Close()                { mb.closeFn() }

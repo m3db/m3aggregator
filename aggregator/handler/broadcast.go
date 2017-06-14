@@ -21,77 +21,34 @@
 package handler
 
 import (
-	"bytes"
-	"sync/atomic"
-
 	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/protocol/msgpack"
+	"github.com/m3db/m3x/errors"
 )
 
 type broadcastHandler struct {
-	handlers    []aggregator.Handler
-	handlersLen int32
+	handlers []aggregator.Handler
 }
 
 // NewBroadcastHandler creates a new Handler that routes a
 // msgpack buffer to a list of handlers.
 func NewBroadcastHandler(handlers []aggregator.Handler) aggregator.Handler {
-	return &broadcastHandler{handlers: handlers, handlersLen: int32(len(handlers))}
+	return &broadcastHandler{handlers: handlers}
 }
 
-func (b *broadcastHandler) Handle(buffer msgpack.Buffer) error {
-	var (
-		buf = newReferencedBuffer(buffer)
-		err error
-	)
+func (b *broadcastHandler) Handle(buffer *aggregator.RefCountedBuffer) error {
+	multiErr := xerrors.NewMultiError()
 	for _, h := range b.handlers {
-		buf.incRef()
-		if err = h.Handle(buf); err != nil {
-			break
+		buffer.IncRef()
+		if err := h.Handle(buffer); err != nil {
+			multiErr = multiErr.Add(err)
 		}
 	}
-	buf.Close()
-	return err
+	buffer.DecRef()
+	return multiErr.FinalError()
 }
 
 func (b *broadcastHandler) Close() {
 	for _, h := range b.handlers {
 		h.Close()
 	}
-}
-
-type referencedBuffer struct {
-	// Could not embed msgpack.Buffer here due to naming conflict with method Buffer().
-	buffer msgpack.Buffer
-	ref    uint32
-}
-
-func newReferencedBuffer(buffer msgpack.Buffer) *referencedBuffer {
-	return &referencedBuffer{buffer: buffer, ref: 1}
-}
-
-func (b *referencedBuffer) Buffer() *bytes.Buffer {
-	return b.buffer.Buffer()
-}
-
-func (b *referencedBuffer) Bytes() []byte {
-	return b.buffer.Bytes()
-}
-
-func (b *referencedBuffer) Reset() {
-	b.buffer.Reset()
-}
-
-func (b *referencedBuffer) Close() {
-	// Decrement b.ref
-	ref := atomic.AddUint32(&b.ref, ^uint32(0))
-	if ref > 0 {
-		return
-	}
-
-	b.buffer.Close()
-}
-
-func (b *referencedBuffer) incRef() {
-	atomic.AddUint32(&b.ref, 1)
 }

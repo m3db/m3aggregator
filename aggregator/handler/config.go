@@ -31,9 +31,9 @@ import (
 )
 
 var (
-	errUnknownFlushHandlerType            = errors.New("unknown flush handler type")
-	errNoForwardHandlerConfiguration      = errors.New("no forward flush configuration")
-	errEmptyBroadcastHandlerConfiguration = errors.New("emtpy broadcast flush configuration")
+	errUnknownFlushHandlerType         = errors.New("unknown flush handler type")
+	errNoForwardHandlerConfiguration   = errors.New("no forward handler configuration")
+	errNoBroadcastHandlerConfiguration = errors.New("no broadcast handler configuration")
 )
 
 // FlushHandlerConfiguration contains configuration for flushing metrics.
@@ -45,7 +45,7 @@ type FlushHandlerConfiguration struct {
 	Forward *forwardHandlerConfiguration `yaml:"forward"`
 
 	// Forward handler configuration.
-	Broadcast []broadcastHandlerConfiguration `yaml:"broadcast"`
+	Broadcast *broadcastHandlerConfiguration `yaml:"broadcast"`
 }
 
 // NewHandler creates a new flush handler
@@ -57,66 +57,50 @@ func (c *FlushHandlerConfiguration) NewHandler(
 	case BlackholeHandler:
 		return NewBlackholeHandler(), nil
 	case LoggingHandler:
-		scope = scope.SubScope("logging").Tagged(map[string]string{"handler": "logging"})
+		scope = scope.SubScope("logging").Tagged(map[string]string{
+			"handler-type": "logging",
+		})
 		return NewLoggingHandler(iOpts.SetMetricsScope(scope)), nil
 	case ForwardHandler:
 		if c.Forward == nil {
 			return nil, errNoForwardHandlerConfiguration
 		}
-		scope = scope.SubScope("forward").Tagged(map[string]string{"handler": "forward", "target": c.Forward.Name})
+		scope = scope.SubScope("forward").Tagged(map[string]string{
+			"handler-type":   "forward",
+			"forward-target": c.Forward.Name,
+		})
 		logger := iOpts.Logger().WithFields(xlog.NewLogField("forward-target", c.Forward.Name))
 		return c.Forward.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
 	case Broadcast:
-		scope = scope.Tagged(map[string]string{"handler": "broadcast"})
-		return newBroadcastHandler(c.Broadcast, iOpts.SetMetricsScope(scope))
+		if c.Broadcast == nil {
+			return nil, errNoBroadcastHandlerConfiguration
+		}
+		scope = scope.SubScope("broadcast").Tagged(map[string]string{
+			"handler-type": "broadcast",
+		})
+		return c.Broadcast.NewHandler(iOpts.SetMetricsScope(scope))
 	default:
 		return nil, errUnknownFlushHandlerType
 	}
-}
-
-func newBroadcastHandler(cfgs []broadcastHandlerConfiguration, iopts instrument.Options) (aggregator.Handler, error) {
-	if len(cfgs) == 0 {
-		return nil, errEmptyBroadcastHandlerConfiguration
-	}
-
-	handlers := make([]aggregator.Handler, len(cfgs))
-	for i, cfg := range cfgs {
-		h, err := cfg.NewHandler(iopts)
-		if err != nil {
-			return nil, err
-		}
-		handlers[i] = h
-	}
-	return NewBroadcastHandler(handlers), nil
 }
 
 type broadcastHandlerConfiguration struct {
-	// Flushing handler type.
-	Type string `yaml:"type" validate:"regexp=(^blackhole$|^logging$|^forward$)"`
-
-	// Forward handler configuration.
-	Forward *forwardHandlerConfiguration `yaml:"forward"`
+	// Broadcast target handlers.
+	Handlers []FlushHandlerConfiguration `yaml:"handlers" validate:"nonzero"`
 }
 
-func (c broadcastHandlerConfiguration) NewHandler(iOpts instrument.Options) (aggregator.Handler, error) {
-	scope := iOpts.MetricsScope()
-	switch Type(c.Type) {
-	case BlackholeHandler:
-		return NewBlackholeHandler(), nil
-	case LoggingHandler:
-		scope = scope.SubScope("logging")
-		iOpts = iOpts.SetMetricsScope(scope)
-		return NewLoggingHandler(iOpts), nil
-	case ForwardHandler:
-		if c.Forward == nil {
-			return nil, errNoForwardHandlerConfiguration
+func (c *broadcastHandlerConfiguration) NewHandler(
+	iOpts instrument.Options,
+) (aggregator.Handler, error) {
+	handlers := make([]aggregator.Handler, 0, len(c.Handlers))
+	for _, cfg := range c.Handlers {
+		handler, err := cfg.NewHandler(iOpts)
+		if err != nil {
+			return nil, err
 		}
-		scope = scope.SubScope("forward").Tagged(map[string]string{"target": c.Forward.Name})
-		logger := iOpts.Logger().WithFields(xlog.NewLogField("broadcast-target", c.Forward.Name))
-		return c.Forward.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
-	default:
-		return nil, errUnknownFlushHandlerType
+		handlers = append(handlers, handler)
 	}
+	return NewBroadcastHandler(handlers), nil
 }
 
 // forwardHandlerConfiguration contains configuration for forward

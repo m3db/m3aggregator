@@ -18,49 +18,45 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package aggregator
 
 import (
-	"io"
+	"sync/atomic"
 
-	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/metric/aggregated"
-	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 )
 
-// HandleFunc handles an aggregated metric alongside the policy.
-type HandleFunc func(metric aggregated.Metric, policy policy.Policy) error
-
-type decodingHandler struct {
-	handle HandleFunc
+// RefCountedBuffer is a refcounted buffer.
+type RefCountedBuffer struct {
+	n   int32
+	buf msgpack.Buffer
 }
 
-// NewDecodingHandler creates a new decoding handler with a custom handle function.
-func NewDecodingHandler(handle HandleFunc) aggregator.Handler {
-	return decodingHandler{handle: handle}
+// NewRefCountedBuffer creates a new refcounted buffer.
+func NewRefCountedBuffer(buffer msgpack.Buffer) *RefCountedBuffer {
+	return &RefCountedBuffer{n: 1, buf: buffer}
 }
 
-func (h decodingHandler) Handle(buffer *aggregator.RefCountedBuffer) error {
-	defer buffer.DecRef()
+// Buffer returns the internal msgpack buffer.
+func (b *RefCountedBuffer) Buffer() msgpack.Buffer { return b.buf }
 
-	iter := msgpack.NewAggregatedIterator(buffer.Buffer().Buffer(), msgpack.NewAggregatedIteratorOptions())
-	defer iter.Close()
-
-	for iter.Next() {
-		rawMetric, policy := iter.Value()
-		metric, err := rawMetric.Metric()
-		if err != nil {
-			return err
-		}
-		if err := h.handle(metric, policy); err != nil {
-			return err
-		}
+// IncRef increments the refcount for the buffer.
+func (b *RefCountedBuffer) IncRef() int {
+	if n := int(atomic.AddInt32(&b.n, 1)); n > 0 {
+		return n
 	}
-	if err := iter.Err(); err != nil && err != io.EOF {
-		return err
-	}
-	return nil
+	panic("invalid ref count")
 }
 
-func (h decodingHandler) Close() {}
+// DecRef decrements the refcount for the buffer.
+func (b *RefCountedBuffer) DecRef() int {
+	if n := int(atomic.AddInt32(&b.n, -1)); n == 0 {
+		if b.buf != nil {
+			b.buf.Close()
+		}
+		return n
+	} else if n > 0 {
+		return n
+	}
+	panic("invalid ref count")
+}
