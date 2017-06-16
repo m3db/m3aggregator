@@ -61,7 +61,18 @@ http:
   writeTimeout: 45s
 
 aggregator:
-  timerAggregationTypes: Sum,SumSq,Mean,Lower,Upper,Count,Stdev,Median,P50,P95,P99
+  timerAggregationTypes: 
+  - Sum
+  - SumSq
+  - Mean
+  - Lower
+  - Upper
+  - Count
+  - Stdev
+  - Median
+  - P50
+  - P95
+  - P99
   stream:
     eps: 0.001
     capacity: 32
