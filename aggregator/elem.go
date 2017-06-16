@@ -493,7 +493,7 @@ func (e *TimerElem) findOrCreate(alignedStart int64) (*aggregation.LockedTimer, 
 	numValues := len(e.values)
 	e.values = append(e.values, emptyTimedTimer)
 	copy(e.values[idx+1:numValues+1], e.values[idx:numValues])
-	newTimer := aggregation.NewTimer(e.opts.TimerQuantiles(), e.opts.StreamOptions(), e.aggOpts)
+	newTimer := aggregation.NewTimer(e.quantiles, e.opts.StreamOptions(), e.aggOpts)
 	e.values[idx] = timedTimer{
 		timeNanos: alignedStart,
 		timer:     aggregation.NewLockedTimer(newTimer),
