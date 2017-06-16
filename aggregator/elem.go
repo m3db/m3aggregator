@@ -362,6 +362,8 @@ func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes 
 	e.elemBase.ResetSetData(id, sp, aggTypes)
 
 	if aggTypes.IsDefault() {
+		// TODO(cw) Remove UseDefaultAggregation in aggregation opts and
+		// store it in elemBase.
 		e.aggOpts.ResetSetData(e.opts.DefaultTimerAggregationTypes())
 		e.isAggTypesPooled = false
 		e.quantiles, e.isQuantilesPooled = e.opts.TimerQuantiles(), false

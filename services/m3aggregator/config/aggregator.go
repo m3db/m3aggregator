@@ -96,6 +96,7 @@ type AggregatorConfiguration struct {
 	AggregationMedianSuffix string `yaml:"aggregationMedianSuffix"`
 
 	// Target quantiles to compute.
+	// TODO(cw) Consider change to []policy.AggregationType.
 	TimerAggregationTypes policy.AggregationTypes `yaml:"timerAggregationTypes" validate:"nonzero"`
 
 	// Timer quantile suffix function type.
