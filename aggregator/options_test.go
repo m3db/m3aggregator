@@ -171,16 +171,16 @@ func TestOptionsSetTimerMeanSuffix(t *testing.T) {
 	require.Equal(t, newMeanSuffix, o.AggregationMeanSuffix())
 }
 
-func TestOptionsSetTimerLowerSuffix(t *testing.T) {
-	newLowerSuffix := []byte("testTimerLowerSuffix")
-	o := NewOptions().SetAggregationMinSuffix(newLowerSuffix)
-	require.Equal(t, newLowerSuffix, o.AggregationMinSuffix())
+func TestOptionsSetTimerMinSuffix(t *testing.T) {
+	newMinSuffix := []byte("testTimerMinSuffix")
+	o := NewOptions().SetAggregationMinSuffix(newMinSuffix)
+	require.Equal(t, newMinSuffix, o.AggregationMinSuffix())
 }
 
-func TestOptionsSetTimerUpperSuffix(t *testing.T) {
-	newUpperSuffix := []byte("testTimerUpperSuffix")
-	o := NewOptions().SetAggregationMaxSuffix(newUpperSuffix)
-	require.Equal(t, newUpperSuffix, o.AggregationMaxSuffix())
+func TestOptionsSetTimerMaxSuffix(t *testing.T) {
+	newMaxSuffix := []byte("testTimerMaxSuffix")
+	o := NewOptions().SetAggregationMaxSuffix(newMaxSuffix)
+	require.Equal(t, newMaxSuffix, o.AggregationMaxSuffix())
 }
 
 func TestOptionsSetTimerCountSuffix(t *testing.T) {

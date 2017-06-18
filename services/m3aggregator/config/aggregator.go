@@ -91,10 +91,10 @@ type AggregatorConfiguration struct {
 	AggregationMeanSuffix string `yaml:"aggregationMeanSuffix"`
 
 	// Metric suffix for aggregation type min.
-	AggregationMinSuffix string `yaml:"aggregationLowerSuffix"`
+	AggregationMinSuffix string `yaml:"aggregationMinSuffix"`
 
 	// Metric suffix for aggregation type max.
-	AggregationMaxSuffix string `yaml:"aggregationUpperSuffix"`
+	AggregationMaxSuffix string `yaml:"aggregationMaxSuffix"`
 
 	// Metric suffix for aggregation type count.
 	AggregationCountSuffix string `yaml:"aggregationCountSuffix"`
