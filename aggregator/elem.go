@@ -144,11 +144,11 @@ func newElemBase(opts Options) elemBase {
 }
 
 // resetSetData resets the element base and sets data.
-func (e *elemBase) resetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes, isDefault bool) {
+func (e *elemBase) resetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes, useDefaultAggregation bool) {
 	e.id = id
 	e.sp = sp
 	e.aggTypes = aggTypes
-	e.useDefaultAggregation = isDefault
+	e.useDefaultAggregation = useDefaultAggregation
 	e.aggOpts.ResetSetData(aggTypes)
 	e.tombstoned = false
 	e.closed = false
@@ -186,12 +186,12 @@ func NewCounterElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.Aggreg
 
 // ResetSetData resets the counter element and sets data.
 func (e *CounterElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes) {
-	isDefault := aggTypes.IsDefault()
-	if isDefault {
+	useDefaultAggregation := aggTypes.IsDefault()
+	if useDefaultAggregation {
 		aggTypes = e.opts.DefaultCounterAggregationTypes()
 	}
 
-	e.elemBase.resetSetData(id, sp, aggTypes, isDefault)
+	e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation)
 }
 
 // AddMetric adds a new counter value
@@ -366,15 +366,15 @@ func NewTimerElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.Aggregat
 
 // ResetSetData resets the timer element and sets data.
 func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes) {
-	isDefault := aggTypes.IsDefault()
-	if isDefault {
+	useDefaultAggregation := aggTypes.IsDefault()
+	if useDefaultAggregation {
 		aggTypes = e.opts.DefaultTimerAggregationTypes()
 		e.quantiles, e.isQuantilesPooled = e.opts.TimerQuantiles(), false
 	} else {
 		e.quantiles, e.isQuantilesPooled = aggTypes.PooledQuantiles(e.opts.QuantilesPool())
 	}
 
-	e.elemBase.resetSetData(id, sp, aggTypes, isDefault)
+	e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation)
 }
 
 // AddMetric adds a new batch of timer values.
@@ -565,12 +565,12 @@ func NewGaugeElem(id id.RawID, sp policy.StoragePolicy, aggTypes policy.Aggregat
 
 // ResetSetData resets the gauge element and sets data.
 func (e *GaugeElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes policy.AggregationTypes) {
-	isDefault := aggTypes.IsDefault()
-	if isDefault {
+	useDefaultAggregation := aggTypes.IsDefault()
+	if useDefaultAggregation {
 		aggTypes = e.opts.DefaultGaugeAggregationTypes()
 	}
 
-	e.elemBase.resetSetData(id, sp, aggTypes, isDefault)
+	e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation)
 }
 
 // AddMetric adds a new gauge value
