@@ -186,9 +186,9 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	scope := instrumentOpts.MetricsScope()
 	opts := aggregator.NewOptions().SetInstrumentOptions(instrumentOpts)
 
-	opts = opts.SetDefaultCounterAggregationTypes(c.CounterAggregationTypes)
-	opts = opts.SetDefaultTimerAggregationTypes(c.TimerAggregationTypes)
-	opts = opts.SetDefaultGaugeAggregationTypes(c.GaugeAggregationTypes)
+	opts = opts.SetDefaultCounterAggregationTypes(c.CounterAggregationTypes).
+		SetDefaultTimerAggregationTypes(c.TimerAggregationTypes).
+		SetDefaultGaugeAggregationTypes(c.GaugeAggregationTypes)
 
 	// Set the prefix and suffix for metrics aggregations.
 	opts = setMetricPrefixOrSuffix(opts, c.MetricPrefix, opts.SetMetricPrefix)
@@ -212,9 +212,9 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	}
 	opts = opts.SetTimerQuantileSuffixFn(quantileSuffixFn)
 
-	opts = opts.SetCounterSuffixOverride(c.parseSuffixOverride(c.CounterSuffixOverride))
-	opts = opts.SetTimerSuffixOverride(c.parseSuffixOverride(c.TimerSuffixOverride))
-	opts = opts.SetGaugeSuffixOverride(c.parseSuffixOverride(c.GaugeSuffixOverride))
+	opts = opts.SetCounterSuffixOverride(c.parseSuffixOverride(c.CounterSuffixOverride)).
+		SetTimerSuffixOverride(c.parseSuffixOverride(c.TimerSuffixOverride)).
+		SetGaugeSuffixOverride(c.parseSuffixOverride(c.GaugeSuffixOverride))
 
 	// Set stream options.
 	iOpts := instrumentOpts.SetMetricsScope(scope.SubScope("stream"))

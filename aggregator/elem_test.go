@@ -103,7 +103,7 @@ func TestElemBaseResetSetData(t *testing.T) {
 	require.Equal(t, testStoragePolicy, e.sp)
 	require.False(t, e.tombstoned)
 	require.False(t, e.closed)
-	require.False(t, e.isDefault)
+	require.False(t, e.useDefaultAggregation)
 	require.True(t, e.aggOpts.HasExpensiveAggregations)
 }
 
@@ -111,7 +111,7 @@ func TestCounterResetSetData(t *testing.T) {
 	opts := NewOptions()
 	ce := NewCounterElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, opts)
 	require.Equal(t, opts.DefaultCounterAggregationTypes(), ce.aggTypes)
-	require.True(t, ce.isDefault)
+	require.True(t, ce.useDefaultAggregation)
 	require.False(t, ce.aggOpts.HasExpensiveAggregations)
 
 	sp := policy.NewStoragePolicy(time.Second, xtime.Second, time.Hour)
@@ -122,7 +122,7 @@ func TestCounterResetSetData(t *testing.T) {
 	require.Equal(t, testAggregationTypesExpensive, ce.aggTypes)
 	require.False(t, ce.tombstoned)
 	require.False(t, ce.closed)
-	require.False(t, ce.isDefault)
+	require.False(t, ce.useDefaultAggregation)
 	require.True(t, ce.aggOpts.HasExpensiveAggregations)
 }
 
@@ -132,7 +132,7 @@ func TestTimerResetSetData(t *testing.T) {
 	require.False(t, te.isQuantilesPooled)
 	require.True(t, te.aggOpts.HasExpensiveAggregations)
 	require.Equal(t, opts.DefaultTimerAggregationTypes(), te.aggTypes)
-	require.True(t, te.isDefault)
+	require.True(t, te.useDefaultAggregation)
 
 	sp := policy.NewStoragePolicy(time.Second, xtime.Second, time.Hour)
 	te.ResetSetData(testBatchTimerID, sp, policy.AggregationTypes{policy.Max, policy.P999})
@@ -142,7 +142,7 @@ func TestTimerResetSetData(t *testing.T) {
 	require.Equal(t, policy.AggregationTypes{policy.Max, policy.P999}, te.aggTypes)
 	require.False(t, te.tombstoned)
 	require.False(t, te.closed)
-	require.False(t, te.isDefault)
+	require.False(t, te.useDefaultAggregation)
 	require.False(t, te.aggOpts.HasExpensiveAggregations)
 	require.Equal(t, []float64{0.999}, te.quantiles)
 	require.True(t, te.isQuantilesPooled)
@@ -152,7 +152,7 @@ func TestGaugeResetSetData(t *testing.T) {
 	opts := NewOptions()
 	ge := NewGaugeElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, opts)
 	require.Equal(t, opts.DefaultGaugeAggregationTypes(), ge.aggTypes)
-	require.True(t, ge.isDefault)
+	require.True(t, ge.useDefaultAggregation)
 	require.False(t, ge.aggOpts.HasExpensiveAggregations)
 
 	sp := policy.NewStoragePolicy(time.Second, xtime.Second, time.Hour)
@@ -163,7 +163,7 @@ func TestGaugeResetSetData(t *testing.T) {
 	require.Equal(t, testAggregationTypesExpensive, ge.aggTypes)
 	require.False(t, ge.tombstoned)
 	require.False(t, ge.closed)
-	require.False(t, ge.isDefault)
+	require.False(t, ge.useDefaultAggregation)
 	require.True(t, ge.aggOpts.HasExpensiveAggregations)
 }
 

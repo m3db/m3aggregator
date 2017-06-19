@@ -209,7 +209,7 @@ func NewOptions() Options {
 func (o *options) SetDefaultCounterAggregationTypes(aggTypes policy.AggregationTypes) Options {
 	opts := *o
 	opts.defaultCounterAggregationTypes = aggTypes
-	opts.computeDefaultCounterAggregationSuffix()
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -220,8 +220,8 @@ func (o *options) DefaultCounterAggregationTypes() policy.AggregationTypes {
 func (o *options) SetDefaultTimerAggregationTypes(aggTypes policy.AggregationTypes) Options {
 	opts := *o
 	opts.defaultTimerAggregationTypes = aggTypes
-	opts.computeDefaultTimerAggregationSuffix()
 	opts.computeQuantiles()
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -232,7 +232,7 @@ func (o *options) DefaultTimerAggregationTypes() policy.AggregationTypes {
 func (o *options) SetDefaultGaugeAggregationTypes(aggTypes policy.AggregationTypes) Options {
 	opts := *o
 	opts.defaultGaugeAggregationTypes = aggTypes
-	opts.computeDefaultGaugeAggregationSuffix()
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -287,6 +287,7 @@ func (o *options) GaugePrefix() []byte {
 func (o *options) SetAggregationLastSuffix(value []byte) Options {
 	opts := *o
 	opts.lastSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -297,6 +298,7 @@ func (o *options) AggregationLastSuffix() []byte {
 func (o *options) SetAggregationMinSuffix(value []byte) Options {
 	opts := *o
 	opts.minSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -307,6 +309,7 @@ func (o *options) AggregationMinSuffix() []byte {
 func (o *options) SetAggregationMaxSuffix(value []byte) Options {
 	opts := *o
 	opts.maxSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -314,15 +317,10 @@ func (o *options) AggregationMaxSuffix() []byte {
 	return o.maxSuffix
 }
 
-func (o *options) SetAggregationSumSuffix(value []byte) Options {
-	opts := *o
-	opts.sumSuffix = value
-	return &opts
-}
-
 func (o *options) SetAggregationMeanSuffix(value []byte) Options {
 	opts := *o
 	opts.meanSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -333,6 +331,7 @@ func (o *options) AggregationMeanSuffix() []byte {
 func (o *options) SetAggregationMedianSuffix(value []byte) Options {
 	opts := *o
 	opts.medianSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -343,11 +342,19 @@ func (o *options) AggregationMedianSuffix() []byte {
 func (o *options) SetAggregationCountSuffix(value []byte) Options {
 	opts := *o
 	opts.countSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
 func (o *options) AggregationCountSuffix() []byte {
 	return o.countSuffix
+}
+
+func (o *options) SetAggregationSumSuffix(value []byte) Options {
+	opts := *o
+	opts.sumSuffix = value
+	opts.computeSuffixes()
+	return &opts
 }
 
 func (o *options) AggregationSumSuffix() []byte {
@@ -357,6 +364,7 @@ func (o *options) AggregationSumSuffix() []byte {
 func (o *options) SetAggregationSumSqSuffix(value []byte) Options {
 	opts := *o
 	opts.sumSqSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -367,6 +375,7 @@ func (o *options) AggregationSumSqSuffix() []byte {
 func (o *options) SetAggregationStdevSuffix(value []byte) Options {
 	opts := *o
 	opts.stdevSuffix = value
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -377,9 +386,7 @@ func (o *options) AggregationStdevSuffix() []byte {
 func (o *options) SetTimerQuantileSuffixFn(value QuantileSuffixFn) Options {
 	opts := *o
 	opts.timerQuantileSuffixFn = value
-	opts.computeDefaultSuffixes()
-	opts.computeTimerSuffix()
-	opts.computeDefaultTimerAggregationSuffix()
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -616,21 +623,21 @@ func (o *options) SetQuantilesPool(pool pool.FloatsPool) Options {
 func (o *options) SetCounterSuffixOverride(m map[policy.AggregationType][]byte) Options {
 	opts := *o
 	opts.counterSuffixOverride = m
-	opts.computeCounterSuffix()
+	opts.computeSuffixes()
 	return &opts
 }
 
 func (o *options) SetTimerSuffixOverride(m map[policy.AggregationType][]byte) Options {
 	opts := *o
 	opts.timerSuffixOverride = m
-	opts.computeTimerSuffix()
+	opts.computeSuffixes()
 	return &opts
 }
 
 func (o *options) SetGaugeSuffixOverride(m map[policy.AggregationType][]byte) Options {
 	opts := *o
 	opts.gaugeSuffixOverride = m
-	opts.computeGaugeSuffix()
+	opts.computeSuffixes()
 	return &opts
 }
 
@@ -716,13 +723,7 @@ func (o *options) initPools() {
 func (o *options) computeAllDerived() {
 	o.computeFullPrefixes()
 	o.computeQuantiles()
-	o.computeDefaultSuffixes()
-	o.computeCounterSuffix()
-	o.computeTimerSuffix()
-	o.computeGaugeSuffix()
-	o.computeDefaultCounterAggregationSuffix()
-	o.computeDefaultTimerAggregationSuffix()
-	o.computeDefaultGaugeAggregationSuffix()
+	o.computeSuffixes()
 }
 
 func (o *options) computeFullPrefixes() {
@@ -733,6 +734,17 @@ func (o *options) computeFullPrefixes() {
 
 func (o *options) computeQuantiles() {
 	o.timerQuantiles, _ = o.DefaultTimerAggregationTypes().PooledQuantiles(o.QuantilesPool())
+}
+
+func (o *options) computeSuffixes() {
+	// NB(cw) The order matters.
+	o.computeDefaultSuffixes()
+	o.computeCounterSuffixes()
+	o.computeTimerSuffixes()
+	o.computeGaugeSuffixes()
+	o.computeDefaultCounterAggregationSuffix()
+	o.computeDefaultTimerAggregationSuffix()
+	o.computeDefaultGaugeAggregationSuffix()
 }
 
 func (o *options) computeDefaultSuffixes() {
@@ -767,37 +779,28 @@ func (o *options) computeDefaultSuffixes() {
 	}
 }
 
-func (o *options) computeCounterSuffix() {
-	o.counterSuffixes = make([][]byte, policy.MaxAggregationTypeID+1)
-	for aggType := range policy.ValidAggregationTypes {
-		if suffix, ok := o.counterSuffixOverride[aggType]; ok {
-			o.counterSuffixes[aggType.ID()] = suffix
-			continue
-		}
-		o.counterSuffixes[aggType.ID()] = o.defaultSuffixes[aggType.ID()]
-	}
+func (o *options) computeCounterSuffixes() {
+	o.counterSuffixes = o.computeOverrideSuffixes(o.counterSuffixOverride)
 }
 
-func (o *options) computeTimerSuffix() {
-	o.timerSuffixes = make([][]byte, policy.MaxAggregationTypeID+1)
-	for aggType := range policy.ValidAggregationTypes {
-		if suffix, ok := o.timerSuffixOverride[aggType]; ok {
-			o.timerSuffixes[aggType.ID()] = suffix
-			continue
-		}
-		o.timerSuffixes[aggType.ID()] = o.defaultSuffixes[aggType.ID()]
-	}
+func (o *options) computeTimerSuffixes() {
+	o.timerSuffixes = o.computeOverrideSuffixes(o.timerSuffixOverride)
 }
 
-func (o *options) computeGaugeSuffix() {
-	o.gaugeSuffixes = make([][]byte, policy.MaxAggregationTypeID+1)
+func (o *options) computeGaugeSuffixes() {
+	o.gaugeSuffixes = o.computeOverrideSuffixes(o.gaugeSuffixOverride)
+}
+
+func (o options) computeOverrideSuffixes(m map[policy.AggregationType][]byte) [][]byte {
+	res := make([][]byte, policy.MaxAggregationTypeID+1)
 	for aggType := range policy.ValidAggregationTypes {
-		if suffix, ok := o.gaugeSuffixOverride[aggType]; ok {
-			o.gaugeSuffixes[aggType.ID()] = suffix
+		if suffix, ok := m[aggType]; ok {
+			res[aggType.ID()] = suffix
 			continue
 		}
-		o.gaugeSuffixes[aggType.ID()] = o.defaultSuffixes[aggType.ID()]
+		res[aggType.ID()] = o.defaultSuffixes[aggType.ID()]
 	}
+	return res
 }
 
 func (o *options) computeDefaultCounterAggregationSuffix() {

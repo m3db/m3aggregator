@@ -130,19 +130,19 @@ type Options interface {
 	/// Read-write base options
 
 	// SetDefaultCounterAggregationTypes sets the counter aggregation types.
-	SetDefaultCounterAggregationTypes(aggTypes policy.AggregationTypes) Options
+	SetDefaultCounterAggregationTypes(value policy.AggregationTypes) Options
 
 	// DefaultCounterAggregationTypes returns the aggregation types for counters.
 	DefaultCounterAggregationTypes() policy.AggregationTypes
 
 	// SetDefaultTimerAggregationTypes sets the timer aggregation types.
-	SetDefaultTimerAggregationTypes(aggTypes policy.AggregationTypes) Options
+	SetDefaultTimerAggregationTypes(value policy.AggregationTypes) Options
 
 	// DefaultTimerAggregationTypes returns the aggregation types for timers.
 	DefaultTimerAggregationTypes() policy.AggregationTypes
 
 	// SetDefaultGaugeAggregationTypes sets the gauge aggregation types.
-	SetDefaultGaugeAggregationTypes(aggTypes policy.AggregationTypes) Options
+	SetDefaultGaugeAggregationTypes(value policy.AggregationTypes) Options
 
 	// DefaultGaugeAggregationTypes returns the aggregation types for gauges.
 	DefaultGaugeAggregationTypes() policy.AggregationTypes
@@ -407,11 +407,11 @@ type Options interface {
 	DefaultGaugeAggregationSuffixes() [][]byte
 
 	// Suffix returns the suffix for the aggregation type for counters.
-	SuffixForCounter(aggType policy.AggregationType) []byte
+	SuffixForCounter(value policy.AggregationType) []byte
 
 	// Suffix returns the suffix for the aggregation type for timers.
-	SuffixForTimer(aggType policy.AggregationType) []byte
+	SuffixForTimer(value policy.AggregationType) []byte
 
 	// Suffix returns the suffix for the aggregation type for gauges.
-	SuffixForGauge(aggType policy.AggregationType) []byte
+	SuffixForGauge(value policy.AggregationType) []byte
 }

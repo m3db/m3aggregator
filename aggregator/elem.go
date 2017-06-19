@@ -99,14 +99,14 @@ type timedGauge struct {
 type elemBase struct {
 	sync.RWMutex
 
-	opts       Options
-	id         id.RawID
-	sp         policy.StoragePolicy
-	aggTypes   policy.AggregationTypes
-	aggOpts    aggregation.Options
-	isDefault  bool
-	tombstoned bool
-	closed     bool
+	opts                  Options
+	id                    id.RawID
+	sp                    policy.StoragePolicy
+	aggTypes              policy.AggregationTypes
+	aggOpts               aggregation.Options
+	useDefaultAggregation bool
+	tombstoned            bool
+	closed                bool
 }
 
 // CounterElem is the counter element
@@ -148,7 +148,7 @@ func (e *elemBase) resetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes p
 	e.id = id
 	e.sp = sp
 	e.aggTypes = aggTypes
-	e.isDefault = isDefault
+	e.useDefaultAggregation = isDefault
 	e.aggOpts.ResetSetData(aggTypes)
 	e.tombstoned = false
 	e.closed = false
@@ -261,7 +261,7 @@ func (e *CounterElem) Close() {
 	pool := e.opts.CounterElemPool()
 	e.Unlock()
 
-	if !e.isDefault {
+	if !e.useDefaultAggregation {
 		aggTypesPool.Put(e.aggTypes)
 	}
 	pool.Put(e)
@@ -339,7 +339,7 @@ func (e *CounterElem) indexOfWithLock(alignedStart int64) (int, bool) {
 
 func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn aggMetricFn) {
 	var fullCounterPrefix = e.opts.FullCounterPrefix()
-	if e.isDefault {
+	if e.useDefaultAggregation {
 		// NB(cw) Use default suffix slice for faster look up.
 		suffixes := e.opts.DefaultCounterAggregationSuffixes()
 		aggTypes := e.opts.DefaultCounterAggregationTypes()
@@ -459,7 +459,7 @@ func (e *TimerElem) Close() {
 	if e.isQuantilesPooled {
 		quantileFloatsPool.Put(e.quantiles)
 	}
-	if !e.isDefault {
+	if !e.useDefaultAggregation {
 		aggTypesPool.Put(e.aggTypes)
 	}
 	pool.Put(e)
@@ -538,7 +538,7 @@ func (e *TimerElem) indexOfWithLock(alignedStart int64) (int, bool) {
 
 func (e *TimerElem) processValue(timeNanos int64, agg aggregation.Timer, fn aggMetricFn) {
 	fullTimerPrefix := e.opts.FullTimerPrefix()
-	if e.isDefault {
+	if e.useDefaultAggregation {
 		// NB(cw) Use default suffix slice for faster look up.
 		suffixes := e.opts.DefaultTimerAggregationSuffixes()
 		aggTypes := e.opts.DefaultTimerAggregationTypes()
@@ -639,7 +639,7 @@ func (e *GaugeElem) Close() {
 	pool := e.opts.GaugeElemPool()
 	e.Unlock()
 
-	if !e.isDefault {
+	if !e.useDefaultAggregation {
 		aggTypesPool.Put(e.aggTypes)
 	}
 	pool.Put(e)
@@ -717,7 +717,7 @@ func (e *GaugeElem) indexOfWithLock(alignedStart int64) (int, bool) {
 
 func (e *GaugeElem) processValue(timeNanos int64, agg aggregation.Gauge, fn aggMetricFn) {
 	var fullGaugePrefix = e.opts.FullGaugePrefix()
-	if e.isDefault {
+	if e.useDefaultAggregation {
 		// NB(cw) Use default suffix slice for faster look up.
 		suffixes := e.opts.DefaultGaugeAggregationSuffixes()
 		aggTypes := e.opts.DefaultGaugeAggregationTypes()
