@@ -62,21 +62,21 @@ http:
 
 aggregator:
   counterAggregationTypes: 
-  - Sum
+    - Sum
   timerAggregationTypes: 
-  - Sum
-  - SumSq
-  - Mean
-  - Min
-  - Max
-  - Count
-  - Stdev
-  - Median
-  - P50
-  - P95
-  - P99
+    - Sum
+    - SumSq
+    - Mean
+    - Min
+    - Max
+    - Count
+    - Stdev
+    - Median
+    - P50
+    - P95
+    - P99
   gaugeAggregationTypes: 
-  - Last
+    - Last
   counterSuffixOverride:
     Sum: ""
   timerSuffixOverride:
