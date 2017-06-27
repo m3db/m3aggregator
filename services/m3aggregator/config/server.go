@@ -29,6 +29,7 @@ import (
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
 	"github.com/m3db/m3x/retry"
+	"github.com/m3db/m3x/server"
 )
 
 // MsgpackServerConfiguration contains msgpack server configuration.
@@ -60,10 +61,10 @@ func (c *MsgpackServerConfiguration) NewMsgpackServerOptions(
 		SetInstrumentOptions(instrumentOpts).
 		SetRetryOptions(c.Retry.NewOptions(instrumentOpts.MetricsScope()))
 	if c.KeepAliveEnabled != nil {
-		serverOpts = serverOpts.SetKeepAliveEnabled(*c.KeepAliveEnabled)
+		serverOpts = serverOpts.SetTCPConnectionKeepAlive(*c.KeepAliveEnabled)
 	}
 	if c.KeepAlivePeriod != 0 {
-		serverOpts = serverOpts.SetKeepAlivePeriod(c.KeepAlivePeriod)
+		serverOpts = serverOpts.SetTCPConnectionKeepAlivePeriod(c.KeepAlivePeriod)
 	}
 	opts = opts.SetServerOptions(serverOpts)
 
