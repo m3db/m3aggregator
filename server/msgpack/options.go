@@ -21,11 +21,9 @@
 package msgpack
 
 import (
-	"time"
-
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/instrument"
-	"github.com/m3db/m3x/retry"
+	"github.com/m3db/m3x/server"
 )
 
 const (
@@ -41,23 +39,11 @@ type Options interface {
 	// InstrumentOptions returns the instrument options
 	InstrumentOptions() instrument.Options
 
-	// SetKeepAliveEnabled sets the keep alive state for tcp connections.
-	SetKeepAliveEnabled(value bool) Options
+	// SetServerOptions sets the server options.
+	SetServerOptions(value xserver.Options) Options
 
-	// KeepAliveEnabled returns the keep alive state for tcp connections.
-	KeepAliveEnabled() bool
-
-	// SetKeepAlivePeriod sets the keep alive period for tcp connections.
-	SetKeepAlivePeriod(value time.Duration) Options
-
-	// KeepAlivePeriod returns the keep alive period for tcp connections.
-	KeepAlivePeriod() time.Duration
-
-	// SetRetryOptions sets the retry options for accepting connections
-	SetRetryOptions(value xretry.Options) Options
-
-	// RetryOptions returns the retry options for accepting connections
-	RetryOptions() xretry.Options
+	// ServerOptiosn returns the server options.
+	ServerOptions() xserver.Options
 
 	// SetIteratorPool sets the iterator pool
 	SetIteratorPool(value msgpack.UnaggregatedIteratorPool) Options
@@ -67,11 +53,9 @@ type Options interface {
 }
 
 type options struct {
-	instrumentOpts   instrument.Options
-	keepAliveEnabled bool
-	keepAlivePeriod  time.Duration
-	retryOpts        xretry.Options
-	iteratorPool     msgpack.UnaggregatedIteratorPool
+	instrumentOpts instrument.Options
+	serverOpts     xserver.Options
+	iteratorPool   msgpack.UnaggregatedIteratorPool
 }
 
 // NewOptions creates a new set of server options
@@ -83,11 +67,9 @@ func NewOptions() Options {
 	})
 
 	return &options{
-		instrumentOpts:   instrument.NewOptions(),
-		keepAliveEnabled: defaultKeepAliveEnabled,
-		keepAlivePeriod:  defaultKeepAlivePeriod,
-		retryOpts:        xretry.NewOptions(),
-		iteratorPool:     iteratorPool,
+		instrumentOpts: instrument.NewOptions(),
+		serverOpts:     xserver.NewOptions(),
+		iteratorPool:   iteratorPool,
 	}
 }
 
@@ -101,34 +83,14 @@ func (o *options) InstrumentOptions() instrument.Options {
 	return o.instrumentOpts
 }
 
-func (o *options) SetKeepAliveEnabled(value bool) Options {
+func (o *options) SetServerOptions(value xserver.Options) Options {
 	opts := *o
-	opts.keepAliveEnabled = value
+	opts.serverOpts = value
 	return &opts
 }
 
-func (o *options) KeepAliveEnabled() bool {
-	return o.keepAliveEnabled
-}
-
-func (o *options) SetKeepAlivePeriod(value time.Duration) Options {
-	opts := *o
-	opts.keepAlivePeriod = value
-	return &opts
-}
-
-func (o *options) KeepAlivePeriod() time.Duration {
-	return o.keepAlivePeriod
-}
-
-func (o *options) SetRetryOptions(value xretry.Options) Options {
-	opts := *o
-	opts.retryOpts = value
-	return &opts
-}
-
-func (o *options) RetryOptions() xretry.Options {
-	return o.retryOpts
+func (o *options) ServerOptions() xserver.Options {
+	return o.serverOpts
 }
 
 func (o *options) SetIteratorPool(value msgpack.UnaggregatedIteratorPool) Options {

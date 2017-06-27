@@ -55,17 +55,17 @@ func (c *MsgpackServerConfiguration) NewMsgpackServerOptions(
 ) msgpack.Options {
 	opts := msgpack.NewOptions().SetInstrumentOptions(instrumentOpts)
 
-	// Set retry options.
-	retryOpts := c.Retry.NewOptions(instrumentOpts.MetricsScope())
-	opts = opts.SetRetryOptions(retryOpts)
-
-	// Set keep alive options.
+	// Set server options.
+	serverOpts := xserver.NewOptions().
+		SetInstrumentOptions(instrumentOpts).
+		SetRetryOptions(c.Retry.NewOptions(instrumentOpts.MetricsScope()))
 	if c.KeepAliveEnabled != nil {
-		opts = opts.SetKeepAliveEnabled(*c.KeepAliveEnabled)
+		serverOpts = serverOpts.SetKeepAliveEnabled(*c.KeepAliveEnabled)
 	}
 	if c.KeepAlivePeriod != 0 {
-		opts = opts.SetKeepAlivePeriod(c.KeepAlivePeriod)
+		serverOpts = serverOpts.SetKeepAlivePeriod(c.KeepAlivePeriod)
 	}
+	opts = opts.SetServerOptions(serverOpts)
 
 	// Set unaggregated iterator pool.
 	iteratorPool := c.Iterator.NewUnaggregatedIteratorPool(instrumentOpts)
