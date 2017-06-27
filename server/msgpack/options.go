@@ -21,9 +21,16 @@
 package msgpack
 
 import (
+	"time"
+
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/retry"
+)
+
+const (
+	defaultKeepAliveEnabled = true
+	defaultKeepAlivePeriod  = 0
 )
 
 // Options provide a set of server options
@@ -33,6 +40,18 @@ type Options interface {
 
 	// InstrumentOptions returns the instrument options
 	InstrumentOptions() instrument.Options
+
+	// SetKeepAliveEnabled sets the keep alive state for tcp connections.
+	SetKeepAliveEnabled(value bool) Options
+
+	// KeepAliveEnabled returns the keep alive state for tcp connections.
+	KeepAliveEnabled() bool
+
+	// SetKeepAlivePeriod sets the keep alive period for tcp connections.
+	SetKeepAlivePeriod(value time.Duration) Options
+
+	// KeepAlivePeriod returns the keep alive period for tcp connections.
+	KeepAlivePeriod() time.Duration
 
 	// SetRetryOptions sets the retry options for accepting connections
 	SetRetryOptions(value xretry.Options) Options
@@ -48,9 +67,11 @@ type Options interface {
 }
 
 type options struct {
-	instrumentOpts instrument.Options
-	retryOpts      xretry.Options
-	iteratorPool   msgpack.UnaggregatedIteratorPool
+	instrumentOpts   instrument.Options
+	keepAliveEnabled bool
+	keepAlivePeriod  time.Duration
+	retryOpts        xretry.Options
+	iteratorPool     msgpack.UnaggregatedIteratorPool
 }
 
 // NewOptions creates a new set of server options
@@ -62,9 +83,11 @@ func NewOptions() Options {
 	})
 
 	return &options{
-		instrumentOpts: instrument.NewOptions(),
-		retryOpts:      xretry.NewOptions(),
-		iteratorPool:   iteratorPool,
+		instrumentOpts:   instrument.NewOptions(),
+		keepAliveEnabled: defaultKeepAliveEnabled,
+		keepAlivePeriod:  defaultKeepAlivePeriod,
+		retryOpts:        xretry.NewOptions(),
+		iteratorPool:     iteratorPool,
 	}
 }
 
@@ -76,6 +99,26 @@ func (o *options) SetInstrumentOptions(value instrument.Options) Options {
 
 func (o *options) InstrumentOptions() instrument.Options {
 	return o.instrumentOpts
+}
+
+func (o *options) SetKeepAliveEnabled(value bool) Options {
+	opts := *o
+	opts.keepAliveEnabled = value
+	return &opts
+}
+
+func (o *options) KeepAliveEnabled() bool {
+	return o.keepAliveEnabled
+}
+
+func (o *options) SetKeepAlivePeriod(value time.Duration) Options {
+	opts := *o
+	opts.keepAlivePeriod = value
+	return &opts
+}
+
+func (o *options) KeepAlivePeriod() time.Duration {
+	return o.keepAlivePeriod
 }
 
 func (o *options) SetRetryOptions(value xretry.Options) Options {

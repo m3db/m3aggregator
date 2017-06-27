@@ -46,7 +46,11 @@ func NewServer(address string, aggregator aggregator.Aggregator, opts Options) x
 	handler := NewHandler(aggregator, opts.SetInstrumentOptions(handlerInstrumentOpts))
 
 	serverInstrumentOpts := iOpts.SetMetricsScope(scope.Tagged(map[string]string{"server": "msgpack"}))
-	serverOpts := xserver.NewOptions().SetInstrumentOptions(serverInstrumentOpts).SetRetryOptions(opts.RetryOptions())
+	serverOpts := xserver.NewOptions().
+		SetInstrumentOptions(serverInstrumentOpts).
+		SetTCPConnectionKeepAlive(opts.KeepAliveEnabled()).
+		SetTCPConnectionKeepAlivePeriod(opts.KeepAlivePeriod()).
+		SetRetryOptions(opts.RetryOptions())
 
 	return xserver.NewServer(address, handler, serverOpts)
 }
