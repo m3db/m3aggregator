@@ -35,11 +35,14 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler"
 	"github.com/m3db/m3cluster/client"
 	etcdclient "github.com/m3db/m3cluster/client/etcd"
+	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/placement"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
+	"github.com/m3db/m3x/retry"
+	"github.com/m3db/m3x/sync"
 
 	"github.com/spaolacci/murmur3"
 )
@@ -56,6 +59,7 @@ var (
 )
 
 // AggregatorConfiguration contains aggregator configuration.
+// TODO(xichen): consolidate the kv stores.
 type AggregatorConfiguration struct {
 	// Default aggregation types for counter metrics.
 	CounterAggregationTypes []policy.AggregationType `yaml:"counterAggregationTypes" validate:"nonzero"`
@@ -129,6 +133,9 @@ type AggregatorConfiguration struct {
 	// Sharding function type.
 	ShardFnType *shardFnType `yaml:"shardFnType"`
 
+	// Election manager.
+	ElectionManager electionManagerConfiguration `yaml:"electionManager"`
+
 	// Flush manager.
 	FlushManager flushManagerConfiguration `yaml:"flushManager"`
 
@@ -155,6 +162,9 @@ type AggregatorConfiguration struct {
 
 	// Default policies.
 	DefaultPolicies []policy.Policy `yaml:"defaultPolicies" validate:"nonzero"`
+
+	// Graceful close timeout.
+	GracefulCloseTimeout time.Duration `yaml:"gracefulCloseTimeout"`
 
 	// Pool of counter elements.
 	CounterElemPool pool.ObjectPoolConfiguration `yaml:"counterElemPool"`
@@ -257,9 +267,20 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	}
 	opts = opts.SetShardFn(shardFn)
 
+	// Set election manager.
+	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("election-manager"))
+	electionManager, err := c.ElectionManager.NewElectionManager(client, instrumentOpts)
+	if err != nil {
+		return nil, err
+	}
+	opts = opts.SetElectionManager(electionManager)
+
 	// Set flush manager.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("flush-manager"))
-	flushManager := c.FlushManager.NewFlushManager(iOpts)
+	flushManager, err := c.FlushManager.NewFlushManager(client, electionManager, iOpts)
+	if err != nil {
+		return nil, err
+	}
 	opts = opts.SetFlushManager(flushManager)
 
 	// Set flushing handler.
@@ -295,6 +316,11 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	copy(policies, c.DefaultPolicies)
 	sort.Sort(policy.ByResolutionAsc(policies))
 	opts = opts.SetDefaultPolicies(policies)
+
+	// Set graceful close timeout.
+	if c.GracefulCloseTimeout != 0 {
+		opts = opts.SetGracefulCloseTimeout(c.GracefulCloseTimeout)
+	}
 
 	// Set counter elem pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("counter-elem-pool"))
@@ -515,6 +541,94 @@ func (t shardFnType) ShardFn() (aggregator.ShardFn, error) {
 	}
 }
 
+type electionManagerConfiguration struct {
+	Election        electionConfiguration  `yaml:"election"`
+	ServiceID       serviceIDConfiguration `yaml:"serviceID"`
+	LeaderValue     string                 `yaml:"leaderValue"`
+	ElectionKeyFmt  string                 `yaml:"electionKeyFmt" validate:"nonzero"`
+	CampaignRetrier xretry.Configuration   `yaml:"campaignRetrier"`
+	ChangeRetrier   xretry.Configuration   `yaml:"changeRetrier"`
+}
+
+func (c electionManagerConfiguration) NewElectionManager(
+	client client.Client,
+	instrumentOpts instrument.Options,
+) (aggregator.ElectionManager, error) {
+	electionOpts, err := c.Election.NewElectionOptions()
+	if err != nil {
+		return nil, err
+	}
+	serviceID := c.ServiceID.NewServiceID()
+	svcs, err := client.Services()
+	if err != nil {
+		return nil, err
+	}
+	leaderService, err := svcs.LeaderService(serviceID, electionOpts)
+	if err != nil {
+		return nil, err
+	}
+	campaignOpts := services.NewCampaignOptions()
+	if c.LeaderValue != "" {
+		campaignOpts = campaignOpts.SetLeaderValue(c.LeaderValue)
+	}
+	scope := instrumentOpts.MetricsScope()
+	campaignRetryOpts := c.CampaignRetrier.NewOptions(scope.SubScope("campaign"))
+	changeRetryOpts := c.ChangeRetrier.NewOptions(scope.SubScope("change"))
+	opts := aggregator.NewElectionManagerOptions().
+		SetInstrumentOptions(instrumentOpts).
+		SetElectionOptions(electionOpts).
+		SetCampaignOptions(campaignOpts).
+		SetCampaignRetryOptions(campaignRetryOpts).
+		SetChangeRetryOptions(changeRetryOpts).
+		SetElectionKeyFmt(c.ElectionKeyFmt).
+		SetLeaderService(leaderService)
+	electionManager := aggregator.NewElectionManager(opts)
+	return electionManager, nil
+}
+
+type electionConfiguration struct {
+	LeaderTimeout time.Duration `yaml:"leaderTimeout"`
+	ResignTimeout time.Duration `yaml:"resignTimeout"`
+	TTLSeconds    int           `yaml:"ttlSeconds"`
+}
+
+func (c electionConfiguration) NewElectionOptions() (services.ElectionOptions, error) {
+	opts, err := services.NewElectionOptions()
+	if err != nil {
+		return nil, err
+	}
+	if c.LeaderTimeout != 0 {
+		opts = opts.SetLeaderTimeout(c.LeaderTimeout)
+	}
+	if c.ResignTimeout != 0 {
+		opts = opts.SetResignTimeout(c.ResignTimeout)
+	}
+	if c.TTLSeconds != 0 {
+		opts = opts.SetTTL(c.TTLSeconds)
+	}
+	return opts, nil
+}
+
+type serviceIDConfiguration struct {
+	Name        string `yaml:"name"`
+	Environment string `yaml:"environment"`
+	Zone        string `yaml:"zone"`
+}
+
+func (c serviceIDConfiguration) NewServiceID() services.ServiceID {
+	sid := services.NewServiceID()
+	if c.Name != "" {
+		sid = sid.SetName(c.Name)
+	}
+	if c.Environment != "" {
+		sid = sid.SetEnvironment(c.Environment)
+	}
+	if c.Zone != "" {
+		sid = sid.SetZone(c.Zone)
+	}
+	return sid
+}
+
 type flushManagerConfiguration struct {
 	// How frequently the flush manager checks for next flush.
 	CheckEvery time.Duration `yaml:"checkEvery"`
@@ -524,12 +638,37 @@ type flushManagerConfiguration struct {
 
 	// Number of workers per CPU.
 	NumWorkersPerCPU float64 `yaml:"numWorkersPerCPU" validate:"min=0.0,max=1.0"`
+
+	// Flush times namespace.
+	FlushTimesNamespace string `yaml:"flushTimesNamespace"`
+
+	// Flush times key format.
+	FlushTimesKeyFmt string `yaml:"flushTimesKeyFmt" validate:"nonzero"`
+
+	// How frequently the flush times are persisted.
+	FlushTimesPersistEvery time.Duration `yaml:"flushTimesPersistEvery"`
+
+	// Maximum duration with no flushes.
+	MaxNoFlushDuration time.Duration `yaml:"maxNoFlushDuration"`
+
+	// Window size for a forced flush.
+	ForcedFlushWindowSize time.Duration `yaml:"ForcedFlushWindowSize"`
 }
 
 func (c flushManagerConfiguration) NewFlushManager(
+	client client.Client,
+	electionManager aggregator.ElectionManager,
 	instrumentOpts instrument.Options,
-) aggregator.FlushManager {
-	opts := aggregator.NewFlushManagerOptions().SetInstrumentOptions(instrumentOpts)
+) (aggregator.FlushManager, error) {
+	store, err := client.Store(c.FlushTimesNamespace)
+	if err != nil {
+		return nil, err
+	}
+	opts := aggregator.NewFlushManagerOptions().
+		SetInstrumentOptions(instrumentOpts).
+		SetElectionManager(electionManager).
+		SetFlushTimesKeyFmt(c.FlushTimesKeyFmt).
+		SetFlushTimesStore(store)
 	if c.CheckEvery != 0 {
 		opts = opts.SetCheckEvery(c.CheckEvery)
 	}
@@ -538,9 +677,20 @@ func (c flushManagerConfiguration) NewFlushManager(
 	}
 	if c.NumWorkersPerCPU != 0 {
 		workerPoolSize := int(float64(runtime.NumCPU()) * c.NumWorkersPerCPU)
-		opts = opts.SetWorkerPoolSize(workerPoolSize)
+		workerPool := xsync.NewWorkerPool(workerPoolSize)
+		workerPool.Init()
+		opts = opts.SetWorkerPool(workerPool)
 	}
-	return aggregator.NewFlushManager(opts)
+	if c.FlushTimesPersistEvery != 0 {
+		opts = opts.SetFlushTimesPersistEvery(c.FlushTimesPersistEvery)
+	}
+	if c.MaxNoFlushDuration != 0 {
+		opts = opts.SetMaxNoFlushDuration(c.MaxNoFlushDuration)
+	}
+	if c.ForcedFlushWindowSize != 0 {
+		opts = opts.SetForcedFlushWindowSize(c.ForcedFlushWindowSize)
+	}
+	return aggregator.NewFlushManager(opts), nil
 }
 
 // timerQuantileSuffixFnType is the timer quantile suffix function type.

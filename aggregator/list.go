@@ -24,6 +24,7 @@ import (
 	"container/list"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/m3db/m3metrics/metric/aggregated"
@@ -42,21 +43,25 @@ var (
 )
 
 type metricListMetrics struct {
-	encodeErrors   tally.Counter
-	flushCollected tally.Counter
-	flushSuccess   tally.Counter
-	flushErrors    tally.Counter
-	flushDuration  tally.Timer
+	encodeErrors        tally.Counter
+	flushCollected      tally.Counter
+	flushSuccess        tally.Counter
+	flushErrors         tally.Counter
+	flushDuration       tally.Timer
+	flushStale          tally.Counter
+	flushBeforeDuration tally.Timer
 }
 
 func newMetricListMetrics(scope tally.Scope) metricListMetrics {
 	flushScope := scope.SubScope("flush")
 	return metricListMetrics{
-		encodeErrors:   scope.Counter("encode-errors"),
-		flushCollected: flushScope.Counter("collected"),
-		flushSuccess:   flushScope.Counter("success"),
-		flushErrors:    flushScope.Counter("errors"),
-		flushDuration:  flushScope.Timer("duration"),
+		encodeErrors:        scope.Counter("encode-errors"),
+		flushCollected:      flushScope.Counter("collected"),
+		flushSuccess:        flushScope.Counter("success"),
+		flushErrors:         flushScope.Counter("errors"),
+		flushDuration:       flushScope.Timer("duration"),
+		flushStale:          flushScope.Counter("stale"),
+		flushBeforeDuration: scope.Timer("flush-before.duration"),
 	}
 }
 
@@ -67,6 +72,7 @@ type encodeFn func(mp aggregated.ChunkedMetricWithStoragePolicy) error
 type metricList struct {
 	sync.RWMutex
 
+	shard         uint32
 	opts          Options
 	nowFn         clock.NowFn
 	log           xlog.Logger
@@ -77,16 +83,17 @@ type metricList struct {
 	resolution    time.Duration
 	flushInterval time.Duration
 
-	aggregations *list.List
-	encoder      msgpack.AggregatedEncoder
-	toCollect    []*list.Element
-	closed       bool
-	encodeFn     encodeFn
-	aggMetricFn  aggMetricFn
-	metrics      metricListMetrics
+	aggregations     *list.List
+	lastFlushedNanos int64
+	encoder          msgpack.AggregatedEncoder
+	toCollect        []*list.Element
+	closed           bool
+	encodeFn         encodeFn
+	aggMetricFn      aggMetricFn
+	metrics          metricListMetrics
 }
 
-func newMetricList(resolution time.Duration, opts Options) *metricList {
+func newMetricList(shard uint32, resolution time.Duration, opts Options) *metricList {
 	// NB(xichen): by default the flush interval is the same as metric
 	// resolution, unless the resolution is smaller than the minimum flush
 	// interval, in which case we use the min flush interval to avoid excessing
@@ -102,6 +109,7 @@ func newMetricList(resolution time.Duration, opts Options) *metricList {
 	encoder := encoderPool.Get()
 	encoder.Reset()
 	l := &metricList{
+		shard:         shard,
 		opts:          opts,
 		nowFn:         opts.ClockOptions().NowFn(),
 		log:           opts.InstrumentOptions().Logger(),
@@ -124,11 +132,15 @@ func newMetricList(resolution time.Duration, opts Options) *metricList {
 	return l
 }
 
-// FlushInterval returns the flush interval of the list.
-func (l *metricList) FlushInterval() time.Duration { return l.flushInterval }
+func (l *metricList) Shard() uint32 { return l.shard }
+
+func (l *metricList) LastFlushedNanos() int64 { return atomic.LoadInt64(&l.lastFlushedNanos) }
 
 // Resolution returns the resolution of the list.
 func (l *metricList) Resolution() time.Duration { return l.resolution }
+
+// FlushInterval returns the flush interval of the list.
+func (l *metricList) FlushInterval() time.Duration { return l.flushInterval }
 
 // Len returns the number of elements in the list.
 func (l *metricList) Len() int {
@@ -176,8 +188,19 @@ func (l *metricList) Flush() {
 	resolution := l.resolution
 	l.timeLock.Unlock()
 	alignedStartNanos := consumeStart.Truncate(resolution).UnixNano()
+	l.FlushBefore(alignedStartNanos)
 
-	// Reset states reused across ticks.
+	flushDuration := l.nowFn().Sub(flushStart)
+	l.metrics.flushDuration.Record(flushDuration)
+}
+
+func (l *metricList) FlushBefore(beforeNanos int64) {
+	if l.LastFlushedNanos() >= beforeNanos {
+		l.metrics.flushStale.Inc(1)
+		return
+	}
+
+	flushBeforeStart := l.nowFn()
 	l.toCollect = l.toCollect[:0]
 
 	// Flush out aggregations, may need to do it in batches if the read lock
@@ -187,7 +210,7 @@ func (l *metricList) Flush() {
 		// If the element is eligible for collection after the values are
 		// processed, close it and reset the value to nil.
 		elem := e.Value.(metricElem)
-		if elem.Consume(alignedStartNanos, l.aggMetricFn) {
+		if elem.Consume(beforeNanos, l.aggMetricFn) {
 			elem.Close()
 			e.Value = nil
 			l.toCollect = append(l.toCollect, e)
@@ -216,9 +239,10 @@ func (l *metricList) Flush() {
 	numCollected := len(l.toCollect)
 	l.Unlock()
 
+	atomic.StoreInt64(&l.lastFlushedNanos, beforeNanos)
 	l.metrics.flushCollected.Inc(int64(numCollected))
-	flushDuration := l.nowFn().Sub(flushStart)
-	l.metrics.flushDuration.Record(flushDuration)
+	flushBeforeDuration := l.nowFn().Sub(flushBeforeStart)
+	l.metrics.flushBeforeDuration.Record(flushBeforeDuration)
 }
 
 func (l *metricList) processAggregatedMetric(
@@ -281,20 +305,22 @@ func (l *metricList) processAggregatedMetric(
 	}
 }
 
-type newMetricListFn func(resolution time.Duration, opts Options) *metricList
+type newMetricListFn func(shard uint32, resolution time.Duration, opts Options) *metricList
 
 // metricLists contains all the metric lists.
 type metricLists struct {
 	sync.RWMutex
 
+	shard           uint32
 	opts            Options
 	newMetricListFn newMetricListFn
 	closed          bool
 	lists           map[time.Duration]*metricList
 }
 
-func newMetricLists(opts Options) *metricLists {
+func newMetricLists(shard uint32, opts Options) *metricLists {
 	return &metricLists{
+		shard:           shard,
 		opts:            opts,
 		newMetricListFn: newMetricList,
 		lists:           make(map[time.Duration]*metricList),
@@ -331,7 +357,7 @@ func (l *metricLists) FindOrCreate(resolution time.Duration) (*metricList, error
 	}
 	list, exists = l.lists[resolution]
 	if !exists {
-		list = l.newMetricListFn(resolution, l.opts)
+		list = l.newMetricListFn(l.shard, resolution, l.opts)
 		l.lists[resolution] = list
 	}
 	l.Unlock()

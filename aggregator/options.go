@@ -59,6 +59,7 @@ var (
 	defaultEntryCheckInterval        = time.Hour
 	defaultEntryCheckBatchPercent    = 0.01
 	defaultMaxTimerBatchSizePerWrite = 0
+	defaultGracefulCloseTimeout      = 5 * time.Minute
 	defaultDefaultPolicies           = []policy.Policy{
 		policy.NewPolicy(policy.NewStoragePolicy(10*time.Second, xtime.Second, 2*24*time.Hour), policy.DefaultAggregationID),
 		policy.NewPolicy(policy.NewStoragePolicy(time.Minute, xtime.Minute, 40*24*time.Hour), policy.DefaultAggregationID),
@@ -131,6 +132,8 @@ type options struct {
 	entryCheckBatchPercent         float64
 	maxTimerBatchSizePerWrite      int
 	defaultPolicies                []policy.Policy
+	electionManager                ElectionManager
+	gracefulCloseTimeout           time.Duration
 	entryPool                      EntryPool
 	counterElemPool                CounterElemPool
 	timerElemPool                  TimerElemPool
@@ -192,6 +195,7 @@ func NewOptions() Options {
 		entryCheckBatchPercent:         defaultEntryCheckBatchPercent,
 		maxTimerBatchSizePerWrite:      defaultMaxTimerBatchSizePerWrite,
 		defaultPolicies:                defaultDefaultPolicies,
+		gracefulCloseTimeout:           defaultGracefulCloseTimeout,
 		counterSuffixOverride:          defaultCounterSuffixOverride,
 		timerSuffixOverride:            defaultTimerSuffixOverride,
 		gaugeSuffixOverride:            defaultGaugeSuffixOverride,
@@ -464,6 +468,16 @@ func (o *options) ShardFn() ShardFn {
 	return o.shardFn
 }
 
+func (o *options) SetElectionManager(value ElectionManager) Options {
+	opts := *o
+	opts.electionManager = value
+	return &opts
+}
+
+func (o *options) ElectionManager() ElectionManager {
+	return o.electionManager
+}
+
 func (o *options) SetFlushManager(value FlushManager) Options {
 	opts := *o
 	opts.flushManager = value
@@ -552,6 +566,16 @@ func (o *options) SetDefaultPolicies(value []policy.Policy) Options {
 
 func (o *options) DefaultPolicies() []policy.Policy {
 	return o.defaultPolicies
+}
+
+func (o *options) SetGracefulCloseTimeout(value time.Duration) Options {
+	opts := *o
+	opts.gracefulCloseTimeout = value
+	return &opts
+}
+
+func (o *options) GracefulCloseTimeout() time.Duration {
+	return o.gracefulCloseTimeout
 }
 
 func (o *options) SetEntryPool(value EntryPool) Options {

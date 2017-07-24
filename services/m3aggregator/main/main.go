@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/m3db/m3aggregator/aggregator"
+	m3aggregator "github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3aggregator/services/m3aggregator/config"
 	"github.com/m3db/m3aggregator/services/m3aggregator/serve"
 	"github.com/m3db/m3x/config"
@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	gracefulShutdownTimeout = 10 * time.Second
+	defaultGracefulShutdownTimeout = 5 * time.Minute
 )
 
 var (
@@ -92,7 +92,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("error creating aggregator options: %v", err)
 	}
-	aggregator := aggregator.NewAggregator(aggregatorOpts)
+	aggregator := m3aggregator.NewAggregator(aggregatorOpts)
 	if err := aggregator.Open(); err != nil {
 		logger.Fatalf("error opening the aggregator: %v", err)
 	}
@@ -119,8 +119,15 @@ func main() {
 
 	close(doneCh)
 
+	gracefulShutdownTimeout := cfg.Aggregator.GracefulCloseTimeout
+	if gracefulShutdownTimeout == 0 {
+		gracefulShutdownTimeout = defaultGracefulShutdownTimeout
+	}
+
+	// TODO(xichen): rework this logic for integration with deployment tooling.
 	select {
 	case <-closedCh:
+		aggregator.Close(m3aggregator.GracefulClose)
 		logger.Info("server closed clean")
 	case <-time.After(gracefulShutdownTimeout):
 		logger.Infof("server closed due to %s timeout", gracefulShutdownTimeout.String())

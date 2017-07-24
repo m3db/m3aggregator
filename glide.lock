@@ -1,5 +1,5 @@
-hash: 171baa487bff804651d7188376d143ee41fe2b43ff59cfaf092e4b11f15a88ab
-updated: 2017-06-27T11:14:08.024047537-04:00
+hash: 0418a36f793ab8192a418b94ca38cd14f074822dacf0ebe49d9f9c091245f9e4
+updated: 2017-07-24T10:13:14.916328642-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -14,6 +14,7 @@ imports:
   subpackages:
   - auth/authpb
   - clientv3
+  - clientv3/concurrency
   - etcdserver/api/v3rpc/rpctypes
   - etcdserver/etcdserverpb
   - mvcc/mvccpb
@@ -48,7 +49,7 @@ imports:
   - runtime/internal
   - utilities
 - name: github.com/m3db/m3cluster
-  version: 4b5c64d5fdcde721bf249a531359aeb3b9162806
+  version: b804c50bdd15bc4a799a3c0d36a1142abdc8b0c4
   subpackages:
   - client
   - client/etcd
@@ -63,6 +64,9 @@ imports:
   - services
   - services/client
   - services/heartbeat/etcd
+  - services/leader
+  - services/leader/campaign
+  - services/leader/election
   - services/placement
   - services/placement/algo
   - services/placement/service

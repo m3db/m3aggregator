@@ -38,8 +38,6 @@ func Serve(
 	doneCh chan struct{},
 ) error {
 	log := msgpackServerOpts.InstrumentOptions().Logger()
-	defer aggregator.Close()
-
 	msgpackServer := msgpackserver.NewServer(msgpackAddr, aggregator, msgpackServerOpts)
 	if err := msgpackServer.ListenAndServe(); err != nil {
 		return fmt.Errorf("could not start msgpack server at %s: %v", msgpackAddr, err)
