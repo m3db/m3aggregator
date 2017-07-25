@@ -20,46 +20,18 @@
 
 package aggregator
 
-import (
-	"testing"
+import "context"
 
-	"github.com/m3db/m3metrics/metric/unaggregated"
-	"github.com/m3db/m3metrics/policy"
-	"github.com/stretchr/testify/require"
-)
+type electionOpenFn func(shardSetID string) error
+type resignFn func(ctx context.Context) error
 
-var (
-	testShard = uint32(0)
-)
-
-func TestAggregatorShard(t *testing.T) {
-	shard := newAggregatorShard(testShard, testOptions().SetEntryCheckInterval(0))
-	require.Equal(t, testShard, shard.ID())
-
-	var (
-		resultMu           unaggregated.MetricUnion
-		resultPoliciesList policy.PoliciesList
-	)
-	shard.addMetricWithPoliciesListFn = func(
-		mu unaggregated.MetricUnion,
-		pl policy.PoliciesList,
-	) error {
-		resultMu = mu
-		resultPoliciesList = pl
-		return nil
-	}
-
-	require.NoError(t, shard.AddMetricWithPoliciesList(testValidMetric, testPoliciesList))
-	require.Equal(t, testValidMetric, resultMu)
-	require.Equal(t, testPoliciesList, resultPoliciesList)
-
-	// Close the shard.
-	shard.Close()
-
-	// Adding a metric to a closed shard should result in an error.
-	err := shard.AddMetricWithPoliciesList(testValidMetric, testPoliciesList)
-	require.Equal(t, errAggregatorShardClosed, err)
-
-	// Assert the shard is closed.
-	require.True(t, shard.closed)
+type mockElectionManager struct {
+	openFn         electionOpenFn
+	electionStatus ElectionStatus
+	resignFn       resignFn
 }
+
+func (m *mockElectionManager) Open(shardSetID string) error     { return m.openFn(shardSetID) }
+func (m *mockElectionManager) ElectionStatus() ElectionStatus   { return m.electionStatus }
+func (m *mockElectionManager) Resign(ctx context.Context) error { return m.resignFn(ctx) }
+func (m *mockElectionManager) Close() error                     { return nil }

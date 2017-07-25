@@ -29,25 +29,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	testShardSetID = "testShardSet"
+)
+
 func TestFlushManagerRegisterClosed(t *testing.T) {
 	mgr, _ := testFlushManager()
-	mgr.closed = true
-	require.Equal(t, errFlushManagerClosed, mgr.Register(nil))
+	mgr.status = flushManagerClosed
+	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Register(nil))
 }
 
 func TestFlushManagerRegisterSuccess(t *testing.T) {
 	mgr, now := testFlushManager()
 	*now = time.Unix(1234, 0)
 
+	var (
+		bucketIndices []int
+		buckets       []*flushBucket
+	)
+	mgr.leaderMgr = &mockRoleBasedFlushManager{
+		openFn: func(string) {},
+	}
+	mgr.followerMgr = &mockRoleBasedFlushManager{
+		openFn: func(string) {},
+		onBucketAddedFn: func(bucketIdx int, bucket *flushBucket) {
+			bucketIndices = append(bucketIndices, bucketIdx)
+			buckets = append(buckets, bucket)
+		},
+	}
 	flushers := []PeriodicFlusher{
 		&mockFlusher{flushInterval: time.Second},
 		&mockFlusher{flushInterval: time.Minute},
 		&mockFlusher{flushInterval: time.Second},
 		&mockFlusher{flushInterval: time.Hour},
 	}
+
+	require.NoError(t, mgr.Open(testShardSetID))
 	for _, flusher := range flushers {
 		require.NoError(t, mgr.Register(flusher))
 	}
+
 	expectedBuckets := []*flushBucket{
 		&flushBucket{
 			interval: time.Second,
@@ -67,24 +88,24 @@ func TestFlushManagerRegisterSuccess(t *testing.T) {
 		require.Equal(t, expectedBuckets[i].interval, mgr.buckets[i].interval)
 		require.Equal(t, expectedBuckets[i].flushers, mgr.buckets[i].flushers)
 	}
-	expectedFlushTimes := []flushMetadata{
-		{timeNanos: 1235000000000, bucketIdx: 0},
-		{timeNanos: 1294000000000, bucketIdx: 1},
-		{timeNanos: 4834000000000, bucketIdx: 2},
+	for i := 0; i < len(expectedBuckets); i++ {
+		require.Equal(t, i, bucketIndices[i])
+		require.Equal(t, expectedBuckets[i].interval, buckets[i].interval)
+		require.Equal(t, expectedBuckets[i].flushers, buckets[i].flushers)
 	}
-	require.Equal(t, flushMetadataHeap(expectedFlushTimes), mgr.flushTimes)
 }
 
 func TestFlushManagerCloseSuccess(t *testing.T) {
 	opts, _ := testFlushManagerOptions()
 	opts = opts.SetCheckEvery(time.Second)
 	mgr := NewFlushManager(opts).(*flushManager)
+	mgr.status = flushManagerOpen
 
 	// Wait a little for the flush goroutine to start.
 	time.Sleep(100 * time.Millisecond)
 
 	mgr.Close()
-	require.True(t, mgr.closed)
+	require.Equal(t, flushManagerClosed, mgr.status)
 	require.Panics(t, func() { mgr.wgFlush.Done() })
 }
 
@@ -94,37 +115,54 @@ func TestFlushManagerFlush(t *testing.T) {
 		SetJitterEnabled(false)
 	mgr := NewFlushManager(opts).(*flushManager)
 
-	var flushCounts [4]int
-	flushers := []PeriodicFlusher{
-		&mockFlusher{
-			flushInterval: 100 * time.Millisecond,
-			flushFn:       func() { flushCounts[0]++ },
+	var captured []*flushBucket
+	mgr.electionMgr = &mockElectionManager{
+		electionStatus: FollowerStatus,
+	}
+	mgr.leaderMgr = &mockRoleBasedFlushManager{
+		openFn: func(string) {},
+	}
+	mgr.followerMgr = &mockRoleBasedFlushManager{
+		openFn: func(string) {},
+		prepareFn: func(buckets []*flushBucket) (flushTask, time.Duration) {
+			captured = buckets
+			return nil, 0
 		},
-		&mockFlusher{
-			flushInterval: 200 * time.Millisecond,
-			flushFn:       func() { flushCounts[1]++ },
-		},
-		&mockFlusher{
-			flushInterval: 100 * time.Millisecond,
-			flushFn:       func() { flushCounts[2]++ },
-		},
-		&mockFlusher{
-			flushInterval: 500 * time.Millisecond,
-			flushFn:       func() { flushCounts[3]++ },
-		},
+		onBucketAddedFn: func(bucketIdx int, bucket *flushBucket) {},
 	}
 
+	require.NoError(t, mgr.Open(testShardSetID))
+	flushers := []PeriodicFlusher{
+		&mockFlusher{flushInterval: 100 * time.Millisecond},
+		&mockFlusher{flushInterval: 200 * time.Millisecond},
+		&mockFlusher{flushInterval: 100 * time.Millisecond},
+		&mockFlusher{flushInterval: 500 * time.Millisecond},
+	}
 	for _, flusher := range flushers {
 		require.NoError(t, mgr.Register(flusher))
 	}
 	time.Sleep(1200 * time.Millisecond)
 	mgr.Close()
 
-	require.True(t, flushCounts[0] >= 12)
-	require.True(t, flushCounts[1] >= 6)
-	require.True(t, flushCounts[2] >= 12)
-	require.True(t, flushCounts[3] == 3)
-
+	expectedBuckets := []*flushBucket{
+		&flushBucket{
+			interval: 100 * time.Millisecond,
+			flushers: []PeriodicFlusher{flushers[0], flushers[2]},
+		},
+		&flushBucket{
+			interval: 200 * time.Millisecond,
+			flushers: []PeriodicFlusher{flushers[1]},
+		},
+		&flushBucket{
+			interval: 500 * time.Millisecond,
+			flushers: []PeriodicFlusher{flushers[3]},
+		},
+	}
+	require.Equal(t, len(expectedBuckets), len(captured))
+	for i := range expectedBuckets {
+		require.Equal(t, expectedBuckets[i].interval, captured[i].interval)
+		require.Equal(t, expectedBuckets[i].flushers, captured[i].flushers)
+	}
 }
 
 func testFlushManager() (*flushManager, *time.Time) {
@@ -143,12 +181,46 @@ func testFlushManagerOptions() (FlushManagerOptions, *time.Time) {
 }
 
 type flushFn func()
+type flushBeforeFn func(beforeNanos int64)
 
 type mockFlusher struct {
-	flushInterval time.Duration
-	flushFn       flushFn
+	shard            uint32
+	resolution       time.Duration
+	flushInterval    time.Duration
+	lastFlushedNanos int64
+	flushFn          flushFn
+	flushBeforeFn    flushBeforeFn
 }
 
-func (f *mockFlusher) FlushInterval() time.Duration { return f.flushInterval }
+func (f *mockFlusher) Shard() uint32                 { return f.shard }
+func (f *mockFlusher) Resolution() time.Duration     { return f.resolution }
+func (f *mockFlusher) FlushInterval() time.Duration  { return f.flushInterval }
+func (f *mockFlusher) LastFlushedNanos() int64       { return f.lastFlushedNanos }
+func (f *mockFlusher) Flush()                        { f.flushFn() }
+func (f *mockFlusher) FlushBefore(beforeNanos int64) { f.flushBeforeFn(beforeNanos) }
 
-func (f *mockFlusher) Flush() { f.flushFn() }
+type flushOpenFn func(shardSetID string)
+type bucketInitFn func(buckets []*flushBucket)
+type bucketPrepareFn func(buckets []*flushBucket) (flushTask, time.Duration)
+type onBucketAddedFn func(bucketIdx int, bucket *flushBucket)
+
+type mockRoleBasedFlushManager struct {
+	openFn          flushOpenFn
+	initFn          bucketInitFn
+	prepareFn       bucketPrepareFn
+	onBucketAddedFn onBucketAddedFn
+}
+
+func (m *mockRoleBasedFlushManager) Open(shardSetID string) { m.openFn(shardSetID) }
+
+func (m *mockRoleBasedFlushManager) Init(buckets []*flushBucket) {
+	m.initFn(buckets)
+}
+
+func (m *mockRoleBasedFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.Duration) {
+	return m.prepareFn(buckets)
+}
+
+func (m *mockRoleBasedFlushManager) OnBucketAdded(bucketIdx int, bucket *flushBucket) {
+	m.onBucketAddedFn(bucketIdx, bucket)
+}

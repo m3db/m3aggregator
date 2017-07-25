@@ -66,6 +66,7 @@ type leaderFlushManager struct {
 	flushTimesKey       string
 	lastPersistAt       time.Time
 	flushedSincePersist bool
+	flushTask           *leaderFlushTask
 	metrics             leaderFlushManagerMetrics
 }
 
@@ -74,7 +75,7 @@ func newLeaderFlushManager(opts FlushManagerOptions) roleBasedFlushManager {
 	rand := rand.New(rand.NewSource(nowFn().UnixNano()))
 	instrumentOpts := opts.InstrumentOptions()
 	scope := instrumentOpts.MetricsScope()
-	return &leaderFlushManager{
+	mgr := &leaderFlushManager{
 		nowFn:                  nowFn,
 		checkEvery:             opts.CheckEvery(),
 		jitterEnabled:          opts.JitterEnabled(),
@@ -88,6 +89,8 @@ func newLeaderFlushManager(opts FlushManagerOptions) roleBasedFlushManager {
 		lastPersistAt:          nowFn(),
 		metrics:                newLeaderFlushManagerMetrics(scope),
 	}
+	mgr.flushTask = &leaderFlushTask{mgr: mgr}
+	return mgr
 }
 
 func (mgr *leaderFlushManager) Open(shardSetID string) {
@@ -98,31 +101,22 @@ func (mgr *leaderFlushManager) Open(shardSetID string) {
 
 // Init initializes the leader flush manager by enqueuing all
 // the flushers in the buckets.
-func (mgr *leaderFlushManager) Init(
-	bucketLock *sync.RWMutex,
-	buckets []*flushBucket,
-) {
-	bucketLock.RLock()
+func (mgr *leaderFlushManager) Init(buckets []*flushBucket) {
 	mgr.Lock()
 	mgr.flushTimes.Reset()
 	for bucketIdx, bucket := range buckets {
 		mgr.enqueueBucketWithLock(bucketIdx, bucket)
 	}
 	mgr.Unlock()
-	bucketLock.RUnlock()
 }
 
-func (mgr *leaderFlushManager) Flush(
-	bucketLock *sync.RWMutex,
-	buckets []*flushBucket,
-) (bool, time.Duration) {
+func (mgr *leaderFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.Duration) {
 	var (
 		shouldFlush = false
 		duration    tally.Timer
 		flushers    []PeriodicFlusher
 		waitFor     = mgr.checkEvery
 	)
-	bucketLock.RLock()
 	mgr.Lock()
 	numFlushTimes := mgr.flushTimes.Len()
 	mgr.metrics.queueSize.Update(float64(numFlushTimes))
@@ -163,36 +157,16 @@ func (mgr *leaderFlushManager) Flush(
 		flushTimes = mgr.prepareFlushTimesWithLock(buckets)
 	}
 	mgr.Unlock()
-	bucketLock.RUnlock()
 
 	if !shouldFlush && !shouldPersist {
-		return false, waitFor
+		return nil, waitFor
 	}
-
-	if shouldFlush {
-		var wgWorkers sync.WaitGroup
-		start := mgr.nowFn()
-		for _, flusher := range flushers {
-			flusher := flusher
-			wgWorkers.Add(1)
-			mgr.workers.Go(func() {
-				flusher.Flush()
-				wgWorkers.Done()
-			})
-		}
-		wgWorkers.Wait()
-		duration.Record(mgr.nowFn().Sub(start))
-	}
-
-	// NB(xichen): if we should flush in this cycle, wait for the flush to finish before
-	// persisting in order to persist the most up-to-date flush times. Also we are not using
-	// the worker pool as persistence could be done asynchronously to avoid blocking
-	// the workers reserved for flushing.
-	if shouldPersist {
-		go mgr.persistFlushTimes(&flushTimes)
-	}
-
-	return true, 0
+	mgr.flushTask.shouldFlush = shouldFlush
+	mgr.flushTask.duration = duration
+	mgr.flushTask.flushers = flushers
+	mgr.flushTask.shouldPersist = shouldPersist
+	mgr.flushTask.flushTimes = &flushTimes
+	return mgr.flushTask, 0
 }
 
 // NB(xichen): if the current instance is a leader, we need to update the flush
@@ -227,13 +201,17 @@ func (mgr *leaderFlushManager) enqueueBucketWithLock(
 func (mgr *leaderFlushManager) prepareFlushTimesWithLock(
 	buckets []*flushBucket,
 ) schema.ShardSetFlushTimes {
-	var proto schema.ShardSetFlushTimes
+	proto := schema.ShardSetFlushTimes{
+		ByShard: make(map[uint32]*schema.ShardFlushTimes, defaultInitialFlushTimesCapacity),
+	}
 	for _, bucket := range buckets {
 		for _, flusher := range bucket.flushers {
 			shard := flusher.Shard()
 			shardFlushTimes, exists := proto.ByShard[shard]
 			if !exists {
-				shardFlushTimes = &schema.ShardFlushTimes{}
+				shardFlushTimes = &schema.ShardFlushTimes{
+					ByResolution: make(map[int64]int64, 2),
+				}
 				proto.ByShard[shard] = shardFlushTimes
 			}
 			resolution := flusher.Resolution()
@@ -251,6 +229,41 @@ func (mgr *leaderFlushManager) persistFlushTimes(flushTimes *schema.ShardSetFlus
 }
 
 func (mgr *leaderFlushManager) nowNanos() int64 { return mgr.nowFn().UnixNano() }
+
+type leaderFlushTask struct {
+	mgr           *leaderFlushManager
+	shouldFlush   bool
+	duration      tally.Timer
+	flushers      []PeriodicFlusher
+	shouldPersist bool
+	flushTimes    *schema.ShardSetFlushTimes
+}
+
+func (t *leaderFlushTask) Run() {
+	mgr := t.mgr
+	if t.shouldFlush {
+		var wgWorkers sync.WaitGroup
+		start := mgr.nowFn()
+		for _, flusher := range t.flushers {
+			flusher := flusher
+			wgWorkers.Add(1)
+			mgr.workers.Go(func() {
+				flusher.Flush()
+				wgWorkers.Done()
+			})
+		}
+		wgWorkers.Wait()
+		t.duration.Record(mgr.nowFn().Sub(start))
+	}
+
+	// NB(xichen): if we should flush in this cycle, wait for the flush to finish before
+	// persisting in order to persist the most up-to-date flush times. Also we are not using
+	// the worker pool as persistence could be done asynchronously to avoid blocking
+	// the workers reserved for flushing.
+	if t.shouldPersist {
+		go mgr.persistFlushTimes(t.flushTimes)
+	}
+}
 
 // flushMetadata contains metadata information for a flush.
 type flushMetadata struct {

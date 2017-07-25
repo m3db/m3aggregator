@@ -38,7 +38,7 @@ import (
 )
 
 func TestMetricListPushBack(t *testing.T) {
-	l := newMetricList(time.Second, testOptions())
+	l := newMetricList(testShard, time.Second, testOptions())
 	elem := NewCounterElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, l.opts)
 
 	// Push a counter to the list
@@ -57,7 +57,7 @@ func TestMetricListPushBack(t *testing.T) {
 }
 
 func TestMetricListClose(t *testing.T) {
-	l := newMetricList(time.Second, testOptions())
+	l := newMetricList(testShard, time.Second, testOptions())
 	l.RLock()
 	require.False(t, l.closed)
 	l.RUnlock()
@@ -94,7 +94,7 @@ func TestMetricListFlush(t *testing.T) {
 		SetMaxFlushSize(100).
 		SetFlushHandler(handler)
 
-	l := newMetricList(0, opts)
+	l := newMetricList(testShard, 0, opts)
 	l.resolution = testStoragePolicy.Resolution().Window
 
 	// Intentionally cause a one-time error during encoding.
@@ -182,7 +182,9 @@ func TestMetricListFlush(t *testing.T) {
 		e.Value.(metricElem).MarkAsTombstoned()
 	}
 
-	// Force a flush.
+	// Move the time forward and force a flush.
+	nowTs = nowTs.Add(testStoragePolicy.Resolution().Window)
+	atomic.StoreInt64(&now, nowTs.UnixNano())
 	l.Flush()
 
 	// Assert all elements have been collected.
@@ -190,7 +192,7 @@ func TestMetricListFlush(t *testing.T) {
 }
 
 func TestMetricLists(t *testing.T) {
-	lists := newMetricLists(testOptions())
+	lists := newMetricLists(testShard, testOptions())
 	require.False(t, lists.closed)
 
 	// Create a new list.

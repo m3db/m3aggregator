@@ -34,6 +34,10 @@ import (
 	"github.com/uber-go/tally"
 )
 
+const (
+	defaultInitialFlushTimesCapacity = 16
+)
+
 type followerFlushManagerMetrics struct {
 	watchCreateErrors  tally.Counter
 	unmarshalErrors    tally.Counter
@@ -72,6 +76,7 @@ type followerFlushManager struct {
 	flushTimesKey     string
 	flushTimesUpdated bool
 	lastFlushed       time.Time
+	flushTask         *followerFlushTask
 	sleepFn           sleepFn
 	metrics           followerFlushManagerMetrics
 }
@@ -83,7 +88,7 @@ func newFollowerFlushManager(
 	nowFn := opts.ClockOptions().NowFn()
 	instrumentOpts := opts.InstrumentOptions()
 	scope := instrumentOpts.MetricsScope()
-	return &followerFlushManager{
+	mgr := &followerFlushManager{
 		nowFn:                 nowFn,
 		checkEvery:            opts.CheckEvery(),
 		workers:               opts.WorkerPool(),
@@ -98,6 +103,8 @@ func newFollowerFlushManager(
 		sleepFn:               time.Sleep,
 		metrics:               newFollowerFlushManagerMetrics(scope),
 	}
+	mgr.flushTask = &followerFlushTask{mgr: mgr}
+	return mgr
 }
 
 func (mgr *followerFlushManager) Open(shardSetID string) {
@@ -109,12 +116,9 @@ func (mgr *followerFlushManager) Open(shardSetID string) {
 }
 
 // NB(xichen): no actions needed for initializing the follower flush manager.
-func (mgr *followerFlushManager) Init(*sync.RWMutex, []*flushBucket) {}
+func (mgr *followerFlushManager) Init([]*flushBucket) {}
 
-func (mgr *followerFlushManager) Flush(
-	bucketLock *sync.RWMutex,
-	buckets []*flushBucket,
-) (bool, time.Duration) {
+func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.Duration) {
 	var (
 		shouldFlush        = false
 		flushersByInterval []flushersGroup
@@ -122,13 +126,12 @@ func (mgr *followerFlushManager) Flush(
 	// NB(xichen): a flush is triggered in the following scenarios:
 	// * The flush times persisted in kv have been updated since last flush.
 	// * Sufficient time (a.k.a. maxNoFlushDuration) has elapsed since last flush.
-	bucketLock.RLock()
 	mgr.Lock()
 	if mgr.flushTimesUpdated {
 		mgr.metrics.kvUpdateFlush.Inc(1)
 		shouldFlush = true
 		mgr.flushTimesUpdated = false
-		flushersByInterval = mgr.flushersFromKVUpdate(buckets)
+		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
 	} else {
 		now := mgr.nowFn()
 		durationSinceLastFlush := now.Sub(mgr.lastFlushed)
@@ -136,43 +139,28 @@ func (mgr *followerFlushManager) Flush(
 			mgr.metrics.forcedFlush.Inc(1)
 			shouldFlush = true
 			flushBeforeNanos := now.Add(-mgr.maxNoFlushDuration).Add(mgr.forcedFlushWindowSize).UnixNano()
-			flushersByInterval = mgr.flushersFromForcedFlush(buckets, flushBeforeNanos)
+			flushersByInterval = mgr.flushersFromForcedFlushWithLock(buckets, flushBeforeNanos)
 		}
 	}
 	mgr.Unlock()
-	bucketLock.RUnlock()
 
 	if !shouldFlush {
-		return false, mgr.checkEvery
+		return nil, mgr.checkEvery
 	}
-
-	var wgWorkers sync.WaitGroup
-	for _, group := range flushersByInterval {
-		start := mgr.nowFn()
-		for _, flusherWithTime := range group.flushers {
-			flusherWithTime := flusherWithTime
-			wgWorkers.Add(1)
-			mgr.workers.Go(func() {
-				flusherWithTime.flusher.FlushBefore(flusherWithTime.flushBeforeNanos)
-				wgWorkers.Done()
-			})
-		}
-		wgWorkers.Wait()
-		group.duration.Record(mgr.nowFn().Sub(start))
-	}
-	return true, 0
+	mgr.flushTask.flushersByInterval = flushersByInterval
+	return mgr.flushTask, 0
 }
 
 // NB(xichen): the follower flush manager flushes data based on the flush times
 // stored in kv and does not need to take extra actions when a new bucket is added.
 func (mgr *followerFlushManager) OnBucketAdded(int, *flushBucket) {}
 
-func (mgr *followerFlushManager) flushersFromKVUpdate(buckets []*flushBucket) []flushersGroup {
+func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBucket) []flushersGroup {
 	flushersByInterval := make([]flushersGroup, len(buckets))
 	for i, bucket := range buckets {
 		flushersByInterval[i].interval = bucket.interval
 		flushersByInterval[i].duration = bucket.duration
-		flushersByInterval[i].flushers = make([]flusherWithTime, 0, 16)
+		flushersByInterval[i].flushers = make([]flusherWithTime, 0, defaultInitialFlushTimesCapacity)
 		for _, flusher := range bucket.flushers {
 			shard := flusher.Shard()
 			shardFlushTimes, exists := mgr.proto.ByShard[shard]
@@ -203,7 +191,7 @@ func (mgr *followerFlushManager) flushersFromKVUpdate(buckets []*flushBucket) []
 	return flushersByInterval
 }
 
-func (mgr *followerFlushManager) flushersFromForcedFlush(
+func (mgr *followerFlushManager) flushersFromForcedFlushWithLock(
 	buckets []*flushBucket,
 	flushBeforeNanos int64,
 ) []flushersGroup {
@@ -211,7 +199,7 @@ func (mgr *followerFlushManager) flushersFromForcedFlush(
 	for i, bucket := range buckets {
 		flushersByInterval[i].interval = bucket.interval
 		flushersByInterval[i].duration = bucket.duration
-		flushersByInterval[i].flushers = make([]flusherWithTime, 0, 16)
+		flushersByInterval[i].flushers = make([]flusherWithTime, 0, defaultInitialFlushTimesCapacity)
 		for _, flusher := range bucket.flushers {
 			newFlushTarget := flusherWithTime{
 				flusher:          flusher,
@@ -264,6 +252,31 @@ func (mgr *followerFlushManager) watchFlushTimes() {
 		}
 		mgr.flushTimesUpdated = true
 		mgr.Unlock()
+	}
+}
+
+type followerFlushTask struct {
+	mgr                *followerFlushManager
+	flushersByInterval []flushersGroup
+}
+
+func (t *followerFlushTask) Run() {
+	var (
+		mgr       = t.mgr
+		wgWorkers sync.WaitGroup
+	)
+	for _, group := range t.flushersByInterval {
+		start := mgr.nowFn()
+		for _, flusherWithTime := range group.flushers {
+			flusherWithTime := flusherWithTime
+			wgWorkers.Add(1)
+			mgr.workers.Go(func() {
+				flusherWithTime.flusher.FlushBefore(flusherWithTime.flushBeforeNanos)
+				wgWorkers.Done()
+			})
+		}
+		wgWorkers.Wait()
+		group.duration.Record(mgr.nowFn().Sub(start))
 	}
 }
 

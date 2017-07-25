@@ -98,7 +98,7 @@ func NewElectionManagerOptions() ElectionManagerOptions {
 	return &electionManagerOptions{
 		clockOpts:         clock.NewOptions(),
 		instrumentOpts:    instrument.NewOptions(),
-		campaignOpts:      services.NewCampaignOptions(),
+		electionOpts:      services.NewElectionOptions(),
 		campaignRetryOpts: xretry.NewOptions(),
 		changeRetryOpts:   xretry.NewOptions(),
 		electionKeyFmt:    defaultElectionKeyFormat,

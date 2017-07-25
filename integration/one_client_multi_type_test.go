@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m3db/m3aggregator/aggregator"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,8 +37,7 @@ func TestOneClientMultiType(t *testing.T) {
 	}
 
 	// Test setup
-	testSetup, err := newTestSetup(newTestOptions())
-	require.NoError(t, err)
+	testSetup := newTestSetup(t, newTestOptions())
 	defer testSetup.close()
 
 	testSetup.aggregatorOpts =
@@ -49,6 +50,8 @@ func TestOneClientMultiType(t *testing.T) {
 	log.Info("test one client sending multiple types of metrics")
 	require.NoError(t, testSetup.startServer())
 	log.Info("server is now up")
+	require.NoError(t, testSetup.waitUntilLeader())
+	log.Info("server is now the leader")
 
 	var (
 		idPrefix = "foo"
@@ -81,7 +84,7 @@ func TestOneClientMultiType(t *testing.T) {
 	time.Sleep(4 * time.Second)
 
 	// Stop the server
-	require.NoError(t, testSetup.stopServer())
+	require.NoError(t, testSetup.stopServer(aggregator.ForceClose))
 	log.Info("server is now down")
 
 	// Validate results

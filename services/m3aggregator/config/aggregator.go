@@ -567,7 +567,10 @@ func (c electionManagerConfiguration) NewElectionManager(
 	if err != nil {
 		return nil, err
 	}
-	campaignOpts := services.NewCampaignOptions()
+	campaignOpts, err := services.NewCampaignOptions()
+	if err != nil {
+		return nil, err
+	}
 	if c.LeaderValue != "" {
 		campaignOpts = campaignOpts.SetLeaderValue(c.LeaderValue)
 	}
@@ -593,10 +596,7 @@ type electionConfiguration struct {
 }
 
 func (c electionConfiguration) NewElectionOptions() (services.ElectionOptions, error) {
-	opts, err := services.NewElectionOptions()
-	if err != nil {
-		return nil, err
-	}
+	opts := services.NewElectionOptions()
 	if c.LeaderTimeout != 0 {
 		opts = opts.SetLeaderTimeout(c.LeaderTimeout)
 	}
@@ -604,7 +604,7 @@ func (c electionConfiguration) NewElectionOptions() (services.ElectionOptions, e
 		opts = opts.SetResignTimeout(c.ResignTimeout)
 	}
 	if c.TTLSeconds != 0 {
-		opts = opts.SetTTL(c.TTLSeconds)
+		opts = opts.SetTTLSecs(c.TTLSeconds)
 	}
 	return opts, nil
 }

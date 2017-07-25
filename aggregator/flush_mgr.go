@@ -68,13 +68,18 @@ type FlushManager interface {
 	Close() error
 }
 
+// flushTask is a flush task.
+type flushTask interface {
+	Run()
+}
+
 // roleBasedFlushManager manages flushing data based on their elected roles.
 type roleBasedFlushManager interface {
 	Open(shardSetID string)
 
-	Init(bucketLock *sync.RWMutex, buckets []*flushBucket)
+	Init(buckets []*flushBucket)
 
-	Flush(bucketLock *sync.RWMutex, buckets []*flushBucket) (bool, time.Duration)
+	Prepare(buckets []*flushBucket) (flushTask, time.Duration)
 
 	OnBucketAdded(bucketIdx int, bucket *flushBucket)
 }
@@ -101,7 +106,7 @@ type flushManager struct {
 	status         flushManagerStatus
 	doneCh         chan struct{}
 	buckets        []*flushBucket
-	electionStatus electionStatus
+	electionStatus ElectionStatus
 	electionMgr    ElectionManager
 	leaderMgr      roleBasedFlushManager
 	followerMgr    roleBasedFlushManager
@@ -130,7 +135,7 @@ func NewFlushManager(opts FlushManagerOptions) FlushManager {
 		scope:          instrumentOpts.MetricsScope(),
 		checkEvery:     opts.CheckEvery(),
 		doneCh:         doneCh,
-		electionStatus: followerStatus,
+		electionStatus: FollowerStatus,
 		electionMgr:    opts.ElectionManager(),
 		leaderMgr:      leaderMgr,
 		followerMgr:    followerMgr,
@@ -212,7 +217,6 @@ func (mgr *flushManager) flush() {
 		mgr.RLock()
 		status := mgr.status
 		electionStatus := mgr.electionStatus
-		flushManager := mgr.flushManagerWithLock()
 		mgr.RUnlock()
 		if status == flushManagerClosed {
 			return
@@ -223,12 +227,16 @@ func (mgr *flushManager) flush() {
 		if electionStatus != newElectionStatus {
 			mgr.Lock()
 			mgr.electionStatus = newElectionStatus
-			flushManager = mgr.flushManagerWithLock()
+			mgr.flushManagerWithLock().Init(mgr.buckets)
 			mgr.Unlock()
-			flushManager.Init(&mgr.RWMutex, mgr.buckets)
 		}
 
-		_, waitFor := flushManager.Flush(&mgr.RWMutex, mgr.buckets)
+		mgr.RLock()
+		flushTask, waitFor := mgr.flushManagerWithLock().Prepare(mgr.buckets)
+		mgr.RUnlock()
+		if flushTask != nil {
+			flushTask.Run()
+		}
 		if waitFor > 0 {
 			mgr.sleepFn(waitFor)
 		}
@@ -237,9 +245,9 @@ func (mgr *flushManager) flush() {
 
 func (mgr *flushManager) flushManagerWithLock() roleBasedFlushManager {
 	switch mgr.electionStatus {
-	case followerStatus:
+	case FollowerStatus:
 		return mgr.followerMgr
-	case leaderStatus:
+	case LeaderStatus:
 		return mgr.leaderMgr
 	default:
 		// We should never get here.

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
@@ -88,7 +89,7 @@ func (agg *mockAggregator) AddMetricWithPoliciesList(
 	return nil
 }
 
-func (agg *mockAggregator) Close() error { return nil }
+func (agg *mockAggregator) Close(aggregator.CloseType) error { return nil }
 
 func (agg *mockAggregator) NumMetricsAdded() int {
 	agg.RLock()

@@ -20,16 +20,25 @@
 
 package integration
 
-import "time"
+import (
+	"time"
+
+	"github.com/m3db/m3cluster/kv"
+	"github.com/m3db/m3cluster/kv/mem"
+)
 
 const (
-	defaultServerStateChangeTimeout = 5 * time.Second
-	defaultClientBatchSize          = 1440
-	defaultClientConnectTimeout     = time.Second
-	defaultWorkerPoolSize           = 4
-	defaultInstanceID               = "localhost:6000"
-	defaultNumShards                = 1024
-	defaultPlacementKVKey           = "placement"
+	defaultServerStateChangeTimeout    = 5 * time.Second
+	defaultClientBatchSize             = 1440
+	defaultClientConnectTimeout        = time.Second
+	defaultWorkerPoolSize              = 4
+	defaultInstanceID                  = "localhost:6000"
+	defaultNumShards                   = 1024
+	defaultPlacementKVKey              = "/placement"
+	defaultElectionKeyFmt              = "/shardset/%s/lock"
+	defaultFlushTimesKeyFmt            = "/shardset/%s/flush"
+	defaultShardSetID                  = "0"
+	defaultElectionStatusChangeTimeout = time.Second
 )
 
 type testOptions interface {
@@ -63,6 +72,30 @@ type testOptions interface {
 	// PlacementKVKey returns the placement kv key.
 	PlacementKVKey() string
 
+	// SetElectionKeyFmt sets the election key format.
+	SetElectionKeyFmt(value string) testOptions
+
+	// ElectionKeyFmt returns the election key format.
+	ElectionKeyFmt() string
+
+	// SetShardSetID sets the shard set id.
+	SetShardSetID(value string) testOptions
+
+	// ShardSetID returns the shard set id.
+	ShardSetID() string
+
+	// SetFlushTimesKeyFmt sets the flush times key format.
+	SetFlushTimesKeyFmt(value string) testOptions
+
+	// FlushTimesKeyFmt returns the flush times key format.
+	FlushTimesKeyFmt() string
+
+	// SetKVStore sets the key value store.
+	SetKVStore(value kv.Store) testOptions
+
+	// KVStore returns the key value store.
+	KVStore() kv.Store
+
 	// SetClientBatchSize sets the client-side batch size.
 	SetClientBatchSize(value int) testOptions
 
@@ -81,6 +114,12 @@ type testOptions interface {
 	// ServerStateChangeTimeout returns the client connect timeout.
 	ServerStateChangeTimeout() time.Duration
 
+	// SetElectionStatusChangeTimeout sets the election status change timeout.
+	SetElectionStatusChangeTimeout(value time.Duration) testOptions
+
+	// ElectionStatusChangeTimeout returns the election status change timeout.
+	ElectionStatusChangeTimeout() time.Duration
+
 	// SetWorkerPoolSize sets the number of workers in the worker pool.
 	SetWorkerPoolSize(value int) testOptions
 
@@ -89,26 +128,36 @@ type testOptions interface {
 }
 
 type options struct {
-	msgpackAddr              string
-	httpAddr                 string
-	instanceID               string
-	numShards                int
-	placementKVKey           string
-	serverStateChangeTimeout time.Duration
-	workerPoolSize           int
-	clientBatchSize          int
-	clientConnectTimeout     time.Duration
+	msgpackAddr                 string
+	httpAddr                    string
+	instanceID                  string
+	numShards                   int
+	placementKVKey              string
+	electionKeyFmt              string
+	shardSetID                  string
+	flushTimesKeyFmt            string
+	kvStore                     kv.Store
+	serverStateChangeTimeout    time.Duration
+	workerPoolSize              int
+	clientBatchSize             int
+	clientConnectTimeout        time.Duration
+	electionStatusChangeTimeout time.Duration
 }
 
 func newTestOptions() testOptions {
 	return &options{
-		instanceID:               defaultInstanceID,
-		numShards:                defaultNumShards,
-		placementKVKey:           defaultPlacementKVKey,
-		serverStateChangeTimeout: defaultServerStateChangeTimeout,
-		workerPoolSize:           defaultWorkerPoolSize,
-		clientBatchSize:          defaultClientBatchSize,
-		clientConnectTimeout:     defaultClientConnectTimeout,
+		instanceID:                  defaultInstanceID,
+		numShards:                   defaultNumShards,
+		placementKVKey:              defaultPlacementKVKey,
+		electionKeyFmt:              defaultElectionKeyFmt,
+		shardSetID:                  defaultShardSetID,
+		flushTimesKeyFmt:            defaultFlushTimesKeyFmt,
+		kvStore:                     mem.NewStore(),
+		serverStateChangeTimeout:    defaultServerStateChangeTimeout,
+		workerPoolSize:              defaultWorkerPoolSize,
+		clientBatchSize:             defaultClientBatchSize,
+		clientConnectTimeout:        defaultClientConnectTimeout,
+		electionStatusChangeTimeout: defaultElectionStatusChangeTimeout,
 	}
 }
 
@@ -162,6 +211,46 @@ func (o *options) PlacementKVKey() string {
 	return o.placementKVKey
 }
 
+func (o *options) SetElectionKeyFmt(value string) testOptions {
+	opts := *o
+	opts.electionKeyFmt = value
+	return &opts
+}
+
+func (o *options) ElectionKeyFmt() string {
+	return o.electionKeyFmt
+}
+
+func (o *options) SetShardSetID(value string) testOptions {
+	opts := *o
+	opts.shardSetID = value
+	return &opts
+}
+
+func (o *options) ShardSetID() string {
+	return o.shardSetID
+}
+
+func (o *options) SetFlushTimesKeyFmt(value string) testOptions {
+	opts := *o
+	opts.flushTimesKeyFmt = value
+	return &opts
+}
+
+func (o *options) FlushTimesKeyFmt() string {
+	return o.flushTimesKeyFmt
+}
+
+func (o *options) SetKVStore(value kv.Store) testOptions {
+	opts := *o
+	opts.kvStore = value
+	return &opts
+}
+
+func (o *options) KVStore() kv.Store {
+	return o.kvStore
+}
+
 func (o *options) SetClientBatchSize(value int) testOptions {
 	opts := *o
 	opts.clientBatchSize = value
@@ -190,6 +279,16 @@ func (o *options) SetServerStateChangeTimeout(value time.Duration) testOptions {
 
 func (o *options) ServerStateChangeTimeout() time.Duration {
 	return o.serverStateChangeTimeout
+}
+
+func (o *options) SetElectionStatusChangeTimeout(value time.Duration) testOptions {
+	opts := *o
+	opts.electionStatusChangeTimeout = value
+	return &opts
+}
+
+func (o *options) ElectionStatusChangeTimeout() time.Duration {
+	return o.electionStatusChangeTimeout
 }
 
 func (o *options) SetWorkerPoolSize(value int) testOptions {

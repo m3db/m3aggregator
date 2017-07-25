@@ -42,7 +42,7 @@ type ElectionManager interface {
 	Open(shardSetID string) error
 
 	// ElectionStatus returns the election status.
-	ElectionStatus() electionStatus
+	ElectionStatus() ElectionStatus
 
 	// Resign stops the election and resigns from the ongoing campaign if any, thereby
 	// forcing the current instance to become a follower. If the provided context
@@ -71,11 +71,13 @@ const (
 	electionManagerClosed
 )
 
-type electionStatus int
+// ElectionStatus is the election status.
+type ElectionStatus int
 
+// A list of supported election statuses.
 const (
-	followerStatus electionStatus = iota
-	leaderStatus
+	FollowerStatus ElectionStatus = iota
+	LeaderStatus
 )
 
 type electionManagerMetrics struct {
@@ -123,7 +125,7 @@ type electionManager struct {
 	doneCh           chan struct{}
 	electionKey      string
 	electionWg       sync.WaitGroup
-	electionStatus   electionStatus
+	electionStatus   ElectionStatus
 	changeInProgress bool
 	changeCancelFn   context.CancelFunc
 	changeWg         sync.WaitGroup
@@ -151,7 +153,7 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		status:          electionManagerNotOpen,
 		resignCh:        make(chan struct{}, 1),
 		doneCh:          make(chan struct{}),
-		electionStatus:  followerStatus,
+		electionStatus:  FollowerStatus,
 		sleepFn:         time.Sleep,
 		metrics:         newElectionManagerMetrics(instrumentOpts.MetricsScope()),
 	}
@@ -167,14 +169,14 @@ func (mgr *electionManager) Open(shardSetID string) error {
 		return errElectionManagerExpectNotOpen
 	}
 	mgr.status = electionManagerOpen
-	mgr.electionStatus = followerStatus
+	mgr.electionStatus = FollowerStatus
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
 	mgr.electionWg.Add(1)
 	go mgr.startElectionLoop()
 	return nil
 }
 
-func (mgr *electionManager) ElectionStatus() electionStatus {
+func (mgr *electionManager) ElectionStatus() ElectionStatus {
 	mgr.RLock()
 	electionStatus := mgr.electionStatus
 	mgr.RUnlock()
@@ -217,7 +219,7 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 		case <-ctx.Done():
 			ctxDone = true
 		default:
-			isFollower = mgr.ElectionStatus() == followerStatus
+			isFollower = mgr.ElectionStatus() == FollowerStatus
 		}
 		if ctxDone || isFollower {
 			break
@@ -229,7 +231,7 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 	// the election status.
 	if !isFollower {
 		mgr.cancelInProgressChange()
-		isFollower = mgr.ElectionStatus() == followerStatus
+		isFollower = mgr.ElectionStatus() == FollowerStatus
 	}
 
 	// If the election status is not follower, it means we failed to establish
@@ -316,17 +318,17 @@ func (mgr *electionManager) startElectionLoop() {
 		}
 
 		currStatus := mgr.ElectionStatus()
-		newStatus := followerStatus
+		newStatus := FollowerStatus
 		if campaignStatus.State == campaign.Leader {
-			newStatus = leaderStatus
+			newStatus = LeaderStatus
 		}
 		mgr.changeElectionStatus(currStatus, newStatus)
 	}
 }
 
-func (mgr *electionManager) changeElectionStatus(currStatus, newStatus electionStatus) {
+func (mgr *electionManager) changeElectionStatus(currStatus, newStatus ElectionStatus) {
 	if currStatus == newStatus {
-		if newStatus != leaderStatus {
+		if newStatus != LeaderStatus {
 			return
 		}
 		// We are in the middle of verifying leader and changing from leader to follower
@@ -338,14 +340,14 @@ func (mgr *electionManager) changeElectionStatus(currStatus, newStatus electionS
 			// election status to leader in case the role changing goroutine managed to change
 			// the status to follower just before it was cancelled.
 			mgr.Lock()
-			mgr.electionStatus = leaderStatus
+			mgr.electionStatus = LeaderStatus
 			mgr.Unlock()
 		}
 		return
 	}
 
 	// Changing role from follower to leader.
-	if currStatus == followerStatus && newStatus == leaderStatus {
+	if currStatus == FollowerStatus && newStatus == LeaderStatus {
 		mgr.Lock()
 		mgr.electionStatus = newStatus
 		mgr.Unlock()
@@ -417,7 +419,7 @@ func (mgr *electionManager) leaderToFollower(ctx context.Context) {
 			return errLeaderNotChanged
 		}
 		mgr.Lock()
-		mgr.electionStatus = followerStatus
+		mgr.electionStatus = FollowerStatus
 		mgr.changeCancelFn = nil
 		mgr.changeInProgress = false
 		mgr.Unlock()
@@ -453,7 +455,7 @@ func (mgr *electionManager) reportMetrics() {
 func (mgr *electionManager) logError(desc string, err error) {
 	mgr.logger.WithFields(
 		xlog.NewLogField("electionKey", mgr.electionKey),
-		xlog.NewLogField("electionTTL", time.Duration(mgr.electionOpts.TTL())*time.Second),
+		xlog.NewLogField("electionTTL", time.Duration(mgr.electionOpts.TTLSecs())*time.Second),
 		xlog.NewLogField("leaderValue", mgr.campaignOpts.LeaderValue()),
 		xlog.NewLogErrField(err),
 	).Error(desc)
