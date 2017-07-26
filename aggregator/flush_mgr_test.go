@@ -21,6 +21,7 @@
 package aggregator
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,9 +30,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	testShardSetID = "testShardSet"
-)
+func TestFlushManagerOpenAlreadyOpen(t *testing.T) {
+	mgr, _ := testFlushManager()
+	mgr.status = flushManagerOpen
+	require.Equal(t, errFlushManagerAlreadyOpenOrClosed, mgr.Open(testShardSetID))
+}
+
+func TestFlushManagerOpenSuccess(t *testing.T) {
+	mgr, _ := testFlushManager()
+	mgr.leaderMgr = &mockRoleBasedFlushManager{
+		openFn: func(string) {},
+	}
+	mgr.followerMgr = &mockRoleBasedFlushManager{
+		openFn: func(string) {},
+	}
+	require.NoError(t, mgr.Open(testShardSetID))
+}
 
 func TestFlushManagerRegisterClosed(t *testing.T) {
 	mgr, _ := testFlushManager()
@@ -95,6 +109,12 @@ func TestFlushManagerRegisterSuccess(t *testing.T) {
 	}
 }
 
+func TestFlushManagerCloseAlreadyClosed(t *testing.T) {
+	mgr, _ := testFlushManager()
+	mgr.status = flushManagerClosed
+	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Close())
+}
+
 func TestFlushManagerCloseSuccess(t *testing.T) {
 	opts, _ := testFlushManagerOptions()
 	opts = opts.SetCheckEvery(time.Second)
@@ -110,27 +130,63 @@ func TestFlushManagerCloseSuccess(t *testing.T) {
 }
 
 func TestFlushManagerFlush(t *testing.T) {
+	var (
+		slept           int32
+		followerFlushes int
+		followerInits   int
+		leaderFlushes   int
+		leaderInits     int
+		signalCh        = make(chan struct{})
+		captured        []*flushBucket
+	)
+	followerFlushTask := &mockFlushTask{
+		runFn: func() { followerFlushes++ },
+	}
+	leaderFlushTask := &mockFlushTask{
+		runFn: func() { leaderFlushes++ },
+	}
+	sleepFn := func(time.Duration) {
+		atomic.AddInt32(&slept, 1)
+		<-signalCh
+	}
+	waitUntilSlept := func(v int) {
+		for {
+			if atomic.LoadInt32(&slept) == int32(v) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	electionManager := &mockElectionManager{
+		electionStatus: FollowerStatus,
+	}
+
+	// Initialize flush manager.
 	opts := NewFlushManagerOptions().
 		SetCheckEvery(100 * time.Millisecond).
 		SetJitterEnabled(false)
 	mgr := NewFlushManager(opts).(*flushManager)
-
-	var captured []*flushBucket
-	mgr.electionMgr = &mockElectionManager{
-		electionStatus: FollowerStatus,
-	}
+	mgr.sleepFn = sleepFn
+	mgr.electionMgr = electionManager
 	mgr.leaderMgr = &mockRoleBasedFlushManager{
 		openFn: func(string) {},
+		initFn: func(buckets []*flushBucket) { leaderInits++ },
+		prepareFn: func(buckets []*flushBucket) (flushTask, time.Duration) {
+			captured = buckets
+			return leaderFlushTask, time.Second
+		},
 	}
 	mgr.followerMgr = &mockRoleBasedFlushManager{
 		openFn: func(string) {},
+		initFn: func(buckets []*flushBucket) { followerInits++ },
 		prepareFn: func(buckets []*flushBucket) (flushTask, time.Duration) {
 			captured = buckets
-			return nil, 0
+			return followerFlushTask, time.Second
 		},
 		onBucketAddedFn: func(bucketIdx int, bucket *flushBucket) {},
 	}
 
+	// Flush as a follower.
 	require.NoError(t, mgr.Open(testShardSetID))
 	flushers := []PeriodicFlusher{
 		&mockFlusher{flushInterval: 100 * time.Millisecond},
@@ -141,8 +197,33 @@ func TestFlushManagerFlush(t *testing.T) {
 	for _, flusher := range flushers {
 		require.NoError(t, mgr.Register(flusher))
 	}
-	time.Sleep(1200 * time.Millisecond)
-	mgr.Close()
+	waitUntilSlept(1)
+	require.Equal(t, 1, followerFlushes)
+	require.Equal(t, 0, leaderFlushes)
+	require.Equal(t, 0, followerInits)
+	require.Equal(t, 0, leaderInits)
+
+	// Transition to leader.
+	electionManager.Lock()
+	electionManager.electionStatus = LeaderStatus
+	electionManager.Unlock()
+	signalCh <- struct{}{}
+	waitUntilSlept(2)
+	require.Equal(t, 1, followerFlushes)
+	require.Equal(t, 1, leaderFlushes)
+	require.Equal(t, 0, followerInits)
+	require.Equal(t, 1, leaderInits)
+
+	// Transition to follower.
+	electionManager.Lock()
+	electionManager.electionStatus = FollowerStatus
+	electionManager.Unlock()
+	signalCh <- struct{}{}
+	waitUntilSlept(3)
+	require.Equal(t, 2, followerFlushes)
+	require.Equal(t, 1, leaderFlushes)
+	require.Equal(t, 1, followerInits)
+	require.Equal(t, 1, leaderInits)
 
 	expectedBuckets := []*flushBucket{
 		&flushBucket{
@@ -163,6 +244,9 @@ func TestFlushManagerFlush(t *testing.T) {
 		require.Equal(t, expectedBuckets[i].interval, captured[i].interval)
 		require.Equal(t, expectedBuckets[i].flushers, captured[i].flushers)
 	}
+
+	mgr.status = flushManagerClosed
+	close(signalCh)
 }
 
 func testFlushManager() (*flushManager, *time.Time) {
@@ -224,3 +308,11 @@ func (m *mockRoleBasedFlushManager) Prepare(buckets []*flushBucket) (flushTask, 
 func (m *mockRoleBasedFlushManager) OnBucketAdded(bucketIdx int, bucket *flushBucket) {
 	m.onBucketAddedFn(bucketIdx, bucket)
 }
+
+type runFn func()
+
+type mockFlushTask struct {
+	runFn runFn
+}
+
+func (t *mockFlushTask) Run() { t.runFn() }

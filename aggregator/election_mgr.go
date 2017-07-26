@@ -151,7 +151,7 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		leaderService:   opts.LeaderService(),
 		leaderValue:     campaignOpts.LeaderValue(),
 		status:          electionManagerNotOpen,
-		resignCh:        make(chan struct{}, 1),
+		resignCh:        make(chan struct{}),
 		doneCh:          make(chan struct{}),
 		electionStatus:  FollowerStatus,
 		sleepFn:         time.Sleep,
@@ -169,7 +169,6 @@ func (mgr *electionManager) Open(shardSetID string) error {
 		return errElectionManagerExpectNotOpen
 	}
 	mgr.status = electionManagerOpen
-	mgr.electionStatus = FollowerStatus
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
 	mgr.electionWg.Add(1)
 	go mgr.startElectionLoop()
@@ -204,7 +203,7 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 	}
 
 	// Wait for the election loop to exit after resigning.
-	mgr.resignCh <- struct{}{}
+	close(mgr.resignCh)
 	mgr.electionWg.Wait()
 
 	// Now wait for the current instance to become a follower.
@@ -240,7 +239,9 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 	if !isFollower {
 		mgr.Lock()
 		mgr.status = electionManagerOpen
-		mgr.startElectionLoop()
+		mgr.resignCh = make(chan struct{})
+		mgr.electionWg.Add(1)
+		go mgr.startElectionLoop()
 		mgr.Unlock()
 		err := fmt.Errorf("instance resigned but is not follower: %v", ctx.Err())
 		mgr.metrics.resignNotFollower.Inc(1)
@@ -262,9 +263,11 @@ func (mgr *electionManager) Close() error {
 	if mgr.status != electionManagerOpen && mgr.status != electionManagerResigned {
 		return errElectionManagerExpectOpenOrResigned
 	}
-	mgr.status = electionManagerClosed
-	close(mgr.resignCh)
+	if mgr.status == electionManagerOpen {
+		close(mgr.resignCh)
+	}
 	close(mgr.doneCh)
+	mgr.status = electionManagerClosed
 	return nil
 }
 

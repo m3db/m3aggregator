@@ -46,6 +46,7 @@ const (
 )
 
 var (
+	testShardSetID  = "testShardSet"
 	testValidMetric = unaggregated.MetricUnion{
 		Type:       unaggregated.CounterType,
 		ID:         []byte("foo"),

@@ -152,6 +152,7 @@ func (mgr *leaderFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.
 	)
 	durationSinceLastPersist := now.Sub(mgr.lastPersistAt)
 	if mgr.flushedSincePersist && durationSinceLastPersist >= mgr.flushTimesPersistEvery {
+		shouldPersist = true
 		mgr.lastPersistAt = now
 		mgr.flushedSincePersist = false
 		flushTimes = mgr.prepareFlushTimesWithLock(buckets)
@@ -241,6 +242,13 @@ type leaderFlushTask struct {
 
 func (t *leaderFlushTask) Run() {
 	mgr := t.mgr
+
+	// NB(xichen): we intentionally do not use the worker pool as persistence could be
+	// done asynchronously to avoid blocking the workers reserved for flushing.
+	if t.shouldPersist {
+		go mgr.persistFlushTimes(t.flushTimes)
+	}
+
 	if t.shouldFlush {
 		var wgWorkers sync.WaitGroup
 		start := mgr.nowFn()
@@ -254,14 +262,6 @@ func (t *leaderFlushTask) Run() {
 		}
 		wgWorkers.Wait()
 		t.duration.Record(mgr.nowFn().Sub(start))
-	}
-
-	// NB(xichen): if we should flush in this cycle, wait for the flush to finish before
-	// persisting in order to persist the most up-to-date flush times. Also we are not using
-	// the worker pool as persistence could be done asynchronously to avoid blocking
-	// the workers reserved for flushing.
-	if t.shouldPersist {
-		go mgr.persistFlushTimes(t.flushTimes)
 	}
 }
 
