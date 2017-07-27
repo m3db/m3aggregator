@@ -1,5 +1,5 @@
-hash: 69eef453a5ec0179b6baf7c8d45e0f9a42fc88c26aa017304f6fd6c99e9d7b46
-updated: 2017-07-25T17:24:09.635774561-04:00
+hash: dbe6c9d9030c6eed2c23fc5504fa05dff4b9dbe3a0f66de858275a55674a054b
+updated: 2017-07-27T11:11:38.629193586-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -122,7 +122,7 @@ imports:
 - name: github.com/karlseguin/ccache
   version: a2d62155777b39595c825ed3824279e642a5db3c
 - name: github.com/m3db/m3cluster
-  version: ca516f7087f4e012ab7194b7f8bdb7214a829d1f
+  version: bf453087814a71866f72d50aca86bbd23176b46a
   subpackages:
   - client
   - client/etcd

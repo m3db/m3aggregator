@@ -35,6 +35,7 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler"
 	"github.com/m3db/m3cluster/client"
 	etcdclient "github.com/m3db/m3cluster/client/etcd"
+	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/placement"
 	"github.com/m3db/m3metrics/policy"
@@ -127,11 +128,17 @@ type AggregatorConfiguration struct {
 	// Client configuration for key value store.
 	KVClient kvClientConfiguration `yaml:"kvClient" validate:"nonzero"`
 
+	// KV namespace.
+	KVNamespace string `yaml:"kvNamespace" validate:"nonzero"`
+
 	// Placement watcher configuration for watching placement updates.
 	PlacementWatcher placement.WatcherConfiguration `yaml:"placementWatcher"`
 
 	// Sharding function type.
 	ShardFnType *shardFnType `yaml:"shardFnType"`
+
+	// Resign timeout.
+	ResignTimeout time.Duration `yaml:"resignTimeout"`
 
 	// Election manager.
 	ElectionManager electionManagerConfiguration `yaml:"electionManager"`
@@ -162,9 +169,6 @@ type AggregatorConfiguration struct {
 
 	// Default policies.
 	DefaultPolicies []policy.Policy `yaml:"defaultPolicies" validate:"nonzero"`
-
-	// Resign timeout.
-	ResignTimeout time.Duration `yaml:"resignTimeout"`
 
 	// Pool of counter elements.
 	CounterElemPool pool.ObjectPoolConfiguration `yaml:"counterElemPool"`
@@ -247,13 +251,14 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	if err != nil {
 		return nil, err
 	}
-
-	// Set placement watcher options.
-	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("placement-watcher"))
-	watcherOpts, err := c.PlacementWatcher.NewOptions(client, iOpts)
+	store, err := client.Store(c.KVNamespace)
 	if err != nil {
 		return nil, err
 	}
+
+	// Set placement watcher options.
+	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("placement-watcher"))
+	watcherOpts := c.PlacementWatcher.NewOptions(store, iOpts)
 	opts = opts.SetStagedPlacementWatcherOptions(watcherOpts)
 
 	// Set sharding function.
@@ -267,9 +272,14 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	}
 	opts = opts.SetShardFn(shardFn)
 
+	// Set resign timeout.
+	if c.ResignTimeout != 0 {
+		opts = opts.SetResignTimeout(c.ResignTimeout)
+	}
+
 	// Set election manager.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("election-manager"))
-	electionManager, err := c.ElectionManager.NewElectionManager(client, instrumentOpts)
+	electionManager, err := c.ElectionManager.NewElectionManager(client, iOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +287,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 
 	// Set flush manager.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("flush-manager"))
-	flushManager, err := c.FlushManager.NewFlushManager(client, electionManager, iOpts)
+	flushManager, err := c.FlushManager.NewFlushManager(store, electionManager, iOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -316,11 +326,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	copy(policies, c.DefaultPolicies)
 	sort.Sort(policy.ByResolutionAsc(policies))
 	opts = opts.SetDefaultPolicies(policies)
-
-	// Set resign timeout.
-	if c.ResignTimeout != 0 {
-		opts = opts.SetResignTimeout(c.ResignTimeout)
-	}
 
 	// Set counter elem pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("counter-elem-pool"))
@@ -639,9 +644,6 @@ type flushManagerConfiguration struct {
 	// Number of workers per CPU.
 	NumWorkersPerCPU float64 `yaml:"numWorkersPerCPU" validate:"min=0.0,max=1.0"`
 
-	// Flush times namespace.
-	FlushTimesNamespace string `yaml:"flushTimesNamespace"`
-
 	// Flush times key format.
 	FlushTimesKeyFmt string `yaml:"flushTimesKeyFmt" validate:"nonzero"`
 
@@ -652,18 +654,14 @@ type flushManagerConfiguration struct {
 	MaxNoFlushDuration time.Duration `yaml:"maxNoFlushDuration"`
 
 	// Window size for a forced flush.
-	ForcedFlushWindowSize time.Duration `yaml:"ForcedFlushWindowSize"`
+	ForcedFlushWindowSize time.Duration `yaml:"forcedFlushWindowSize"`
 }
 
 func (c flushManagerConfiguration) NewFlushManager(
-	client client.Client,
+	store kv.Store,
 	electionManager aggregator.ElectionManager,
 	instrumentOpts instrument.Options,
 ) (aggregator.FlushManager, error) {
-	store, err := client.Store(c.FlushTimesNamespace)
-	if err != nil {
-		return nil, err
-	}
 	opts := aggregator.NewFlushManagerOptions().
 		SetInstrumentOptions(instrumentOpts).
 		SetElectionManager(electionManager).
