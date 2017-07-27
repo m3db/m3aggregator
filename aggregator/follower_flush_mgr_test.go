@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/m3db/m3cluster/kv/mem"
-	"github.com/uber-go/tally"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 )
 
 func TestFollowerFlushManagerOpen(t *testing.T) {
@@ -45,15 +45,43 @@ func TestFollowerFlushManagerOpen(t *testing.T) {
 	require.NoError(t, err)
 	for {
 		mgr.RLock()
-		updated := mgr.flushTimesUpdated
+		state := mgr.flushTimesState
 		mgr.RUnlock()
-		if updated {
+		if state != flushTimesUninitialized {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	require.Equal(t, *testFlushTimes, mgr.proto)
 	close(doneCh)
+}
+
+func TestFollowerFlushManagerCanNotLeadFlushTimesNotProcessed(t *testing.T) {
+	doneCh := make(chan struct{})
+	opts := NewFlushManagerOptions()
+	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	mgr.flushTimesState = flushTimesUpdated
+	require.False(t, mgr.CanLead())
+}
+
+func TestFollowerFlushManagerCanNotLeadFlushWindowsNotEnded(t *testing.T) {
+	doneCh := make(chan struct{})
+	opts := NewFlushManagerOptions()
+	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	mgr.flushTimesState = flushTimesProcessed
+	mgr.proto = *testFlushTimes
+	mgr.openedAt = time.Unix(3624, 0)
+	require.False(t, mgr.CanLead())
+}
+
+func TestFollowerFlushManagerCanLead(t *testing.T) {
+	doneCh := make(chan struct{})
+	opts := NewFlushManagerOptions()
+	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	mgr.flushTimesState = flushTimesProcessed
+	mgr.proto = *testFlushTimes
+	mgr.openedAt = time.Unix(3599, 0)
+	require.True(t, mgr.CanLead())
 }
 
 func TestFollowerFlushManagerPrepareNoFlush(t *testing.T) {
@@ -65,7 +93,7 @@ func TestFollowerFlushManagerPrepareNoFlush(t *testing.T) {
 		SetCheckEvery(time.Second)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
 	mgr.nowFn = nowFn
-	mgr.flushTimesUpdated = false
+	mgr.flushTimesState = flushTimesProcessed
 	mgr.lastFlushed = now
 
 	flushTask, dur := mgr.Prepare(testFlushBuckets)
@@ -79,7 +107,7 @@ func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
 		SetMaxNoFlushDuration(time.Minute).
 		SetCheckEvery(time.Second)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
-	mgr.flushTimesUpdated = true
+	mgr.flushTimesState = flushTimesUpdated
 	mgr.proto = *testFlushTimes
 
 	flushTask, dur := mgr.Prepare(testFlushBuckets)
@@ -90,11 +118,11 @@ func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[0].flushers[0],
-					flushBeforeNanos: 1000,
+					flushBeforeNanos: 3663000000000,
 				},
 				{
 					flusher:          testFlushBuckets[0].flushers[1],
-					flushBeforeNanos: 1500,
+					flushBeforeNanos: 3668000000000,
 				},
 			},
 		},
@@ -103,7 +131,7 @@ func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[1].flushers[0],
-					flushBeforeNanos: 1200,
+					flushBeforeNanos: 3660000000000,
 				},
 			},
 		},
@@ -112,7 +140,7 @@ func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[2].flushers[0],
-					flushBeforeNanos: 2000,
+					flushBeforeNanos: 3600000000000,
 				},
 			},
 		},
@@ -134,7 +162,7 @@ func TestFollowerFlushManagerPrepareMaxNoFlushDurationExceeded(t *testing.T) {
 		SetCheckEvery(time.Second)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
 	mgr.nowFn = nowFn
-	mgr.flushTimesUpdated = false
+	mgr.flushTimesState = flushTimesProcessed
 	mgr.lastFlushed = now
 
 	now = now.Add(2 * time.Second)

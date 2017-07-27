@@ -59,7 +59,7 @@ var (
 	defaultEntryCheckInterval        = time.Hour
 	defaultEntryCheckBatchPercent    = 0.01
 	defaultMaxTimerBatchSizePerWrite = 0
-	defaultGracefulCloseTimeout      = 5 * time.Minute
+	defaultResignTimeout             = 5 * time.Minute
 	defaultDefaultPolicies           = []policy.Policy{
 		policy.NewPolicy(policy.NewStoragePolicy(10*time.Second, xtime.Second, 2*24*time.Hour), policy.DefaultAggregationID),
 		policy.NewPolicy(policy.NewStoragePolicy(time.Minute, xtime.Minute, 40*24*time.Hour), policy.DefaultAggregationID),
@@ -133,7 +133,7 @@ type options struct {
 	maxTimerBatchSizePerWrite      int
 	defaultPolicies                []policy.Policy
 	electionManager                ElectionManager
-	gracefulCloseTimeout           time.Duration
+	resignTimeout                  time.Duration
 	entryPool                      EntryPool
 	counterElemPool                CounterElemPool
 	timerElemPool                  TimerElemPool
@@ -195,7 +195,7 @@ func NewOptions() Options {
 		entryCheckBatchPercent:         defaultEntryCheckBatchPercent,
 		maxTimerBatchSizePerWrite:      defaultMaxTimerBatchSizePerWrite,
 		defaultPolicies:                defaultDefaultPolicies,
-		gracefulCloseTimeout:           defaultGracefulCloseTimeout,
+		resignTimeout:                  defaultResignTimeout,
 		counterSuffixOverride:          defaultCounterSuffixOverride,
 		timerSuffixOverride:            defaultTimerSuffixOverride,
 		gaugeSuffixOverride:            defaultGaugeSuffixOverride,
@@ -568,14 +568,14 @@ func (o *options) DefaultPolicies() []policy.Policy {
 	return o.defaultPolicies
 }
 
-func (o *options) SetGracefulCloseTimeout(value time.Duration) Options {
+func (o *options) SetResignTimeout(value time.Duration) Options {
 	opts := *o
-	opts.gracefulCloseTimeout = value
+	opts.resignTimeout = value
 	return &opts
 }
 
-func (o *options) GracefulCloseTimeout() time.Duration {
-	return o.gracefulCloseTimeout
+func (o *options) ResignTimeout() time.Duration {
+	return o.resignTimeout
 }
 
 func (o *options) SetEntryPool(value EntryPool) Options {

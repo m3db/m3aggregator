@@ -61,11 +61,20 @@ type FlushManager interface {
 	// Open opens the flush manager for a given shard set.
 	Open(shardSetID string) error
 
+	// Status returns the flush status.
+	Status() FlushStatus
+
 	// Register registers a metric list with the flush manager.
 	Register(flusher PeriodicFlusher) error
 
 	// Close closes the flush manager.
 	Close() error
+}
+
+// FlushStatus is the flush status.
+type FlushStatus struct {
+	ElectionState string `json:"electionState"`
+	CanLead       bool   `json:"canLead"`
 }
 
 // flushTask is a flush task.
@@ -82,6 +91,8 @@ type roleBasedFlushManager interface {
 	Prepare(buckets []*flushBucket) (flushTask, time.Duration)
 
 	OnBucketAdded(bucketIdx int, bucket *flushBucket)
+
+	CanLead() bool
 }
 
 var (
@@ -89,10 +100,10 @@ var (
 	errFlushManagerNotOpenOrClosed     = errors.New("flush manager is not open or closed")
 )
 
-type flushManagerStatus int
+type flushManagerState int
 
 const (
-	flushManagerNotOpen flushManagerStatus = iota
+	flushManagerNotOpen flushManagerState = iota
 	flushManagerOpen
 	flushManagerClosed
 )
@@ -103,15 +114,15 @@ type flushManager struct {
 	scope      tally.Scope
 	checkEvery time.Duration
 
-	status         flushManagerStatus
-	doneCh         chan struct{}
-	buckets        []*flushBucket
-	electionStatus ElectionStatus
-	electionMgr    ElectionManager
-	leaderMgr      roleBasedFlushManager
-	followerMgr    roleBasedFlushManager
-	sleepFn        sleepFn
-	wgFlush        sync.WaitGroup
+	state         flushManagerState
+	doneCh        chan struct{}
+	buckets       []*flushBucket
+	electionState ElectionState
+	electionMgr   ElectionManager
+	leaderMgr     roleBasedFlushManager
+	followerMgr   roleBasedFlushManager
+	sleepFn       sleepFn
+	wgFlush       sync.WaitGroup
 }
 
 // NewFlushManager creates a new flush manager.
@@ -132,14 +143,14 @@ func NewFlushManager(opts FlushManagerOptions) FlushManager {
 	followerMgr := newFollowerFlushManager(doneCh, opts.SetInstrumentOptions(followerMgrInstrumentOpts))
 
 	return &flushManager{
-		scope:          instrumentOpts.MetricsScope(),
-		checkEvery:     opts.CheckEvery(),
-		doneCh:         doneCh,
-		electionStatus: FollowerStatus,
-		electionMgr:    opts.ElectionManager(),
-		leaderMgr:      leaderMgr,
-		followerMgr:    followerMgr,
-		sleepFn:        time.Sleep,
+		scope:         instrumentOpts.MetricsScope(),
+		checkEvery:    opts.CheckEvery(),
+		doneCh:        doneCh,
+		electionState: FollowerState,
+		electionMgr:   opts.ElectionManager(),
+		leaderMgr:     leaderMgr,
+		followerMgr:   followerMgr,
+		sleepFn:       time.Sleep,
 	}
 }
 
@@ -147,10 +158,10 @@ func (mgr *flushManager) Open(shardSetID string) error {
 	mgr.Lock()
 	defer mgr.Unlock()
 
-	if mgr.status != flushManagerNotOpen {
+	if mgr.state != flushManagerNotOpen {
 		return errFlushManagerAlreadyOpenOrClosed
 	}
-	mgr.status = flushManagerOpen
+	mgr.state = flushManagerOpen
 	mgr.leaderMgr.Open(shardSetID)
 	mgr.followerMgr.Open(shardSetID)
 
@@ -173,13 +184,25 @@ func (mgr *flushManager) Register(flusher PeriodicFlusher) error {
 	return err
 }
 
+func (mgr *flushManager) Status() FlushStatus {
+	mgr.RLock()
+	electionState := mgr.electionState
+	canLead := mgr.flushManagerWithLock().CanLead()
+	mgr.RUnlock()
+
+	return FlushStatus{
+		ElectionState: electionState.String(),
+		CanLead:       canLead,
+	}
+}
+
 func (mgr *flushManager) Close() error {
 	mgr.Lock()
-	if mgr.status != flushManagerOpen {
+	if mgr.state != flushManagerOpen {
 		mgr.Unlock()
 		return errFlushManagerNotOpenOrClosed
 	}
-	mgr.status = flushManagerClosed
+	mgr.state = flushManagerClosed
 	close(mgr.doneCh)
 	mgr.Unlock()
 
@@ -188,7 +211,7 @@ func (mgr *flushManager) Close() error {
 }
 
 func (mgr *flushManager) bucketForWithLock(l PeriodicFlusher) (*flushBucket, error) {
-	if mgr.status != flushManagerOpen {
+	if mgr.state != flushManagerOpen {
 		return nil, errFlushManagerNotOpenOrClosed
 	}
 	flushInterval := l.FlushInterval()
@@ -215,18 +238,18 @@ func (mgr *flushManager) flush() {
 
 	for {
 		mgr.RLock()
-		status := mgr.status
-		electionStatus := mgr.electionStatus
+		state := mgr.state
+		electionState := mgr.electionState
 		mgr.RUnlock()
-		if status == flushManagerClosed {
+		if state == flushManagerClosed {
 			return
 		}
 
-		// If the election status has changed, we need to switch the flush manager.
-		newElectionStatus := mgr.electionMgr.ElectionStatus()
-		if electionStatus != newElectionStatus {
+		// If the election state has changed, we need to switch the flush manager.
+		newElectionState := mgr.electionMgr.ElectionState()
+		if electionState != newElectionState {
 			mgr.Lock()
-			mgr.electionStatus = newElectionStatus
+			mgr.electionState = newElectionState
 			mgr.flushManagerWithLock().Init(mgr.buckets)
 			mgr.Unlock()
 		}
@@ -244,14 +267,14 @@ func (mgr *flushManager) flush() {
 }
 
 func (mgr *flushManager) flushManagerWithLock() roleBasedFlushManager {
-	switch mgr.electionStatus {
-	case FollowerStatus:
+	switch mgr.electionState {
+	case FollowerState:
 		return mgr.followerMgr
-	case LeaderStatus:
+	case LeaderState:
 		return mgr.leaderMgr
 	default:
 		// We should never get here.
-		panic(fmt.Sprintf("unknown election status %v", mgr.electionStatus))
+		panic(fmt.Sprintf("unknown election state %v", mgr.electionState))
 	}
 }
 

@@ -89,7 +89,9 @@ func (agg *mockAggregator) AddMetricWithPoliciesList(
 	return nil
 }
 
-func (agg *mockAggregator) Close(aggregator.CloseType) error { return nil }
+func (agg *mockAggregator) Resign() error                    { return nil }
+func (agg *mockAggregator) Status() aggregator.RuntimeStatus { return aggregator.RuntimeStatus{} }
+func (agg *mockAggregator) Close() error                     { return nil }
 
 func (agg *mockAggregator) NumMetricsAdded() int {
 	agg.RLock()

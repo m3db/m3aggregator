@@ -46,11 +46,11 @@ import (
 )
 
 var (
-	msgpackAddrArg                 = flag.String("msgpackAddr", "0.0.0.0:6000", "msgpack server address")
-	httpAddrArg                    = flag.String("httpAddr", "0.0.0.0:6001", "http server address")
-	errServerStartTimedOut         = errors.New("server took too long to start")
-	errServerStopTimedOut          = errors.New("server took too long to stop")
-	errElectionStatusChangeTimeout = errors.New("server took too long to change election status")
+	msgpackAddrArg                = flag.String("msgpackAddr", "0.0.0.0:6000", "msgpack server address")
+	httpAddrArg                   = flag.String("httpAddr", "0.0.0.0:6001", "http server address")
+	errServerStartTimedOut        = errors.New("server took too long to start")
+	errServerStopTimedOut         = errors.New("server took too long to stop")
+	errElectionStateChangeTimeout = errors.New("server took too long to change election state")
 )
 
 // nowSetterFn is the function that sets the current time.
@@ -278,7 +278,7 @@ func (ts *testSetup) waitUntilLeader() error {
 		}
 		return leader == ts.leaderValue
 	}
-	waitUntil(isLeader, ts.opts.ElectionStatusChangeTimeout())
+	waitUntil(isLeader, ts.opts.ElectionStateChangeTimeout())
 	return nil
 }
 
@@ -287,8 +287,8 @@ func (ts *testSetup) sortedResults() []aggregated.MetricWithStoragePolicy {
 	return *ts.results
 }
 
-func (ts *testSetup) stopServer(closeType aggregator.CloseType) error {
-	if err := ts.aggregator.Close(closeType); err != nil {
+func (ts *testSetup) stopServer() error {
+	if err := ts.aggregator.Close(); err != nil {
 		return err
 	}
 	close(ts.doneCh)

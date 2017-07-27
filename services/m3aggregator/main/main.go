@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	defaultGracefulShutdownTimeout = 5 * time.Minute
+	gracefulShutdownTimeout = 15 * time.Second
 )
 
 var (
@@ -119,15 +119,9 @@ func main() {
 
 	close(doneCh)
 
-	gracefulShutdownTimeout := cfg.Aggregator.GracefulCloseTimeout
-	if gracefulShutdownTimeout == 0 {
-		gracefulShutdownTimeout = defaultGracefulShutdownTimeout
-	}
-
-	// TODO(xichen): rework this logic for integration with deployment tooling.
 	select {
 	case <-closedCh:
-		aggregator.Close(m3aggregator.GracefulClose)
+		aggregator.Close()
 		logger.Info("server closed clean")
 	case <-time.After(gracefulShutdownTimeout):
 		logger.Infof("server closed due to %s timeout", gracefulShutdownTimeout.String())

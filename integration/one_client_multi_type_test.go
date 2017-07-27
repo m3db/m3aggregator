@@ -26,8 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3aggregator/aggregator"
-
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,7 +82,7 @@ func TestOneClientMultiType(t *testing.T) {
 	time.Sleep(4 * time.Second)
 
 	// Stop the server
-	require.NoError(t, testSetup.stopServer(aggregator.ForceClose))
+	require.NoError(t, testSetup.stopServer())
 	log.Info("server is now down")
 
 	// Validate results

@@ -21,6 +21,8 @@
 package aggregator
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -174,15 +176,47 @@ func TestAggregatorAddMetricWithPoliciesListSuccessWithPlacementUpdate(t *testin
 	}
 }
 
+func TestAggregatorResignError(t *testing.T) {
+	errTestResign := errors.New("test resign")
+	agg, _ := testAggregator(t)
+	agg.electionManager = &mockElectionManager{
+		resignFn: func(context.Context) error { return errTestResign },
+	}
+	require.Equal(t, errTestResign, agg.Resign())
+}
+
+func TestAggregatorResignSuccess(t *testing.T) {
+	agg, _ := testAggregator(t)
+	agg.electionManager = &mockElectionManager{
+		resignFn: func(context.Context) error { return nil },
+	}
+	require.NoError(t, agg.Resign())
+	require.Equal(t, aggregatorResigned, agg.state)
+}
+
+func TestAggregatorStatus(t *testing.T) {
+	flushStatus := FlushStatus{
+		ElectionState: LeaderState.String(),
+		CanLead:       true,
+	}
+	agg, _ := testAggregator(t)
+	agg.flushManager = &mockFlushManager{
+		statusFn: func() FlushStatus {
+			return flushStatus
+		},
+	}
+	require.Equal(t, RuntimeStatus{FlushStatus: flushStatus}, agg.Status())
+}
+
 func TestAggregatorCloseAlreadyClosed(t *testing.T) {
 	agg, _ := testAggregator(t)
-	require.Equal(t, errAggregatorExpectOpen, agg.Close(ForceClose))
+	require.Equal(t, errAggregatorExpectOpen, agg.Close())
 }
 
 func TestAggregatorCloseSuccess(t *testing.T) {
 	agg, _ := testAggregator(t)
 	require.NoError(t, agg.Open())
-	require.NoError(t, agg.Close(ForceClose))
+	require.NoError(t, agg.Close())
 	require.Equal(t, aggregatorClosed, agg.state)
 }
 
@@ -193,7 +227,7 @@ func TestAggregatorTick(t *testing.T) {
 	// Forcing a tick.
 	agg.tickInternal()
 
-	require.NoError(t, agg.Close(ForceClose))
+	require.NoError(t, agg.Close())
 }
 
 func testAggregator(t *testing.T) (*aggregator, kv.Store) {
@@ -257,9 +291,11 @@ func testOptions() Options {
 }
 
 type registerFn func(flusher PeriodicFlusher) error
+type statusFn func() FlushStatus
 
 type mockFlushManager struct {
 	registerFn registerFn
+	statusFn   statusFn
 }
 
 func (mgr *mockFlushManager) Open(shardSetID string) error { return nil }
@@ -267,5 +303,7 @@ func (mgr *mockFlushManager) Open(shardSetID string) error { return nil }
 func (mgr *mockFlushManager) Register(flusher PeriodicFlusher) error {
 	return mgr.registerFn(flusher)
 }
+
+func (mgr *mockFlushManager) Status() FlushStatus { return mgr.statusFn() }
 
 func (mgr *mockFlushManager) Close() error { return nil }

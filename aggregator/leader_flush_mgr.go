@@ -181,6 +181,9 @@ func (mgr *leaderFlushManager) OnBucketAdded(
 	mgr.Unlock()
 }
 
+// NB(xichen): leader flush manager can always lead.
+func (mgr *leaderFlushManager) CanLead() bool { return true }
+
 func (mgr *leaderFlushManager) enqueueBucketWithLock(
 	bucketIdx int,
 	bucket *flushBucket,

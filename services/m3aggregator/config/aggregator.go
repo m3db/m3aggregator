@@ -163,8 +163,8 @@ type AggregatorConfiguration struct {
 	// Default policies.
 	DefaultPolicies []policy.Policy `yaml:"defaultPolicies" validate:"nonzero"`
 
-	// Graceful close timeout.
-	GracefulCloseTimeout time.Duration `yaml:"gracefulCloseTimeout"`
+	// Resign timeout.
+	ResignTimeout time.Duration `yaml:"resignTimeout"`
 
 	// Pool of counter elements.
 	CounterElemPool pool.ObjectPoolConfiguration `yaml:"counterElemPool"`
@@ -317,9 +317,9 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	sort.Sort(policy.ByResolutionAsc(policies))
 	opts = opts.SetDefaultPolicies(policies)
 
-	// Set graceful close timeout.
-	if c.GracefulCloseTimeout != 0 {
-		opts = opts.SetGracefulCloseTimeout(c.GracefulCloseTimeout)
+	// Set resign timeout.
+	if c.ResignTimeout != 0 {
+		opts = opts.SetResignTimeout(c.ResignTimeout)
 	}
 
 	// Set counter elem pool.

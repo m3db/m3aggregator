@@ -317,11 +317,11 @@ type Options interface {
 	// DefaultPolicies returns the default policies.
 	DefaultPolicies() []policy.Policy
 
-	// SetGracefulCloseTimeout sets the timeout period for gracefully closing the aggregator.
-	SetGracefulCloseTimeout(value time.Duration) Options
+	// SetResignTimeout sets the resign timeout.
+	SetResignTimeout(value time.Duration) Options
 
-	// GracefulCloseTimeout returns the timeout period for gracefully closing the aggregator.
-	GracefulCloseTimeout() time.Duration
+	// ResignTimeout returns the resign timeout.
+	ResignTimeout() time.Duration
 
 	// SetEntryPool sets the entry pool
 	SetEntryPool(value EntryPool) Options

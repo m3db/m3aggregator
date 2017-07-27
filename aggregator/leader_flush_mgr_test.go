@@ -41,13 +41,13 @@ var (
 					shard:            0,
 					resolution:       time.Second,
 					flushInterval:    time.Second,
-					lastFlushedNanos: 1000,
+					lastFlushedNanos: 3663000000000,
 				},
 				&mockFlusher{
 					shard:            1,
 					resolution:       time.Second,
 					flushInterval:    time.Second,
-					lastFlushedNanos: 1500,
+					lastFlushedNanos: 3668000000000,
 				},
 			},
 		},
@@ -58,7 +58,7 @@ var (
 					shard:            0,
 					resolution:       time.Minute,
 					flushInterval:    time.Minute,
-					lastFlushedNanos: 1200,
+					lastFlushedNanos: 3660000000000,
 				},
 			},
 		},
@@ -69,7 +69,7 @@ var (
 					shard:            2,
 					resolution:       time.Hour,
 					flushInterval:    time.Hour,
-					lastFlushedNanos: 2000,
+					lastFlushedNanos: 3600000000000,
 				},
 			},
 		},
@@ -79,18 +79,18 @@ var (
 		ByShard: map[uint32]*schema.ShardFlushTimes{
 			0: &schema.ShardFlushTimes{
 				ByResolution: map[int64]int64{
-					1000000000:  1000,
-					60000000000: 1200,
+					1000000000:  3663000000000,
+					60000000000: 3660000000000,
 				},
 			},
 			1: &schema.ShardFlushTimes{
 				ByResolution: map[int64]int64{
-					1000000000: 1500,
+					1000000000: 3668000000000,
 				},
 			},
 			2: &schema.ShardFlushTimes{
 				ByResolution: map[int64]int64{
-					3600000000000: 2000,
+					3600000000000: 3600000000000,
 				},
 			},
 		},

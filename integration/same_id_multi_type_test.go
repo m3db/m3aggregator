@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 
 	"github.com/stretchr/testify/require"
@@ -108,7 +107,7 @@ func TestSameIDMultiType(t *testing.T) {
 	time.Sleep(4 * time.Second)
 
 	// Stop the server
-	require.NoError(t, testSetup.stopServer(aggregator.ForceClose))
+	require.NoError(t, testSetup.stopServer())
 	log.Info("server is now down")
 
 	// Validate results

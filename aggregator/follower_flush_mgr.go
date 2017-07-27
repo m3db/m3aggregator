@@ -39,22 +39,26 @@ const (
 )
 
 type followerFlushManagerMetrics struct {
-	watchCreateErrors  tally.Counter
-	unmarshalErrors    tally.Counter
-	shardNotFound      tally.Counter
-	resolutionNotFound tally.Counter
-	kvUpdateFlush      tally.Counter
-	forcedFlush        tally.Counter
+	watchCreateErrors      tally.Counter
+	unmarshalErrors        tally.Counter
+	shardNotFound          tally.Counter
+	resolutionNotFound     tally.Counter
+	kvUpdateFlush          tally.Counter
+	forcedFlush            tally.Counter
+	flushTimesNotProcessed tally.Counter
+	flushWindowsNotEnded   tally.Counter
 }
 
 func newFollowerFlushManagerMetrics(scope tally.Scope) followerFlushManagerMetrics {
 	return followerFlushManagerMetrics{
-		watchCreateErrors:  scope.Counter("watch-create-errors"),
-		unmarshalErrors:    scope.Counter("unmarshal-errors"),
-		shardNotFound:      scope.Counter("shard-not-found"),
-		resolutionNotFound: scope.Counter("resolution-not-found"),
-		kvUpdateFlush:      scope.Counter("kv-update-flush"),
-		forcedFlush:        scope.Counter("forced-flush"),
+		watchCreateErrors:      scope.Counter("watch-create-errors"),
+		unmarshalErrors:        scope.Counter("unmarshal-errors"),
+		shardNotFound:          scope.Counter("shard-not-found"),
+		resolutionNotFound:     scope.Counter("resolution-not-found"),
+		kvUpdateFlush:          scope.Counter("kv-update-flush"),
+		forcedFlush:            scope.Counter("forced-flush"),
+		flushTimesNotProcessed: scope.Counter("flush-times-not-processed"),
+		flushWindowsNotEnded:   scope.Counter("flush-windows-not-ended"),
 	}
 }
 
@@ -71,14 +75,15 @@ type followerFlushManager struct {
 	logger                xlog.Logger
 	scope                 tally.Scope
 
-	doneCh            <-chan struct{}
-	proto             schema.ShardSetFlushTimes
-	flushTimesKey     string
-	flushTimesUpdated bool
-	lastFlushed       time.Time
-	flushTask         *followerFlushTask
-	sleepFn           sleepFn
-	metrics           followerFlushManagerMetrics
+	doneCh          <-chan struct{}
+	proto           schema.ShardSetFlushTimes
+	flushTimesKey   string
+	flushTimesState flushTimesState
+	lastFlushed     time.Time
+	openedAt        time.Time
+	flushTask       *followerFlushTask
+	sleepFn         sleepFn
+	metrics         followerFlushManagerMetrics
 }
 
 func newFollowerFlushManager(
@@ -99,6 +104,7 @@ func newFollowerFlushManager(
 		logger:                instrumentOpts.Logger(),
 		scope:                 scope,
 		doneCh:                doneCh,
+		flushTimesState:       flushTimesUninitialized,
 		lastFlushed:           nowFn(),
 		sleepFn:               time.Sleep,
 		metrics:               newFollowerFlushManagerMetrics(scope),
@@ -112,6 +118,7 @@ func (mgr *followerFlushManager) Open(shardSetID string) {
 	defer mgr.Unlock()
 
 	mgr.flushTimesKey = fmt.Sprintf(mgr.flushTimesKeyFmt, shardSetID)
+	mgr.openedAt = mgr.nowFn()
 	go mgr.watchFlushTimes()
 }
 
@@ -127,10 +134,10 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 	// * The flush times persisted in kv have been updated since last flush.
 	// * Sufficient time (a.k.a. maxNoFlushDuration) has elapsed since last flush.
 	mgr.Lock()
-	if mgr.flushTimesUpdated {
+	if mgr.flushTimesState == flushTimesUpdated {
 		mgr.metrics.kvUpdateFlush.Inc(1)
 		shouldFlush = true
-		mgr.flushTimesUpdated = false
+		mgr.flushTimesState = flushTimesProcessed
 		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
 	} else {
 		now := mgr.nowFn()
@@ -154,6 +161,41 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 // NB(xichen): the follower flush manager flushes data based on the flush times
 // stored in kv and does not need to take extra actions when a new bucket is added.
 func (mgr *followerFlushManager) OnBucketAdded(int, *flushBucket) {}
+
+// The follower flush manager may only lead if and only if all the following conditions
+// are met:
+// * The flush times persisted in kv have been read at least once.
+// * There are no outstanding/unprocessed kv flush times update.
+// * All the aggregation windows since the flush manager is opened have ended.
+func (mgr *followerFlushManager) CanLead() bool {
+	mgr.RLock()
+	defer mgr.RUnlock()
+
+	if mgr.flushTimesState != flushTimesProcessed {
+		mgr.metrics.flushTimesNotProcessed.Inc(1)
+		return false
+	}
+
+	allWindowsEnded := true
+	for _, shardFlushTimes := range mgr.proto.ByShard {
+		for windowNanos, lastFlushedNanos := range shardFlushTimes.ByResolution {
+			windowSize := time.Duration(windowNanos)
+			windowEndAt := mgr.openedAt.Truncate(windowSize)
+			if windowEndAt.Before(mgr.openedAt) {
+				windowEndAt = windowEndAt.Add(windowSize)
+			}
+			if lastFlushedNanos < windowEndAt.UnixNano() {
+				mgr.metrics.flushWindowsNotEnded.Inc(1)
+				allWindowsEnded = false
+				break
+			}
+		}
+		if !allWindowsEnded {
+			break
+		}
+	}
+	return allWindowsEnded
+}
 
 func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBucket) []flushersGroup {
 	flushersByInterval := make([]flushersGroup, len(buckets))
@@ -250,7 +292,7 @@ func (mgr *followerFlushManager) watchFlushTimes() {
 			mgr.Unlock()
 			continue
 		}
-		mgr.flushTimesUpdated = true
+		mgr.flushTimesState = flushTimesUpdated
 		mgr.Unlock()
 	}
 }
@@ -279,6 +321,14 @@ func (t *followerFlushTask) Run() {
 		group.duration.Record(mgr.nowFn().Sub(start))
 	}
 }
+
+type flushTimesState int
+
+const (
+	flushTimesUninitialized flushTimesState = iota
+	flushTimesUpdated
+	flushTimesProcessed
+)
 
 type flusherWithTime struct {
 	flusher          PeriodicFlusher

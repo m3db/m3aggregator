@@ -39,15 +39,6 @@ import (
 	"github.com/uber-go/tally"
 )
 
-// CloseType defines how the aggregator should be closed.
-type CloseType int
-
-// List of supported close types.
-const (
-	GracefulClose CloseType = iota
-	ForceClose
-)
-
 // Aggregator aggregates different types of metrics.
 type Aggregator interface {
 	// Open opens the aggregator.
@@ -56,8 +47,15 @@ type Aggregator interface {
 	// AddMetricWithPoliciesList adds a metric with policies list for aggregation.
 	AddMetricWithPoliciesList(mu unaggregated.MetricUnion, pl policy.PoliciesList) error
 
+	// Resign stops the aggregator from participating in leader election and resigns
+	// from ongoing campaign if any.
+	Resign() error
+
+	// Status returns the run-time status of the aggregator.
+	Status() RuntimeStatus
+
 	// Close closes the aggregator.
-	Close(closeType CloseType) error
+	Close() error
 }
 
 const (
@@ -145,6 +143,11 @@ func newAggregatorMetrics(scope tally.Scope, samplingRate float64) aggregatorMet
 	}
 }
 
+// RuntimeStatus contains run-time status of the aggregator.
+type RuntimeStatus struct {
+	FlushStatus FlushStatus `json:"flushStatus"`
+}
+
 type updateShardsType int
 
 const (
@@ -157,7 +160,7 @@ type aggregatorState int
 const (
 	aggregatorNotOpen aggregatorState = iota
 	aggregatorOpen
-	aggregatorClosing
+	aggregatorResigned
 	aggregatorClosed
 )
 
@@ -168,15 +171,15 @@ type sleepFn func(d time.Duration)
 type aggregator struct {
 	sync.RWMutex
 
-	opts                 Options
-	nowFn                clock.NowFn
-	instanceID           string
-	shardFn              ShardFn
-	checkInterval        time.Duration
-	electionManager      ElectionManager
-	flushManager         FlushManager
-	flushHandler         Handler
-	gracefulCloseTimeout time.Duration
+	opts            Options
+	nowFn           clock.NowFn
+	instanceID      string
+	shardFn         ShardFn
+	checkInterval   time.Duration
+	electionManager ElectionManager
+	flushManager    FlushManager
+	flushHandler    Handler
+	resignTimeout   time.Duration
 
 	shardIDs              []uint32
 	shards                []*aggregatorShard
@@ -205,7 +208,7 @@ func NewAggregator(opts Options) Aggregator {
 		electionManager:       opts.ElectionManager(),
 		flushManager:          opts.FlushManager(),
 		flushHandler:          opts.FlushHandler(),
-		gracefulCloseTimeout:  opts.GracefulCloseTimeout(),
+		resignTimeout:         opts.ResignTimeout(),
 		placementWatcher:      placementWatcher,
 		placementCutoverNanos: uninitializedCutoverNanos,
 		metrics:               metrics,
@@ -270,24 +273,30 @@ func (agg *aggregator) AddMetricWithPoliciesList(
 	return err
 }
 
-func (agg *aggregator) Close(closeType CloseType) error {
+func (agg *aggregator) Resign() error {
+	ctx, cancel := context.WithTimeout(context.Background(), agg.resignTimeout)
+	defer cancel()
+
+	if err := agg.electionManager.Resign(ctx); err != nil {
+		return err
+	}
+	agg.Lock()
+	agg.state = aggregatorResigned
+	agg.Unlock()
+	return nil
+}
+
+func (agg *aggregator) Status() RuntimeStatus {
+	return RuntimeStatus{
+		FlushStatus: agg.flushManager.Status(),
+	}
+}
+
+func (agg *aggregator) Close() error {
 	agg.Lock()
 	if agg.state != aggregatorOpen {
 		agg.Unlock()
 		return errAggregatorExpectOpen
-	}
-	if closeType == GracefulClose {
-		agg.state = aggregatorClosing
-		agg.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), agg.gracefulCloseTimeout)
-		defer cancel()
-		if err := agg.electionManager.Resign(ctx); err != nil {
-			agg.Lock()
-			agg.state = aggregatorOpen
-			agg.Unlock()
-			return err
-		}
-		agg.Lock()
 	}
 	agg.state = aggregatorClosed
 	close(agg.doneCh)

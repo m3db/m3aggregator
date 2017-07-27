@@ -24,108 +24,104 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"reflect"
 	"strings"
 
 	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/metric/unaggregated"
-	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/errors"
 )
 
-var (
-	errRequestMustBePost  = xerrors.NewInvalidParamsError(errors.New("request must be POST"))
-	errInvalidRequestBody = xerrors.NewInvalidParamsError(errors.New("invalid request body"))
+const (
+	resignPath = "/resign"
+	statusPath = "/status"
 )
 
-type respSuccess struct{}
-type respError struct {
-	Error string `json:"error"`
+var (
+	errRequestMustBeGet  = xerrors.NewInvalidParamsError(errors.New("request must be GET"))
+	errRequestMustBePost = xerrors.NewInvalidParamsError(errors.New("request must be POST"))
+)
+
+func registerHandlers(mux *http.ServeMux, aggregator aggregator.Aggregator) {
+	registerResignHandler(mux, aggregator)
+	registerStatusHandler(mux, aggregator)
 }
 
-// metricUnionWithPoliciesList contains a metric union along with applicable policies list.
-type metricUnionWithPoliciesList struct {
-	Metric       unaggregated.MetricUnion `json:"metric"`
-	PoliciesList policy.PoliciesList      `json:"policiesList"`
-}
+func registerResignHandler(mux *http.ServeMux, aggregator aggregator.Aggregator) {
+	mux.HandleFunc(resignPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 
-func registerHandlers(mux *http.ServeMux, aggregator aggregator.Aggregator) error {
-	v := reflect.ValueOf(aggregator)
-	t := v.Type()
-	for i := 0; i < t.NumMethod(); i++ {
-		method := t.Method(i)
-
-		// Ensure the method is of the following signature:
-		// - methodName(param1, param2) error
-		if !(method.Type.NumIn() == 3 && method.Type.NumOut() == 1) {
-			continue
-		}
-
-		obj := method.Type.In(0)
-		if obj != t {
-			continue
-		}
-		metric := method.Type.In(1)
-		if metric != reflect.TypeOf(unaggregated.MetricUnion{}) {
-			continue
-		}
-		policies := method.Type.In(2)
-		if policies != reflect.TypeOf(policy.PoliciesList{}) {
-			continue
-		}
-		resultErr := method.Type.Out(0)
-		errInterfaceType := reflect.TypeOf((*error)(nil)).Elem()
-		if resultErr.Kind() != reflect.Interface || !resultErr.Implements(errInterfaceType) {
-			continue
-		}
-
-		name := strings.ToLower(method.Name)
-		mux.HandleFunc(fmt.Sprintf("/%s", name), func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-
-			if httpMethod := strings.ToUpper(r.Method); httpMethod != http.MethodPost {
-				writeError(w, errRequestMustBePost)
-				return
-			}
-
-			var payload metricUnionWithPoliciesList
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				writeError(w, errInvalidRequestBody)
-				return
-			}
-
-			var (
-				agg = reflect.ValueOf(aggregator)
-				mu  = reflect.ValueOf(payload.Metric)
-				vp  = reflect.ValueOf(payload.PoliciesList)
-			)
-			ret := method.Func.Call([]reflect.Value{agg, mu, vp})
-			if !ret[0].IsNil() {
-				writeError(w, ret[0].Interface().(error))
-				return
-			}
-			json.NewEncoder(w).Encode(&respSuccess{})
+		if httpMethod := strings.ToUpper(r.Method); httpMethod != http.MethodPost {
+			writeErrorResponse(w, errRequestMustBePost)
 			return
-		})
-	}
-	return nil
+		}
+
+		if err := aggregator.Resign(); err != nil {
+			writeErrorResponse(w, err)
+			return
+		}
+		writeSuccessResponse(w, nil)
+		return
+	})
 }
 
-func writeError(w http.ResponseWriter, err error) {
-	var result respError
+func registerStatusHandler(mux *http.ServeMux, aggregator aggregator.Aggregator) {
+	mux.HandleFunc(statusPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if httpMethod := strings.ToUpper(r.Method); httpMethod != http.MethodGet {
+			writeErrorResponse(w, errRequestMustBeGet)
+			return
+		}
+
+		status := aggregator.Status()
+		writeSuccessResponse(w, status)
+		return
+	})
+}
+
+type response struct {
+	Status string      `json:"status,omitempty"`
+	Error  string      `json:"error,omitempty"`
+	Data   interface{} `json:"data,omitempty"`
+}
+
+func newSuccessResponse(data interface{}) response {
+	return response{Status: "OK", Data: data}
+}
+
+func newErrorResponse(err error, data interface{}) response {
+	var errStr string
 	if err != nil {
-		result.Error = err.Error()
+		errStr = err.Error()
 	}
+	return response{Status: "Error", Error: errStr, Data: data}
+}
+
+func writeSuccessResponse(w http.ResponseWriter, data interface{}) {
+	writeResponse(w, data, nil)
+}
+
+func writeErrorResponse(w http.ResponseWriter, err error) {
+	writeResponse(w, nil, err)
+}
+
+func writeResponse(w http.ResponseWriter, data interface{}, err error) {
+	resp := newSuccessResponse(data)
+	if err != nil {
+		resp = newErrorResponse(err, data)
+	}
+
 	buf := bytes.NewBuffer(nil)
-	if err := json.NewEncoder(buf).Encode(&result); err != nil {
+	if encodeErr := json.NewEncoder(buf).Encode(&resp); encodeErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		result.Error = err.Error()
-		json.NewEncoder(w).Encode(&result)
+		resp = newErrorResponse(encodeErr, data)
+		json.NewEncoder(w).Encode(&resp)
 		return
 	}
-	if xerrors.IsInvalidParams(err) {
+
+	if err == nil {
+		w.WriteHeader(http.StatusOK)
+	} else if xerrors.IsInvalidParams(err) {
 		w.WriteHeader(http.StatusBadRequest)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)

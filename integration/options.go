@@ -38,7 +38,7 @@ const (
 	defaultElectionKeyFmt              = "/shardset/%s/lock"
 	defaultFlushTimesKeyFmt            = "/shardset/%s/flush"
 	defaultShardSetID                  = "0"
-	defaultElectionStatusChangeTimeout = time.Second
+	defaultElectionStateChangeTimeout = time.Second
 )
 
 type testOptions interface {
@@ -114,11 +114,11 @@ type testOptions interface {
 	// ServerStateChangeTimeout returns the client connect timeout.
 	ServerStateChangeTimeout() time.Duration
 
-	// SetElectionStatusChangeTimeout sets the election status change timeout.
-	SetElectionStatusChangeTimeout(value time.Duration) testOptions
+	// SetElectionStateChangeTimeout sets the election state change timeout.
+	SetElectionStateChangeTimeout(value time.Duration) testOptions
 
-	// ElectionStatusChangeTimeout returns the election status change timeout.
-	ElectionStatusChangeTimeout() time.Duration
+	// ElectionStateChangeTimeout returns the election state change timeout.
+	ElectionStateChangeTimeout() time.Duration
 
 	// SetWorkerPoolSize sets the number of workers in the worker pool.
 	SetWorkerPoolSize(value int) testOptions
@@ -141,7 +141,7 @@ type options struct {
 	workerPoolSize              int
 	clientBatchSize             int
 	clientConnectTimeout        time.Duration
-	electionStatusChangeTimeout time.Duration
+	electionStateChangeTimeout time.Duration
 }
 
 func newTestOptions() testOptions {
@@ -157,7 +157,7 @@ func newTestOptions() testOptions {
 		workerPoolSize:              defaultWorkerPoolSize,
 		clientBatchSize:             defaultClientBatchSize,
 		clientConnectTimeout:        defaultClientConnectTimeout,
-		electionStatusChangeTimeout: defaultElectionStatusChangeTimeout,
+		electionStateChangeTimeout: defaultElectionStateChangeTimeout,
 	}
 }
 
@@ -281,14 +281,14 @@ func (o *options) ServerStateChangeTimeout() time.Duration {
 	return o.serverStateChangeTimeout
 }
 
-func (o *options) SetElectionStatusChangeTimeout(value time.Duration) testOptions {
+func (o *options) SetElectionStateChangeTimeout(value time.Duration) testOptions {
 	opts := *o
-	opts.electionStatusChangeTimeout = value
+	opts.electionStateChangeTimeout = value
 	return &opts
 }
 
-func (o *options) ElectionStatusChangeTimeout() time.Duration {
-	return o.electionStatusChangeTimeout
+func (o *options) ElectionStateChangeTimeout() time.Duration {
+	return o.electionStateChangeTimeout
 }
 
 func (o *options) SetWorkerPoolSize(value int) testOptions {

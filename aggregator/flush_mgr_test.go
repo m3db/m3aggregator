@@ -32,7 +32,7 @@ import (
 
 func TestFlushManagerOpenAlreadyOpen(t *testing.T) {
 	mgr, _ := testFlushManager()
-	mgr.status = flushManagerOpen
+	mgr.state = flushManagerOpen
 	require.Equal(t, errFlushManagerAlreadyOpenOrClosed, mgr.Open(testShardSetID))
 }
 
@@ -49,7 +49,7 @@ func TestFlushManagerOpenSuccess(t *testing.T) {
 
 func TestFlushManagerRegisterClosed(t *testing.T) {
 	mgr, _ := testFlushManager()
-	mgr.status = flushManagerClosed
+	mgr.state = flushManagerClosed
 	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Register(nil))
 }
 
@@ -109,9 +109,24 @@ func TestFlushManagerRegisterSuccess(t *testing.T) {
 	}
 }
 
+func TestFlushManagerStatus(t *testing.T) {
+	mgr, _ := testFlushManager()
+	mgr.leaderMgr = &mockRoleBasedFlushManager{
+		canLead: false,
+	}
+	mgr.followerMgr = &mockRoleBasedFlushManager{
+		canLead: true,
+	}
+	expected := FlushStatus{
+		ElectionState: "follower",
+		CanLead:       true,
+	}
+	require.Equal(t, expected, mgr.Status())
+}
+
 func TestFlushManagerCloseAlreadyClosed(t *testing.T) {
 	mgr, _ := testFlushManager()
-	mgr.status = flushManagerClosed
+	mgr.state = flushManagerClosed
 	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Close())
 }
 
@@ -119,13 +134,13 @@ func TestFlushManagerCloseSuccess(t *testing.T) {
 	opts, _ := testFlushManagerOptions()
 	opts = opts.SetCheckEvery(time.Second)
 	mgr := NewFlushManager(opts).(*flushManager)
-	mgr.status = flushManagerOpen
+	mgr.state = flushManagerOpen
 
 	// Wait a little for the flush goroutine to start.
 	time.Sleep(100 * time.Millisecond)
 
 	mgr.Close()
-	require.Equal(t, flushManagerClosed, mgr.status)
+	require.Equal(t, flushManagerClosed, mgr.state)
 	require.Panics(t, func() { mgr.wgFlush.Done() })
 }
 
@@ -158,7 +173,7 @@ func TestFlushManagerFlush(t *testing.T) {
 		}
 	}
 	electionManager := &mockElectionManager{
-		electionStatus: FollowerStatus,
+		electionState: FollowerState,
 	}
 
 	// Initialize flush manager.
@@ -205,7 +220,7 @@ func TestFlushManagerFlush(t *testing.T) {
 
 	// Transition to leader.
 	electionManager.Lock()
-	electionManager.electionStatus = LeaderStatus
+	electionManager.electionState = LeaderState
 	electionManager.Unlock()
 	signalCh <- struct{}{}
 	waitUntilSlept(2)
@@ -216,7 +231,7 @@ func TestFlushManagerFlush(t *testing.T) {
 
 	// Transition to follower.
 	electionManager.Lock()
-	electionManager.electionStatus = FollowerStatus
+	electionManager.electionState = FollowerState
 	electionManager.Unlock()
 	signalCh <- struct{}{}
 	waitUntilSlept(3)
@@ -245,7 +260,7 @@ func TestFlushManagerFlush(t *testing.T) {
 		require.Equal(t, expectedBuckets[i].flushers, captured[i].flushers)
 	}
 
-	mgr.status = flushManagerClosed
+	mgr.state = flushManagerClosed
 	close(signalCh)
 }
 
@@ -293,6 +308,7 @@ type mockRoleBasedFlushManager struct {
 	initFn          bucketInitFn
 	prepareFn       bucketPrepareFn
 	onBucketAddedFn onBucketAddedFn
+	canLead         bool
 }
 
 func (m *mockRoleBasedFlushManager) Open(shardSetID string) { m.openFn(shardSetID) }
@@ -308,6 +324,8 @@ func (m *mockRoleBasedFlushManager) Prepare(buckets []*flushBucket) (flushTask, 
 func (m *mockRoleBasedFlushManager) OnBucketAdded(bucketIdx int, bucket *flushBucket) {
 	m.onBucketAddedFn(bucketIdx, bucket)
 }
+
+func (m *mockRoleBasedFlushManager) CanLead() bool { return m.canLead }
 
 type runFn func()
 
