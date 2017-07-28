@@ -220,6 +220,23 @@ func TestElectionManagerStartElectionLoop(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	// Asynchronously resign.
+	go func() {
+		mgr.state = electionManagerResigned
+		campaignCh <- campaign.NewStatus(campaign.Leader)
+
+		// Create a bit of lag between when campaign channel is written
+		// and when the resign channel is closed.
+		time.Sleep(100 * time.Millisecond)
+		close(mgr.resignCh)
+	}()
+	for {
+		if mgr.ElectionState() == LeaderState {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	require.NoError(t, mgr.Close())
 }
 
