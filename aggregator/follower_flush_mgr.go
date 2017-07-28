@@ -133,18 +133,20 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 	// NB(xichen): a flush is triggered in the following scenarios:
 	// * The flush times persisted in kv have been updated since last flush.
 	// * Sufficient time (a.k.a. maxNoFlushDuration) has elapsed since last flush.
+	now := mgr.nowFn()
 	mgr.Lock()
 	if mgr.flushTimesState == flushTimesUpdated {
 		mgr.metrics.kvUpdateFlush.Inc(1)
 		shouldFlush = true
+		mgr.lastFlushed = now
 		mgr.flushTimesState = flushTimesProcessed
 		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
 	} else {
-		now := mgr.nowFn()
 		durationSinceLastFlush := now.Sub(mgr.lastFlushed)
 		if durationSinceLastFlush > mgr.maxNoFlushDuration {
 			mgr.metrics.forcedFlush.Inc(1)
 			shouldFlush = true
+			mgr.lastFlushed = now
 			flushBeforeNanos := now.Add(-mgr.maxNoFlushDuration).Add(mgr.forcedFlushWindowSize).UnixNano()
 			flushersByInterval = mgr.flushersFromForcedFlushWithLock(buckets, flushBeforeNanos)
 		}
@@ -313,7 +315,7 @@ func (t *followerFlushTask) Run() {
 			flusherWithTime := flusherWithTime
 			wgWorkers.Add(1)
 			mgr.workers.Go(func() {
-				flusherWithTime.flusher.FlushBefore(flusherWithTime.flushBeforeNanos)
+				flusherWithTime.flusher.DiscardBefore(flusherWithTime.flushBeforeNanos)
 				wgWorkers.Done()
 			})
 		}

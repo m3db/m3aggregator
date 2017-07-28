@@ -96,17 +96,23 @@ func TestFollowerFlushManagerPrepareNoFlush(t *testing.T) {
 	mgr.flushTimesState = flushTimesProcessed
 	mgr.lastFlushed = now
 
+	now = now.Add(time.Second)
 	flushTask, dur := mgr.Prepare(testFlushBuckets)
+
 	require.Nil(t, flushTask)
 	require.Equal(t, time.Second, dur)
+	require.Equal(t, now.Add(-time.Second), mgr.lastFlushed)
 }
 
 func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
+	now := time.Unix(1234, 0)
+	nowFn := func() time.Time { return now }
 	doneCh := make(chan struct{})
 	opts := NewFlushManagerOptions().
 		SetMaxNoFlushDuration(time.Minute).
 		SetCheckEvery(time.Second)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	mgr.nowFn = nowFn
 	mgr.flushTimesState = flushTimesUpdated
 	mgr.proto = *testFlushTimes
 
@@ -150,6 +156,7 @@ func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
 	task := flushTask.(*followerFlushTask)
 	actual := task.flushersByInterval
 	require.Equal(t, expected, actual)
+	require.Equal(t, now, mgr.lastFlushed)
 }
 
 func TestFollowerFlushManagerPrepareMaxNoFlushDurationExceeded(t *testing.T) {
@@ -206,6 +213,7 @@ func TestFollowerFlushManagerPrepareMaxNoFlushDurationExceeded(t *testing.T) {
 	task := flushTask.(*followerFlushTask)
 	actual := task.flushersByInterval
 	require.Equal(t, expected, actual)
+	require.Equal(t, now, mgr.lastFlushed)
 }
 
 func TestFollowerFlushTaskRun(t *testing.T) {
@@ -216,13 +224,13 @@ func TestFollowerFlushTaskRun(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher: &mockFlusher{
-						flushBeforeFn: func(beforeNanos int64) { flushedBefore[0] = beforeNanos },
+						discardBeforeFn: func(beforeNanos int64) { flushedBefore[0] = beforeNanos },
 					},
 					flushBeforeNanos: 1234,
 				},
 				{
 					flusher: &mockFlusher{
-						flushBeforeFn: func(beforeNanos int64) { flushedBefore[1] = beforeNanos },
+						discardBeforeFn: func(beforeNanos int64) { flushedBefore[1] = beforeNanos },
 					},
 					flushBeforeNanos: 2345,
 				},
@@ -233,7 +241,7 @@ func TestFollowerFlushTaskRun(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher: &mockFlusher{
-						flushBeforeFn: func(beforeNanos int64) { flushedBefore[2] = beforeNanos },
+						discardBeforeFn: func(beforeNanos int64) { flushedBefore[2] = beforeNanos },
 					},
 					flushBeforeNanos: 3456,
 				},

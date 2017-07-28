@@ -197,7 +197,7 @@ func TestMetricListFlushBeforeStale(t *testing.T) {
 	opts := testOptions()
 	l := newMetricList(testShard, 0, opts)
 	l.lastFlushedNanos = 1234
-	l.FlushBefore(1000)
+	l.flushBefore(1000, discardType)
 	require.Equal(t, int64(1234), l.LastFlushedNanos())
 }
 

@@ -50,8 +50,8 @@ type PeriodicFlusher interface {
 	// Flush performs a flush.
 	Flush()
 
-	// FlushBefore flushes all metrics before a given timestamp.
-	FlushBefore(beforeNanos int64)
+	// DiscardBefore discards all metrics before a given timestamp.
+	DiscardBefore(beforeNanos int64)
 }
 
 // FlushManager manages and coordinates flushing activities across many

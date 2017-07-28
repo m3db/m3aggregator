@@ -280,7 +280,7 @@ func testFlushManagerOptions() (FlushManagerOptions, *time.Time) {
 }
 
 type flushFn func()
-type flushBeforeFn func(beforeNanos int64)
+type discardBeforeFn func(beforeNanos int64)
 
 type mockFlusher struct {
 	shard            uint32
@@ -288,15 +288,15 @@ type mockFlusher struct {
 	flushInterval    time.Duration
 	lastFlushedNanos int64
 	flushFn          flushFn
-	flushBeforeFn    flushBeforeFn
+	discardBeforeFn  discardBeforeFn
 }
 
-func (f *mockFlusher) Shard() uint32                 { return f.shard }
-func (f *mockFlusher) Resolution() time.Duration     { return f.resolution }
-func (f *mockFlusher) FlushInterval() time.Duration  { return f.flushInterval }
-func (f *mockFlusher) LastFlushedNanos() int64       { return f.lastFlushedNanos }
-func (f *mockFlusher) Flush()                        { f.flushFn() }
-func (f *mockFlusher) FlushBefore(beforeNanos int64) { f.flushBeforeFn(beforeNanos) }
+func (f *mockFlusher) Shard() uint32                   { return f.shard }
+func (f *mockFlusher) Resolution() time.Duration       { return f.resolution }
+func (f *mockFlusher) FlushInterval() time.Duration    { return f.flushInterval }
+func (f *mockFlusher) LastFlushedNanos() int64         { return f.lastFlushedNanos }
+func (f *mockFlusher) Flush()                          { f.flushFn() }
+func (f *mockFlusher) DiscardBefore(beforeNanos int64) { f.discardBeforeFn(beforeNanos) }
 
 type flushOpenFn func(shardSetID string)
 type bucketInitFn func(buckets []*flushBucket)
