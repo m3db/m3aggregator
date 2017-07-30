@@ -118,40 +118,41 @@ func TestElectionManagerResignTimeout(t *testing.T) {
 }
 
 func TestElectionManagerResignSuccess(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
+	var (
+		statusCh = make(chan campaign.Status)
+		mgr      *electionManager
+	)
 	leaderService := &mockLeaderService{
 		campaignFn: func(
 			electionID string,
 			opts services.CampaignOptions,
 		) (<-chan campaign.Status, error) {
-			return make(chan campaign.Status), nil
+			return statusCh, nil
 		},
 		resignFn: func(electionID string) error {
+			close(statusCh)
+			go func() {
+				// Simulate a delay between resignation and status change.
+				time.Sleep(500 * time.Millisecond)
+				mgr.Lock()
+				mgr.electionState = FollowerState
+				mgr.Unlock()
+			}()
 			return nil
 		},
 	}
 	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
-	mgr := NewElectionManager(opts).(*electionManager)
+	mgr = NewElectionManager(opts).(*electionManager)
 	mgr.Lock()
 	mgr.electionState = LeaderState
 	mgr.Unlock()
 	require.NoError(t, mgr.Open(testShardSetID))
 
-	// Update election state asynchronously.
-	var updated bool
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		mgr.Lock()
-		updated = true
-		mgr.electionState = FollowerState
-		mgr.Unlock()
-	}()
-
 	require.NoError(t, mgr.Resign(ctx))
 	require.Equal(t, electionManagerResigned, mgr.state)
-	require.True(t, updated)
 	require.NoError(t, mgr.Close())
 }
 

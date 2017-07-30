@@ -63,10 +63,10 @@ const (
 )
 
 var (
-	errAggregatorExpectNotOpen = errors.New("aggregator is expected to be not open")
-	errAggregatorExpectOpen    = errors.New("aggregator is expected to be open")
-	errInvalidMetricType       = errors.New("invalid metric type")
-	errActivePlacementChanged  = errors.New("active placement has changed")
+	errAggregatorNotOpenOrClosed     = errors.New("aggregator is not open or closed")
+	errAggregatorAlreadyOpenOrClosed = errors.New("aggregator is already open or closed")
+	errInvalidMetricType             = errors.New("invalid metric type")
+	errActivePlacementChanged        = errors.New("active placement has changed")
 )
 
 type aggregatorTickMetrics struct {
@@ -160,7 +160,6 @@ type aggregatorState int
 const (
 	aggregatorNotOpen aggregatorState = iota
 	aggregatorOpen
-	aggregatorResigned
 	aggregatorClosed
 )
 
@@ -222,7 +221,7 @@ func (agg *aggregator) Open() error {
 	defer agg.Unlock()
 
 	if agg.state != aggregatorNotOpen {
-		return errAggregatorExpectNotOpen
+		return errAggregatorAlreadyOpenOrClosed
 	}
 	if err := agg.placementWatcher.Watch(); err != nil {
 		return err
@@ -276,14 +275,7 @@ func (agg *aggregator) AddMetricWithPoliciesList(
 func (agg *aggregator) Resign() error {
 	ctx, cancel := context.WithTimeout(context.Background(), agg.resignTimeout)
 	defer cancel()
-
-	if err := agg.electionManager.Resign(ctx); err != nil {
-		return err
-	}
-	agg.Lock()
-	agg.state = aggregatorResigned
-	agg.Unlock()
-	return nil
+	return agg.electionManager.Resign(ctx)
 }
 
 func (agg *aggregator) Status() RuntimeStatus {
@@ -296,7 +288,7 @@ func (agg *aggregator) Close() error {
 	agg.Lock()
 	if agg.state != aggregatorOpen {
 		agg.Unlock()
-		return errAggregatorExpectOpen
+		return errAggregatorNotOpenOrClosed
 	}
 	agg.state = aggregatorClosed
 	close(agg.doneCh)
@@ -327,7 +319,7 @@ func (agg *aggregator) shardFor(id id.RawID) (*aggregatorShard, error) {
 
 func (agg *aggregator) shardForWithLock(id id.RawID, updateShardsType updateShardsType) (*aggregatorShard, error) {
 	if agg.state != aggregatorOpen {
-		return nil, errAggregatorExpectOpen
+		return nil, errAggregatorNotOpenOrClosed
 	}
 	placement, err := agg.placement()
 	if err != nil {

@@ -70,7 +70,7 @@ var (
 func TestAggregatorOpenAlreadyOpen(t *testing.T) {
 	agg, _ := testAggregator(t)
 	agg.state = aggregatorOpen
-	require.Equal(t, errAggregatorExpectNotOpen, agg.Open())
+	require.Equal(t, errAggregatorAlreadyOpenOrClosed, agg.Open())
 }
 
 func TestAggregatorOpenSuccess(t *testing.T) {
@@ -94,7 +94,7 @@ func TestAggregatorAddMetricWithPoliciesListInvalidMetricType(t *testing.T) {
 func TestAggregatorAddMetricWithPoliciesListNotOpen(t *testing.T) {
 	agg, _ := testAggregator(t)
 	err := agg.AddMetricWithPoliciesList(testValidMetric, testPoliciesList)
-	require.Equal(t, errAggregatorExpectOpen, err)
+	require.Equal(t, errAggregatorNotOpenOrClosed, err)
 }
 
 func TestAggregatorAddMetricWithPoliciesListPlacementWatcherUnwatched(t *testing.T) {
@@ -191,7 +191,6 @@ func TestAggregatorResignSuccess(t *testing.T) {
 		resignFn: func(context.Context) error { return nil },
 	}
 	require.NoError(t, agg.Resign())
-	require.Equal(t, aggregatorResigned, agg.state)
 }
 
 func TestAggregatorStatus(t *testing.T) {
@@ -210,7 +209,7 @@ func TestAggregatorStatus(t *testing.T) {
 
 func TestAggregatorCloseAlreadyClosed(t *testing.T) {
 	agg, _ := testAggregator(t)
-	require.Equal(t, errAggregatorExpectOpen, agg.Close())
+	require.Equal(t, errAggregatorNotOpenOrClosed, agg.Close())
 }
 
 func TestAggregatorCloseSuccess(t *testing.T) {
