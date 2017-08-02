@@ -22,6 +22,7 @@ package aggregator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -32,6 +33,55 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestElectionStateJSONMarshal(t *testing.T) {
+	for _, input := range []struct {
+		state    ElectionState
+		expected string
+	}{
+		{state: LeaderState, expected: `"leader"`},
+		{state: FollowerState, expected: `"follower"`},
+	} {
+		b, err := json.Marshal(input.state)
+		require.NoError(t, err)
+		require.Equal(t, input.expected, string(b))
+	}
+}
+
+func TestElectionStateJSONMarshalError(t *testing.T) {
+	require.Panics(t, func() {
+		json.Marshal(ElectionState(100))
+	})
+}
+
+func TestElectionStateJSONUnMarshal(t *testing.T) {
+	for _, input := range []struct {
+		str      string
+		expected ElectionState
+	}{
+		{str: `"leader"`, expected: LeaderState},
+		{str: `"follower"`, expected: FollowerState},
+	} {
+		var actual ElectionState
+		require.NoError(t, json.Unmarshal([]byte(input.str), &actual))
+		require.Equal(t, input.expected, actual)
+	}
+}
+
+func TestElectionStateJSONUnMarshalError(t *testing.T) {
+	var state ElectionState
+	require.Error(t, json.Unmarshal([]byte(`"foo"`), &state))
+}
+
+func TestElectionStateJSONRoundtrip(t *testing.T) {
+	for _, input := range []ElectionState{LeaderState, FollowerState} {
+		var actual ElectionState
+		b, err := json.Marshal(input)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(b, &actual))
+		require.Equal(t, input, actual)
+	}
+}
 
 func TestElectionManagerOpenAlreadyOpen(t *testing.T) {
 	opts := testElectionManagerOptions(t)
@@ -85,6 +135,10 @@ func TestElectionManagerResignLeaderServiceResignError(t *testing.T) {
 	}
 	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
 	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.sleepFn = func(time.Duration) {}
+	mgr.Lock()
+	mgr.electionState = LeaderState
+	mgr.Unlock()
 	require.NoError(t, mgr.Open(testShardSetID))
 	require.Error(t, mgr.Resign(context.Background()))
 	require.Equal(t, electionManagerOpen, mgr.state)
@@ -108,6 +162,7 @@ func TestElectionManagerResignTimeout(t *testing.T) {
 	}
 	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
 	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.sleepFn = func(time.Duration) {}
 	mgr.Lock()
 	mgr.electionState = LeaderState
 	mgr.Unlock()
@@ -146,13 +201,14 @@ func TestElectionManagerResignSuccess(t *testing.T) {
 	}
 	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
 	mgr = NewElectionManager(opts).(*electionManager)
+	mgr.sleepFn = func(time.Duration) {}
 	mgr.Lock()
 	mgr.electionState = LeaderState
 	mgr.Unlock()
 	require.NoError(t, mgr.Open(testShardSetID))
 
 	require.NoError(t, mgr.Resign(ctx))
-	require.Equal(t, electionManagerResigned, mgr.state)
+	require.Equal(t, electionManagerOpen, mgr.state)
 	require.NoError(t, mgr.Close())
 }
 
@@ -160,7 +216,7 @@ func TestElectionManagerCloseNotOpenOrResigned(t *testing.T) {
 	opts := testElectionManagerOptions(t)
 	mgr := NewElectionManager(opts).(*electionManager)
 	mgr.state = electionManagerNotOpen
-	require.Equal(t, errElectionManagerExpectOpenOrResigned, mgr.Close())
+	require.Equal(t, errElectionManagerExpectOpen, mgr.Close())
 }
 
 func TestElectionManagerCloseSuccess(t *testing.T) {
@@ -171,14 +227,20 @@ func TestElectionManagerCloseSuccess(t *testing.T) {
 }
 
 func TestElectionManagerStartElectionLoop(t *testing.T) {
+	iter := 0
 	leaderValue := "myself"
 	campaignCh := make(chan campaign.Status)
+	nextCampaignCh := make(chan campaign.Status)
 	leaderService := &mockLeaderService{
 		campaignFn: func(
 			electionID string,
 			opts services.CampaignOptions,
 		) (<-chan campaign.Status, error) {
-			return campaignCh, nil
+			iter++
+			if iter == 1 {
+				return campaignCh, nil
+			}
+			return nextCampaignCh, nil
 		},
 		leaderFn: func(electionID string) (string, error) {
 			return "someone else", nil
@@ -222,21 +284,40 @@ func TestElectionManagerStartElectionLoop(t *testing.T) {
 	}
 
 	// Asynchronously resign.
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		mgr.state = electionManagerResigned
-		campaignCh <- campaign.NewStatus(campaign.Leader)
+		defer wg.Done()
 
-		// Create a bit of lag between when campaign channel is written
-		// and when the resign channel is closed.
-		time.Sleep(100 * time.Millisecond)
-		close(mgr.resignCh)
+		mgr.Lock()
+		mgr.state = electionManagerResigning
+		mgr.resignWg = &sync.WaitGroup{}
+		mgr.resignWg.Add(1)
+		mgr.Unlock()
+		campaignCh <- campaign.NewStatus(campaign.Leader)
+		close(campaignCh)
+
+		// Create a bit of lag between when campaign channel is closed
+		// and when the resign completes.
+		time.Sleep(500 * time.Millisecond)
+		mgr.resignWg.Done()
+
+		mgr.Lock()
+		mgr.state = electionManagerOpen
+		mgr.resignWg = nil
+		mgr.Unlock()
 	}()
+
 	for {
 		if mgr.ElectionState() == LeaderState {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	wg.Wait()
+
+	// Verifying we are still electing.
+	nextCampaignCh <- campaign.NewStatus(campaign.Leader)
 
 	require.NoError(t, mgr.Close())
 }
@@ -361,23 +442,6 @@ func TestElectionManagerLeaderToFollowerWithLeaderErrors(t *testing.T) {
 	mgr.changeWg.Wait()
 	require.Equal(t, FollowerState, mgr.electionState)
 	require.Equal(t, 3, iter)
-}
-
-func TestElectionManagerIsResigned(t *testing.T) {
-	leaderService := &mockLeaderService{
-		campaignFn: func(
-			electionID string,
-			opts services.CampaignOptions,
-		) (<-chan campaign.Status, error) {
-			return make(chan campaign.Status), nil
-		},
-	}
-	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
-	mgr := NewElectionManager(opts).(*electionManager)
-	require.NoError(t, mgr.Open(testShardSetID))
-	require.False(t, mgr.isResigned())
-	require.NoError(t, mgr.Close())
-	require.True(t, mgr.isResigned())
 }
 
 func testElectionManagerOptions(t *testing.T) ElectionManagerOptions {

@@ -286,8 +286,9 @@ func (agg *aggregator) Status() RuntimeStatus {
 
 func (agg *aggregator) Close() error {
 	agg.Lock()
+	defer agg.Unlock()
+
 	if agg.state != aggregatorOpen {
-		agg.Unlock()
 		return errAggregatorNotOpenOrClosed
 	}
 	agg.state = aggregatorClosed

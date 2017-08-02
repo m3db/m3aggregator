@@ -118,7 +118,7 @@ func TestFlushManagerStatus(t *testing.T) {
 		canLead: true,
 	}
 	expected := FlushStatus{
-		ElectionState: "follower",
+		ElectionState: FollowerState,
 		CanLead:       true,
 	}
 	require.Equal(t, expected, mgr.Status())

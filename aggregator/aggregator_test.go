@@ -195,7 +195,7 @@ func TestAggregatorResignSuccess(t *testing.T) {
 
 func TestAggregatorStatus(t *testing.T) {
 	flushStatus := FlushStatus{
-		ElectionState: LeaderState.String(),
+		ElectionState: LeaderState,
 		CanLead:       true,
 	}
 	agg, _ := testAggregator(t)

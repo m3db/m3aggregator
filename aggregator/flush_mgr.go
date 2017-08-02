@@ -73,8 +73,8 @@ type FlushManager interface {
 
 // FlushStatus is the flush status.
 type FlushStatus struct {
-	ElectionState string `json:"electionState"`
-	CanLead       bool   `json:"canLead"`
+	ElectionState ElectionState `json:"electionState"`
+	CanLead       bool          `json:"canLead"`
 }
 
 // flushTask is a flush task.
@@ -191,7 +191,7 @@ func (mgr *flushManager) Status() FlushStatus {
 	mgr.RUnlock()
 
 	return FlushStatus{
-		ElectionState: electionState.String(),
+		ElectionState: electionState,
 		CanLead:       canLead,
 	}
 }

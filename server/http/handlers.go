@@ -31,9 +31,11 @@ import (
 	"github.com/m3db/m3x/errors"
 )
 
+// A list of HTTP endpoints.
 const (
-	resignPath = "/resign"
-	statusPath = "/status"
+	HealthPath = "/health"
+	ResignPath = "/resign"
+	StatusPath = "/status"
 )
 
 var (
@@ -42,12 +44,25 @@ var (
 )
 
 func registerHandlers(mux *http.ServeMux, aggregator aggregator.Aggregator) {
+	registerHealthHandler(mux)
 	registerResignHandler(mux, aggregator)
 	registerStatusHandler(mux, aggregator)
 }
 
+func registerHealthHandler(mux *http.ServeMux) {
+	mux.HandleFunc(HealthPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if httpMethod := strings.ToUpper(r.Method); httpMethod != http.MethodGet {
+			writeErrorResponse(w, errRequestMustBeGet)
+			return
+		}
+		writeSuccessResponse(w, nil)
+	})
+}
+
 func registerResignHandler(mux *http.ServeMux, aggregator aggregator.Aggregator) {
-	mux.HandleFunc(resignPath, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(ResignPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if httpMethod := strings.ToUpper(r.Method); httpMethod != http.MethodPost {
@@ -60,12 +75,11 @@ func registerResignHandler(mux *http.ServeMux, aggregator aggregator.Aggregator)
 			return
 		}
 		writeSuccessResponse(w, nil)
-		return
 	})
 }
 
 func registerStatusHandler(mux *http.ServeMux, aggregator aggregator.Aggregator) {
-	mux.HandleFunc(statusPath, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(StatusPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if httpMethod := strings.ToUpper(r.Method); httpMethod != http.MethodGet {
@@ -75,26 +89,32 @@ func registerStatusHandler(mux *http.ServeMux, aggregator aggregator.Aggregator)
 
 		status := aggregator.Status()
 		writeSuccessResponse(w, status)
-		return
 	})
 }
 
-type response struct {
+// Response is an HTTP response.
+type Response struct {
 	Status string      `json:"status,omitempty"`
 	Error  string      `json:"error,omitempty"`
 	Data   interface{} `json:"data,omitempty"`
 }
 
-func newSuccessResponse(data interface{}) response {
-	return response{Status: "OK", Data: data}
+// NewResponse creates a new empty response.
+func NewResponse() Response { return Response{} }
+
+// NewStatusResponse creates a new empty status response.
+func NewStatusResponse() Response { return Response{Data: aggregator.RuntimeStatus{}} }
+
+func newSuccessResponse(data interface{}) Response {
+	return Response{Status: "OK", Data: data}
 }
 
-func newErrorResponse(err error, data interface{}) response {
+func newErrorResponse(err error, data interface{}) Response {
 	var errStr string
 	if err != nil {
 		errStr = err.Error()
 	}
-	return response{Status: "Error", Error: errStr, Data: data}
+	return Response{Status: "Error", Error: errStr, Data: data}
 }
 
 func writeSuccessResponse(w http.ResponseWriter, data interface{}) {
