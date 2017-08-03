@@ -35,67 +35,67 @@ const (
 	defaultHelperWorkerPoolSize       = 16
 )
 
-// DeploymentHelperOptions provide a set of options for the deployment helper.
-type DeploymentHelperOptions interface {
+// HelperOptions provide a set of options for the deployment helper.
+type HelperOptions interface {
 	// SetInstrumentOptions sets the instrument options.
-	SetInstrumentOptions(value instrument.Options) DeploymentHelperOptions
+	SetInstrumentOptions(value instrument.Options) HelperOptions
 
 	// InstrumentOptions returns the instrument options.
 	InstrumentOptions() instrument.Options
 
-	// SetDeploymentManager sets the deployment manager.
-	SetDeploymentManager(value DeploymentManager) DeploymentHelperOptions
+	// SetManager sets the deployment manager.
+	SetManager(value Manager) HelperOptions
 
-	// DeploymentManager returns the deployment manager.
-	DeploymentManager() DeploymentManager
+	// Manager returns the deployment manager.
+	Manager() Manager
 
-	// SetDeploymentPlanner sets the deployment planner.
-	SetDeploymentPlanner(value DeploymentPlanner) DeploymentHelperOptions
+	// SetPlanner sets the deployment planner.
+	SetPlanner(value Planner) HelperOptions
 
-	// DeploymentPlanner returns the deployment planner.
-	DeploymentPlanner() DeploymentPlanner
+	// Planner returns the deployment planner.
+	Planner() Planner
 
 	// SetAggregatorClient sets the aggregator client.
-	SetAggregatorClient(value AggregatorClient) DeploymentHelperOptions
+	SetAggregatorClient(value AggregatorClient) HelperOptions
 
 	// AggregatorClient returns the aggregator client.
 	AggregatorClient() AggregatorClient
 
 	// SetKVStore sets the kv store.
-	SetKVStore(value kv.Store) DeploymentHelperOptions
+	SetKVStore(value kv.Store) HelperOptions
 
 	// KVStore returns the kv store.
 	KVStore() kv.Store
 
 	// SetRetrier sets the retrier.
-	SetRetrier(value xretry.Retrier) DeploymentHelperOptions
+	SetRetrier(value xretry.Retrier) HelperOptions
 
 	// Retrier returns the retrier.
 	Retrier() xretry.Retrier
 
 	// SetWorkerPool sets the worker pool.
-	SetWorkerPool(value xsync.WorkerPool) DeploymentHelperOptions
+	SetWorkerPool(value xsync.WorkerPool) HelperOptions
 
 	// WorkerPool returns the worker pool.
 	WorkerPool() xsync.WorkerPool
 
 	// SetStagedPlacementWatcherOptions sets the staged placement watcher options.
-	SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) DeploymentHelperOptions
+	SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) HelperOptions
 
 	// StagedPlacementWatcherOptions returns the staged placement watcher options.
 	StagedPlacementWatcherOptions() services.StagedPlacementWatcherOptions
 
 	// SetSettleDurationBetweenSteps sets the settlement duration between consecutive steps.
-	SetSettleDurationBetweenSteps(value time.Duration) DeploymentHelperOptions
+	SetSettleDurationBetweenSteps(value time.Duration) HelperOptions
 
 	// SettleDurationBetweenSteps returns the settlement duration between consecutive steps.
 	SettleDurationBetweenSteps() time.Duration
 }
 
-type deploymentHelperOptions struct {
+type helperOptions struct {
 	instrumentOpts instrument.Options
-	manager        DeploymentManager
-	planner        DeploymentPlanner
+	manager        Manager
+	planner        Planner
 	client         AggregatorClient
 	store          kv.Store
 	retrier        xretry.Retrier
@@ -104,11 +104,11 @@ type deploymentHelperOptions struct {
 	settleDuration time.Duration
 }
 
-// NewDeploymentHelperOptions create a set of deployment helper options.
-func NewDeploymentHelperOptions() DeploymentHelperOptions {
+// NewHelperOptions create a set of deployment helper options.
+func NewHelperOptions() HelperOptions {
 	workers := xsync.NewWorkerPool(defaultHelperWorkerPoolSize)
 	workers.Init()
-	return &deploymentHelperOptions{
+	return &helperOptions{
 		instrumentOpts: instrument.NewOptions(),
 		retrier:        xretry.NewRetrier(xretry.NewOptions()),
 		workerPool:     workers,
@@ -116,92 +116,92 @@ func NewDeploymentHelperOptions() DeploymentHelperOptions {
 	}
 }
 
-func (o *deploymentHelperOptions) SetInstrumentOptions(value instrument.Options) DeploymentHelperOptions {
+func (o *helperOptions) SetInstrumentOptions(value instrument.Options) HelperOptions {
 	opts := *o
 	opts.instrumentOpts = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) InstrumentOptions() instrument.Options {
+func (o *helperOptions) InstrumentOptions() instrument.Options {
 	return o.instrumentOpts
 }
 
-func (o *deploymentHelperOptions) SetDeploymentManager(value DeploymentManager) DeploymentHelperOptions {
+func (o *helperOptions) SetManager(value Manager) HelperOptions {
 	opts := *o
 	opts.manager = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) DeploymentManager() DeploymentManager {
+func (o *helperOptions) Manager() Manager {
 	return o.manager
 }
 
-func (o *deploymentHelperOptions) SetDeploymentPlanner(value DeploymentPlanner) DeploymentHelperOptions {
+func (o *helperOptions) SetPlanner(value Planner) HelperOptions {
 	opts := *o
 	opts.planner = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) DeploymentPlanner() DeploymentPlanner {
+func (o *helperOptions) Planner() Planner {
 	return o.planner
 }
 
-func (o *deploymentHelperOptions) SetAggregatorClient(value AggregatorClient) DeploymentHelperOptions {
+func (o *helperOptions) SetAggregatorClient(value AggregatorClient) HelperOptions {
 	opts := *o
 	opts.client = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) AggregatorClient() AggregatorClient {
+func (o *helperOptions) AggregatorClient() AggregatorClient {
 	return o.client
 }
 
-func (o *deploymentHelperOptions) SetKVStore(value kv.Store) DeploymentHelperOptions {
+func (o *helperOptions) SetKVStore(value kv.Store) HelperOptions {
 	opts := *o
 	opts.store = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) KVStore() kv.Store {
+func (o *helperOptions) KVStore() kv.Store {
 	return o.store
 }
 
-func (o *deploymentHelperOptions) SetRetrier(value xretry.Retrier) DeploymentHelperOptions {
+func (o *helperOptions) SetRetrier(value xretry.Retrier) HelperOptions {
 	opts := *o
 	opts.retrier = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) Retrier() xretry.Retrier {
+func (o *helperOptions) Retrier() xretry.Retrier {
 	return o.retrier
 }
 
-func (o *deploymentHelperOptions) SetWorkerPool(value xsync.WorkerPool) DeploymentHelperOptions {
+func (o *helperOptions) SetWorkerPool(value xsync.WorkerPool) HelperOptions {
 	opts := *o
 	opts.workerPool = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) WorkerPool() xsync.WorkerPool {
+func (o *helperOptions) WorkerPool() xsync.WorkerPool {
 	return o.workerPool
 }
 
-func (o *deploymentHelperOptions) SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) DeploymentHelperOptions {
+func (o *helperOptions) SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) HelperOptions {
 	opts := *o
 	opts.watcherOpts = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) StagedPlacementWatcherOptions() services.StagedPlacementWatcherOptions {
+func (o *helperOptions) StagedPlacementWatcherOptions() services.StagedPlacementWatcherOptions {
 	return o.watcherOpts
 }
 
-func (o *deploymentHelperOptions) SetSettleDurationBetweenSteps(value time.Duration) DeploymentHelperOptions {
+func (o *helperOptions) SetSettleDurationBetweenSteps(value time.Duration) HelperOptions {
 	opts := *o
 	opts.settleDuration = value
 	return &opts
 }
 
-func (o *deploymentHelperOptions) SettleDurationBetweenSteps() time.Duration {
+func (o *helperOptions) SettleDurationBetweenSteps() time.Duration {
 	return o.settleDuration
 }

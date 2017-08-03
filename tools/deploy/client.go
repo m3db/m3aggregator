@@ -33,13 +33,15 @@ import (
 
 // AggregatorClient interacts with aggregator instances via aggregator HTTP endpoints.
 type AggregatorClient interface {
-	// IsHealthy determins whether an instance is healthy.
+	// IsHealthy determines whether an instance is healthy.
 	IsHealthy(instance string) error
 
 	// Status returns the instance status.
 	Status(instance string) (aggregator.RuntimeStatus, error)
 
-	// Resign resigns an aggregator instance.
+	// Resign asks an aggregator instance to give up its current leader role if applicable.
+	// The instance however still participates in leader election as a follower after
+	// resiganation succeeds.
 	Resign(instance string) error
 }
 

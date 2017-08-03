@@ -37,19 +37,20 @@ import (
 
 var (
 	errNoDeploymentProgress = errors.New("no deployment progress")
+	errInvalidRevision      = errors.New("invalid revision")
 )
 
-// DeploymentHelper is helper class handling deployments.
-type DeploymentHelper interface {
+// Helper is a helper class handling deployments.
+type Helper interface {
 	// Deploy deploys a target revision to the instances in the placement.
 	Deploy(revision string) error
 }
 
 // TODO(xichen): disable deployment while another is ongoing.
-type deploymentHelper struct {
+type helper struct {
 	logger             xlog.Logger
-	mgr                DeploymentManager
-	planner            DeploymentPlanner
+	mgr                Manager
+	planner            Planner
 	client             AggregatorClient
 	store              kv.Store
 	retrier            xretry.Retrier
@@ -58,17 +59,17 @@ type deploymentHelper struct {
 	settleBetweenSteps time.Duration
 }
 
-// NewDeploymentHelper creates a new deployment helper.
-func NewDeploymentHelper(opts DeploymentHelperOptions) (DeploymentHelper, error) {
+// NewHelper creates a new deployment helper.
+func NewHelper(opts HelperOptions) (Helper, error) {
 	placementWatcherOpts := opts.StagedPlacementWatcherOptions()
 	placementWatcher := placement.NewStagedPlacementWatcher(placementWatcherOpts)
 	if err := placementWatcher.Watch(); err != nil {
 		return nil, err
 	}
-	return deploymentHelper{
+	return helper{
 		logger:             opts.InstrumentOptions().Logger(),
-		mgr:                opts.DeploymentManager(),
-		planner:            opts.DeploymentPlanner(),
+		mgr:                opts.Manager(),
+		planner:            opts.Planner(),
 		client:             opts.AggregatorClient(),
 		store:              opts.KVStore(),
 		retrier:            opts.Retrier(),
@@ -78,7 +79,10 @@ func NewDeploymentHelper(opts DeploymentHelperOptions) (DeploymentHelper, error)
 	}, nil
 }
 
-func (h deploymentHelper) Deploy(revision string) error {
+func (h helper) Deploy(revision string) error {
+	if revision == "" {
+		return errInvalidRevision
+	}
 	placementInstances, err := h.placementInstances()
 	if err != nil {
 		return fmt.Errorf("unable to determine instances from placement: %v", err)
@@ -107,15 +111,15 @@ func (h deploymentHelper) Deploy(revision string) error {
 }
 
 // Close closes the deployment helper.
-func (h deploymentHelper) Close() error {
+func (h helper) Close() error {
 	if h.placementWatcher == nil {
 		return nil
 	}
 	return h.placementWatcher.Unwatch()
 }
 
-func (h deploymentHelper) execute(
-	plan DeploymentPlan,
+func (h helper) execute(
+	plan Plan,
 	revision string,
 	toDeploy, allInstances []services.PlacementInstance,
 ) error {
@@ -134,8 +138,8 @@ func (h deploymentHelper) execute(
 	return nil
 }
 
-func (h deploymentHelper) executeStep(
-	step DeploymentStep,
+func (h helper) executeStep(
+	step Step,
 	revision string,
 	toDeploy, allInstances []services.PlacementInstance,
 ) error {
@@ -171,7 +175,7 @@ func (h deploymentHelper) executeStep(
 	return nil
 }
 
-func (h deploymentHelper) waitUntilSafe(instances []services.PlacementInstance) error {
+func (h helper) waitUntilSafe(instances []services.PlacementInstance) error {
 	return h.retrier.Attempt(func() error {
 		deploymentInstances, err := h.mgr.Query(instances)
 		if err != nil {
@@ -206,7 +210,7 @@ func (h deploymentHelper) waitUntilSafe(instances []services.PlacementInstance) 
 	})
 }
 
-func (h deploymentHelper) validate(targets []DeploymentTarget) error {
+func (h helper) validate(targets []Target) error {
 	return h.retrier.Attempt(func() error {
 		var (
 			wg    sync.WaitGroup
@@ -237,7 +241,7 @@ func (h deploymentHelper) validate(targets []DeploymentTarget) error {
 	})
 }
 
-func (h deploymentHelper) resign(targets []DeploymentTarget) error {
+func (h helper) resign(targets []Target) error {
 	return h.retrier.Attempt(func() error {
 		var (
 			wg    sync.WaitGroup
@@ -265,7 +269,7 @@ func (h deploymentHelper) resign(targets []DeploymentTarget) error {
 	})
 }
 
-func (h deploymentHelper) deploy(targets []DeploymentTarget, revision string) error {
+func (h helper) deploy(targets []Target, revision string) error {
 	instances := make([]services.PlacementInstance, 0, len(targets))
 	for _, target := range targets {
 		instances = append(instances, target.Instance)
@@ -275,7 +279,7 @@ func (h deploymentHelper) deploy(targets []DeploymentTarget, revision string) er
 	})
 }
 
-func (h deploymentHelper) waitUntilProgressing(
+func (h helper) waitUntilProgressing(
 	instances []services.PlacementInstance,
 	revision string,
 ) error {
@@ -295,7 +299,7 @@ func (h deploymentHelper) waitUntilProgressing(
 	})
 }
 
-func (h deploymentHelper) placementInstances() ([]services.PlacementInstance, error) {
+func (h helper) placementInstances() ([]services.PlacementInstance, error) {
 	placement, err := h.placement()
 	if err != nil {
 		return nil, err
@@ -303,7 +307,7 @@ func (h deploymentHelper) placementInstances() ([]services.PlacementInstance, er
 	return placement.Instances(), nil
 }
 
-func (h deploymentHelper) placement() (services.Placement, error) {
+func (h helper) placement() (services.Placement, error) {
 	stagedPlacement, onStagedPlacementDoneFn, err := h.placementWatcher.ActiveStagedPlacement()
 	if err != nil {
 		return nil, err
@@ -321,7 +325,7 @@ func (h deploymentHelper) placement() (services.Placement, error) {
 
 func filterInstancesByRevision(
 	placementInstances []services.PlacementInstance,
-	deploymentInstances []DeploymentInstance,
+	deploymentInstances []Instance,
 	revision string,
 ) []services.PlacementInstance {
 	filtered := make([]services.PlacementInstance, 0, len(placementInstances))
@@ -335,11 +339,11 @@ func filterInstancesByRevision(
 }
 
 // validateInstances validates instances derived from placement against
-// instaces derived from deployment, ensuring there are no duplicate instances
+// instances derived from deployment, ensuring there are no duplicate instances
 // and the instances derived from two sources match against each other.
 func validateInstances(
 	placementInstances []services.PlacementInstance,
-	deploymentInstances []DeploymentInstance,
+	deploymentInstances []Instance,
 ) error {
 	if len(placementInstances) != len(deploymentInstances) {
 		errMsg := "number of instances is %d in the placement and %d in the deployment"

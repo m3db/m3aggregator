@@ -29,34 +29,34 @@ import (
 )
 
 var (
-	emptyDeploymentPlan DeploymentPlan
+	emptyPlan Plan
 )
 
-// DeploymentTarget is a deployment target.
-type DeploymentTarget struct {
+// Target is a deployment target.
+type Target struct {
 	Instance  services.PlacementInstance
 	Validator Validator
 }
 
-func (t DeploymentTarget) String() string { return t.Instance.ID() }
+func (t Target) String() string { return t.Instance.ID() }
 
-// DeploymentStep is a deployment step.
-type DeploymentStep struct {
-	Targets []DeploymentTarget
+// Step is a deployment step.
+type Step struct {
+	Targets []Target
 }
 
-// DeploymentPlan is a deployment plan.
-type DeploymentPlan struct {
-	Steps []DeploymentStep
+// Plan is a deployment plan.
+type Plan struct {
+	Steps []Step
 }
 
-// DeploymentPlanner generates deployment plans for given instances under constraints.
-type DeploymentPlanner interface {
+// Planner generates deployment plans for given instances under constraints.
+type Planner interface {
 	// GeneratePlan generates a deployment plan for given target instances.
-	GeneratePlan(toDeploy, all []services.PlacementInstance) (DeploymentPlan, error)
+	GeneratePlan(toDeploy, all []services.PlacementInstance) (Plan, error)
 }
 
-type deploymentPlanner struct {
+type planner struct {
 	leaderService    services.LeaderService
 	workers          xsync.WorkerPool
 	electionKeyFmt   string
@@ -64,12 +64,12 @@ type deploymentPlanner struct {
 	validatorFactory validatorFactory
 }
 
-// NewDeploymentPlanner creates a new deployment planner.
-func NewDeploymentPlanner(opts DeploymentPlannerOptions) DeploymentPlanner {
+// NewPlanner creates a new deployment planner.
+func NewPlanner(opts PlannerOptions) Planner {
 	client := opts.AggregatorClient()
 	workers := opts.WorkerPool()
 	validatorFactory := newValidatorFactory(client, workers)
-	return deploymentPlanner{
+	return planner{
 		leaderService:    opts.LeaderService(),
 		workers:          opts.WorkerPool(),
 		electionKeyFmt:   opts.ElectionKeyFmt(),
@@ -78,24 +78,24 @@ func NewDeploymentPlanner(opts DeploymentPlannerOptions) DeploymentPlanner {
 	}
 }
 
-func (p deploymentPlanner) GeneratePlan(
+func (p planner) GeneratePlan(
 	toDeploy, all []services.PlacementInstance,
-) (DeploymentPlan, error) {
+) (Plan, error) {
 	grouped, err := p.groupInstancesByShardSetID(toDeploy, all)
 	if err != nil {
-		return emptyDeploymentPlan, fmt.Errorf("unable to group instances by shard set id: %v", err)
+		return emptyPlan, fmt.Errorf("unable to group instances by shard set id: %v", err)
 	}
 	return p.generatePlan(grouped, len(toDeploy), p.maxStepSize), nil
 }
 
-func (p deploymentPlanner) generatePlan(
+func (p planner) generatePlan(
 	instances map[string]*instanceGroup,
 	numInstances int,
 	maxStepSize int,
-) DeploymentPlan {
+) Plan {
 	var (
-		step  DeploymentStep
-		plan  DeploymentPlan
+		step  Step
+		plan  Plan
 		total = numInstances
 	)
 	for total > 0 {
@@ -106,10 +106,10 @@ func (p deploymentPlanner) generatePlan(
 	return plan
 }
 
-func (p deploymentPlanner) generateStep(
+func (p planner) generateStep(
 	instances map[string]*instanceGroup,
 	maxStepSize int,
-) DeploymentStep {
+) Step {
 	// NB(xichen): we always choose instances that are currently in the follower state first,
 	// unless there are no more follower instances, in which case we'll deploy the leader instances.
 	// This is to reduce the overall deployment time due to reduced number of leader promotions and
@@ -128,12 +128,12 @@ func (p deploymentPlanner) generateStep(
 	return p.generateStepFromTargetType(instances, maxStepSize, leaderTarget)
 }
 
-func (p deploymentPlanner) generateStepFromTargetType(
+func (p planner) generateStepFromTargetType(
 	instances map[string]*instanceGroup,
 	maxStepSize int,
 	targetType targetType,
-) DeploymentStep {
-	step := DeploymentStep{Targets: make([]DeploymentTarget, 0, maxStepSize)}
+) Step {
+	step := Step{Targets: make([]Target, 0, maxStepSize)}
 	for shardSetID, group := range instances {
 		if len(group.ToDeploy) == 0 {
 			delete(instances, shardSetID)
@@ -143,7 +143,7 @@ func (p deploymentPlanner) generateStepFromTargetType(
 			if !matchTargetType(instance.ID(), group.LeaderID, targetType) {
 				continue
 			}
-			target := DeploymentTarget{
+			target := Target{
 				Instance:  instance,
 				Validator: p.validatorFactory.ValidatorFor(instance, group, targetType),
 			}
@@ -158,7 +158,7 @@ func (p deploymentPlanner) generateStepFromTargetType(
 	return step
 }
 
-func (p deploymentPlanner) groupInstancesByShardSetID(
+func (p planner) groupInstancesByShardSetID(
 	toDeploy, all []services.PlacementInstance,
 ) (map[string]*instanceGroup, error) {
 	grouped := make(map[string]*instanceGroup, len(toDeploy))
