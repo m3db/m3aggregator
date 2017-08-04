@@ -722,17 +722,17 @@ func (o *options) initPools() {
 
 	o.counterElemPool = NewCounterElemPool(nil)
 	o.counterElemPool.Init(func() *CounterElem {
-		return NewCounterElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, o)
+		return NewCounterElem(nil, policy.EmptyStoragePolicy, policy.DefaultAggregationTypes, o)
 	})
 
 	o.timerElemPool = NewTimerElemPool(nil)
 	o.timerElemPool.Init(func() *TimerElem {
-		return NewTimerElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, o)
+		return NewTimerElem(nil, policy.EmptyStoragePolicy, policy.DefaultAggregationTypes, o)
 	})
 
 	o.gaugeElemPool = NewGaugeElemPool(nil)
 	o.gaugeElemPool.Init(func() *GaugeElem {
-		return NewGaugeElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, o)
+		return NewGaugeElem(nil, policy.EmptyStoragePolicy, policy.DefaultAggregationTypes, o)
 	})
 
 	o.bufferedEncoderPool = msgpack.NewBufferedEncoderPool(nil)

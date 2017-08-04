@@ -589,24 +589,24 @@ func TestEntryAddMetricWithPoliciesListWithInvalidAggregationType(t *testing.T) 
 	e, _, _ := testEntry()
 
 	require.NoError(t, e.AddMetricWithPoliciesList(testCounter, policy.PoliciesList{policy.NewStagedPolicies(0, false, []policy.Policy{
-		policy.NewPolicy(policy.DefaultStoragePolicy, compressedMin),
+		policy.NewPolicy(policy.EmptyStoragePolicy, compressedMin),
 	})}))
 	require.Error(t, e.AddMetricWithPoliciesList(testCounter, policy.PoliciesList{policy.NewStagedPolicies(0, false, []policy.Policy{
-		policy.NewPolicy(policy.DefaultStoragePolicy, compressedP9999),
+		policy.NewPolicy(policy.EmptyStoragePolicy, compressedP9999),
 	})}))
 
 	require.NoError(t, e.AddMetricWithPoliciesList(testGauge, policy.PoliciesList{policy.NewStagedPolicies(0, false, []policy.Policy{
-		policy.NewPolicy(policy.DefaultStoragePolicy, compressedMin),
+		policy.NewPolicy(policy.EmptyStoragePolicy, compressedMin),
 	})}))
 	require.Error(t, e.AddMetricWithPoliciesList(testGauge, policy.PoliciesList{policy.NewStagedPolicies(0, false, []policy.Policy{
-		policy.NewPolicy(policy.DefaultStoragePolicy, compressedP9999),
+		policy.NewPolicy(policy.EmptyStoragePolicy, compressedP9999),
 	})}))
 
 	require.NoError(t, e.AddMetricWithPoliciesList(testBatchTimer, policy.PoliciesList{policy.NewStagedPolicies(0, false, []policy.Policy{
-		policy.NewPolicy(policy.DefaultStoragePolicy, compressedMin),
+		policy.NewPolicy(policy.EmptyStoragePolicy, compressedMin),
 	})}))
 	require.Error(t, e.AddMetricWithPoliciesList(testBatchTimer, policy.PoliciesList{policy.NewStagedPolicies(0, false, []policy.Policy{
-		policy.NewPolicy(policy.DefaultStoragePolicy, compressedLast),
+		policy.NewPolicy(policy.EmptyStoragePolicy, compressedLast),
 	})}))
 }
 

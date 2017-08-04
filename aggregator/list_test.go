@@ -39,7 +39,7 @@ import (
 
 func TestMetricListPushBack(t *testing.T) {
 	l := newMetricList(testShard, time.Second, testOptions())
-	elem := NewCounterElem(nil, policy.DefaultStoragePolicy, policy.DefaultAggregationTypes, l.opts)
+	elem := NewCounterElem(nil, policy.EmptyStoragePolicy, policy.DefaultAggregationTypes, l.opts)
 
 	// Push a counter to the list
 	e, err := l.PushBack(elem)
