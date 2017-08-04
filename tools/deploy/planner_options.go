@@ -33,12 +33,6 @@ const (
 
 // PlannerOptions provide a set of options for the deployment planner.
 type PlannerOptions interface {
-	// SetAggregatorClient sets the aggregator client.
-	SetAggregatorClient(value AggregatorClient) PlannerOptions
-
-	// AggregatorClient returns the aggregator client.
-	AggregatorClient() AggregatorClient
-
 	// SetLeaderService sets the leader service.
 	SetLeaderService(value services.LeaderService) PlannerOptions
 
@@ -65,7 +59,6 @@ type PlannerOptions interface {
 }
 
 type plannerOptions struct {
-	client         AggregatorClient
 	leaderService  services.LeaderService
 	workerPool     xsync.WorkerPool
 	electionKeyFmt string
@@ -81,16 +74,6 @@ func NewPlannerOptions() PlannerOptions {
 		electionKeyFmt: defaultElectionKeyFmt,
 		maxStepSize:    defaultMaxStepSize,
 	}
-}
-
-func (o *plannerOptions) SetAggregatorClient(value AggregatorClient) PlannerOptions {
-	opts := *o
-	opts.client = value
-	return &opts
-}
-
-func (o *plannerOptions) AggregatorClient() AggregatorClient {
-	return o.client
 }
 
 func (o *plannerOptions) SetLeaderService(value services.LeaderService) PlannerOptions {

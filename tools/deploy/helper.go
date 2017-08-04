@@ -40,27 +40,39 @@ var (
 	errInvalidRevision      = errors.New("invalid revision")
 )
 
+// Mode is the deployment mode.
+type Mode int
+
+// A list of supported deployment modes.
+const (
+	DryRunMode Mode = iota
+	ForceMode
+)
+
 // Helper is a helper class handling deployments.
 type Helper interface {
 	// Deploy deploys a target revision to the instances in the placement.
-	Deploy(revision string) error
+	Deploy(revision string, mode Mode) error
 }
 
 // TODO(xichen): disable deployment while another is ongoing.
 type helper struct {
 	logger             xlog.Logger
+	planner            planner
+	client             aggregatorClient
 	mgr                Manager
-	planner            Planner
-	client             AggregatorClient
 	store              kv.Store
 	retrier            xretry.Retrier
 	workers            xsync.WorkerPool
+	toPlacementIDFn    ToPlacementInstanceIDFn
 	placementWatcher   services.StagedPlacementWatcher
 	settleBetweenSteps time.Duration
 }
 
 // NewHelper creates a new deployment helper.
 func NewHelper(opts HelperOptions) (Helper, error) {
+	client := newAggregatorClient(opts.HTTPClient())
+	planner := newPlanner(client, opts.PlannerOptions())
 	placementWatcherOpts := opts.StagedPlacementWatcherOptions()
 	placementWatcher := placement.NewStagedPlacementWatcher(placementWatcherOpts)
 	if err := placementWatcher.Watch(); err != nil {
@@ -68,45 +80,41 @@ func NewHelper(opts HelperOptions) (Helper, error) {
 	}
 	return helper{
 		logger:             opts.InstrumentOptions().Logger(),
+		planner:            planner,
+		client:             client,
 		mgr:                opts.Manager(),
-		planner:            opts.Planner(),
-		client:             opts.AggregatorClient(),
 		store:              opts.KVStore(),
 		retrier:            opts.Retrier(),
 		workers:            opts.WorkerPool(),
+		toPlacementIDFn:    opts.ToPlacementInstanceIDFn(),
 		placementWatcher:   placementWatcher,
 		settleBetweenSteps: opts.SettleDurationBetweenSteps(),
 	}, nil
 }
 
-func (h helper) Deploy(revision string) error {
+func (h helper) Deploy(revision string, mode Mode) error {
 	if revision == "" {
 		return errInvalidRevision
 	}
-	placementInstances, err := h.placementInstances()
+	all, err := h.allInstanceMetadatas()
 	if err != nil {
-		return fmt.Errorf("unable to determine instances from placement: %v", err)
+		return fmt.Errorf("unable to get all instance metadatas: %v", err)
 	}
-
-	deploymentInstances, err := h.mgr.Query(placementInstances)
-	if err != nil {
-		return fmt.Errorf("unable to query instances from deployment: %v", err)
-	}
-
-	if err := validateInstances(placementInstances, deploymentInstances); err != nil {
-		return fmt.Errorf("unable to validate instances: %v", err)
-	}
-
-	filtered := filterInstancesByRevision(placementInstances, deploymentInstances, revision)
-	deploymentPlan, err := h.planner.GeneratePlan(filtered, placementInstances)
+	filtered := filterByRevision(all, revision)
+	plan, err := h.planner.GeneratePlan(filtered, all)
 	if err != nil {
 		return fmt.Errorf("unable to generate deployment plan: %v", err)
 	}
 
-	if err = h.execute(deploymentPlan, revision, filtered, placementInstances); err != nil {
-		return fmt.Errorf("unable to execute deployment plan: %v", err)
+	// If in dry run mode, log the generated deployment plan and return.
+	if mode == DryRunMode {
+		h.logger.Infof("Generated deployment plan: %+v", plan)
+		return nil
 	}
 
+	if err = h.execute(plan, revision, filtered, all); err != nil {
+		return fmt.Errorf("unable to execute deployment plan: %v", err)
+	}
 	return nil
 }
 
@@ -119,14 +127,14 @@ func (h helper) Close() error {
 }
 
 func (h helper) execute(
-	plan Plan,
+	plan deploymentPlan,
 	revision string,
-	toDeploy, allInstances []services.PlacementInstance,
+	toDeploy, all instanceMetadatas,
 ) error {
 	numSteps := len(plan.Steps)
 	for i, step := range plan.Steps {
 		h.logger.Infof("deploying step %d of %d", i+1, numSteps)
-		if err := h.executeStep(step, revision, toDeploy, allInstances); err != nil {
+		if err := h.executeStep(step, revision, toDeploy, all); err != nil {
 			return err
 		}
 		if i < numSteps-1 && h.settleBetweenSteps > 0 {
@@ -139,12 +147,12 @@ func (h helper) execute(
 }
 
 func (h helper) executeStep(
-	step Step,
+	step deploymentStep,
 	revision string,
-	toDeploy, allInstances []services.PlacementInstance,
+	toDeploy, all instanceMetadatas,
 ) error {
 	h.logger.Infof("waiting until safe to deploy for step %v", step)
-	if err := h.waitUntilSafe(allInstances); err != nil {
+	if err := h.waitUntilSafe(all); err != nil {
 		return err
 	}
 
@@ -169,15 +177,16 @@ func (h helper) executeStep(
 	}
 
 	h.logger.Infof("deployment progressed, waiting for completion: %v", step)
-	if err := h.waitUntilSafe(allInstances); err != nil {
+	if err := h.waitUntilSafe(all); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (h helper) waitUntilSafe(instances []services.PlacementInstance) error {
+func (h helper) waitUntilSafe(instances instanceMetadatas) error {
+	deploymentIDs := instances.DeploymentIDs()
 	return h.retrier.Attempt(func() error {
-		deploymentInstances, err := h.mgr.Query(instances)
+		deploymentInstances, err := h.mgr.Query(deploymentIDs)
 		if err != nil {
 			return fmt.Errorf("error querying instances: %v", err)
 		}
@@ -195,7 +204,7 @@ func (h helper) waitUntilSafe(instances []services.PlacementInstance) error {
 				if !deploymentInstances[i].IsHealthy() || deploymentInstances[i].IsDeploying() {
 					return
 				}
-				if err := h.client.IsHealthy(instances[i].Endpoint()); err != nil {
+				if err := h.client.IsHealthy(instances[i].Endpoint); err != nil {
 					return
 				}
 				atomic.AddInt64(&safe, 1)
@@ -210,7 +219,7 @@ func (h helper) waitUntilSafe(instances []services.PlacementInstance) error {
 	})
 }
 
-func (h helper) validate(targets []Target) error {
+func (h helper) validate(targets []deploymentTarget) error {
 	return h.retrier.Attempt(func() error {
 		var (
 			wg    sync.WaitGroup
@@ -227,7 +236,7 @@ func (h helper) validate(targets []Target) error {
 					return
 				}
 				if err := validator(); err != nil {
-					err = fmt.Errorf("validation error for instance %s: %v", targets[i].Instance.ID(), err)
+					err = fmt.Errorf("validation error for instance %s: %v", targets[i].Instance.PlacementID, err)
 					select {
 					case errCh <- err:
 					default:
@@ -241,7 +250,7 @@ func (h helper) validate(targets []Target) error {
 	})
 }
 
-func (h helper) resign(targets []Target) error {
+func (h helper) resign(targets []deploymentTarget) error {
 	return h.retrier.Attempt(func() error {
 		var (
 			wg    sync.WaitGroup
@@ -254,8 +263,8 @@ func (h helper) resign(targets []Target) error {
 				defer wg.Done()
 
 				instance := targets[i].Instance
-				if err := h.client.Resign(instance.Endpoint()); err != nil {
-					err = fmt.Errorf("resign error for instance %s: %v", instance.ID(), err)
+				if err := h.client.Resign(instance.Endpoint); err != nil {
+					err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementID, err)
 					select {
 					case errCh <- err:
 					default:
@@ -269,22 +278,23 @@ func (h helper) resign(targets []Target) error {
 	})
 }
 
-func (h helper) deploy(targets []Target, revision string) error {
-	instances := make([]services.PlacementInstance, 0, len(targets))
+func (h helper) deploy(targets []deploymentTarget, revision string) error {
+	deploymentIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
-		instances = append(instances, target.Instance)
+		deploymentIDs = append(deploymentIDs, target.Instance.DeploymentID)
 	}
 	return h.retrier.Attempt(func() error {
-		return h.mgr.Deploy(instances, revision)
+		return h.mgr.Deploy(deploymentIDs, revision)
 	})
 }
 
 func (h helper) waitUntilProgressing(
-	instances []services.PlacementInstance,
+	instances instanceMetadatas,
 	revision string,
 ) error {
+	deploymentIDs := instances.DeploymentIDs()
 	return h.retrier.Attempt(func() error {
-		deploymentInstances, err := h.mgr.Query(instances)
+		deploymentInstances, err := h.mgr.Query(deploymentIDs)
 		if err != nil {
 			return fmt.Errorf("error querying instances: %v", err)
 		}
@@ -299,15 +309,71 @@ func (h helper) waitUntilProgressing(
 	})
 }
 
-func (h helper) placementInstances() ([]services.PlacementInstance, error) {
-	placement, err := h.placement()
+func (h helper) allInstanceMetadatas() (instanceMetadatas, error) {
+	placementInstances, err := h.placementInstances()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to determine instances from placement: %v", err)
 	}
-	return placement.Instances(), nil
+	deploymentInstances, err := h.mgr.QueryAll()
+	if err != nil {
+		return nil, fmt.Errorf("unable to query all instances from deployment: %v", err)
+	}
+	metadatas, err := h.computeInstanceMetadatas(placementInstances, deploymentInstances)
+	if err != nil {
+		return nil, fmt.Errorf("unable to compute instance metadatas: %v", err)
+	}
+	return metadatas, nil
 }
 
-func (h helper) placement() (services.Placement, error) {
+// validateInstances validates instances derived from placement against
+// instances derived from deployment, ensuring there are no duplicate instances
+// and the instances derived from two sources match against each other.
+func (h helper) computeInstanceMetadatas(
+	placementInstances []services.PlacementInstance,
+	deploymentInstances []Instance,
+) (instanceMetadatas, error) {
+	if len(placementInstances) != len(deploymentInstances) {
+		errMsg := "number of instances is %d in the placement and %d in the deployment"
+		return nil, fmt.Errorf(errMsg, len(placementInstances), len(deploymentInstances))
+	}
+
+	// Populate instance metadata from placement information.
+	metadatas := make(instanceMetadatas, len(placementInstances))
+	unique := make(map[string]int)
+	for i, pi := range placementInstances {
+		id := pi.ID()
+		_, exists := unique[id]
+		if exists {
+			return nil, fmt.Errorf("instance %s not unique in the placement", id)
+		}
+		unique[id] = i
+		metadatas[i].PlacementID = id
+		metadatas[i].ShardSetID = pi.ShardSetID()
+		metadatas[i].Endpoint = pi.Endpoint()
+	}
+
+	// Populate instance metadata from deployment information.
+	for _, di := range deploymentInstances {
+		id := di.ID()
+		placementID, err := h.toPlacementIDFn(id)
+		if err != nil {
+			return nil, fmt.Errorf("unable to convert deployment instance id %s to placement instance id", id)
+		}
+		idx, exists := unique[placementID]
+		if !exists {
+			return nil, fmt.Errorf("instance %s is in deployment but not in placement", id)
+		}
+		if metadatas[idx].DeploymentID != "" {
+			return nil, fmt.Errorf("instance %s not unique in the deployment", id)
+		}
+		metadatas[idx].DeploymentID = id
+		metadatas[idx].Revision = di.Revision()
+	}
+
+	return metadatas, nil
+}
+
+func (h helper) placementInstances() ([]services.PlacementInstance, error) {
 	stagedPlacement, onStagedPlacementDoneFn, err := h.placementWatcher.ActiveStagedPlacement()
 	if err != nil {
 		return nil, err
@@ -320,55 +386,35 @@ func (h helper) placement() (services.Placement, error) {
 	}
 	defer onPlacementDoneFn()
 
-	return placement, nil
+	return placement.Instances(), nil
 }
 
-func filterInstancesByRevision(
-	placementInstances []services.PlacementInstance,
-	deploymentInstances []Instance,
-	revision string,
-) []services.PlacementInstance {
-	filtered := make([]services.PlacementInstance, 0, len(placementInstances))
-	for i, di := range deploymentInstances {
-		if di.Revision() == revision {
+func filterByRevision(metadatas instanceMetadatas, revision string) instanceMetadatas {
+	filtered := make(instanceMetadatas, 0, len(metadatas))
+	for _, metadata := range metadatas {
+		if metadata.Revision == revision {
 			continue
 		}
-		filtered = append(filtered, placementInstances[i])
+		filtered = append(filtered, metadata)
 	}
 	return filtered
 }
 
-// validateInstances validates instances derived from placement against
-// instances derived from deployment, ensuring there are no duplicate instances
-// and the instances derived from two sources match against each other.
-func validateInstances(
-	placementInstances []services.PlacementInstance,
-	deploymentInstances []Instance,
-) error {
-	if len(placementInstances) != len(deploymentInstances) {
-		errMsg := "number of instances is %d in the placement and %d in the deployment"
-		return fmt.Errorf(errMsg, len(placementInstances), len(deploymentInstances))
+// instanceMetadata contains instance metadata.
+type instanceMetadata struct {
+	PlacementID  string
+	ShardSetID   string
+	Endpoint     string
+	DeploymentID string
+	Revision     string
+}
+
+type instanceMetadatas []instanceMetadata
+
+func (m instanceMetadatas) DeploymentIDs() []string {
+	res := make([]string, 0, len(m))
+	for _, metadata := range m {
+		res = append(res, metadata.DeploymentID)
 	}
-	unique := make(map[string]int)
-	for _, pi := range placementInstances {
-		id := pi.ID()
-		_, exists := unique[id]
-		if exists {
-			return fmt.Errorf("instance %s not unique in the placement", id)
-		}
-		unique[id] = 1
-	}
-	for _, di := range deploymentInstances {
-		id := di.ID()
-		v, exists := unique[id]
-		if !exists {
-			return fmt.Errorf("instance %s is in deployment but not in placement", id)
-		}
-		v--
-		if v < 0 {
-			return fmt.Errorf("instance %s not unique in the deployment", id)
-		}
-		unique[id] = v
-	}
-	return nil
+	return res
 }

@@ -28,35 +28,15 @@ import (
 	"github.com/m3db/m3x/sync"
 )
 
-var (
-	emptyPlan Plan
-)
+var emptyPlan deploymentPlan
 
-// Target is a deployment target.
-type Target struct {
-	Instance  services.PlacementInstance
-	Validator Validator
-}
-
-func (t Target) String() string { return t.Instance.ID() }
-
-// Step is a deployment step.
-type Step struct {
-	Targets []Target
-}
-
-// Plan is a deployment plan.
-type Plan struct {
-	Steps []Step
-}
-
-// Planner generates deployment plans for given instances under constraints.
-type Planner interface {
+// planner generates deployment plans for given instances under constraints.
+type planner interface {
 	// GeneratePlan generates a deployment plan for given target instances.
-	GeneratePlan(toDeploy, all []services.PlacementInstance) (Plan, error)
+	GeneratePlan(toDeploy, all instanceMetadatas) (deploymentPlan, error)
 }
 
-type planner struct {
+type deploymentPlanner struct {
 	leaderService    services.LeaderService
 	workers          xsync.WorkerPool
 	electionKeyFmt   string
@@ -64,12 +44,11 @@ type planner struct {
 	validatorFactory validatorFactory
 }
 
-// NewPlanner creates a new deployment planner.
-func NewPlanner(opts PlannerOptions) Planner {
-	client := opts.AggregatorClient()
+// newPlanner creates a new deployment planner.
+func newPlanner(client aggregatorClient, opts PlannerOptions) planner {
 	workers := opts.WorkerPool()
 	validatorFactory := newValidatorFactory(client, workers)
-	return planner{
+	return deploymentPlanner{
 		leaderService:    opts.LeaderService(),
 		workers:          opts.WorkerPool(),
 		electionKeyFmt:   opts.ElectionKeyFmt(),
@@ -78,9 +57,9 @@ func NewPlanner(opts PlannerOptions) Planner {
 	}
 }
 
-func (p planner) GeneratePlan(
-	toDeploy, all []services.PlacementInstance,
-) (Plan, error) {
+func (p deploymentPlanner) GeneratePlan(
+	toDeploy, all instanceMetadatas,
+) (deploymentPlan, error) {
 	grouped, err := p.groupInstancesByShardSetID(toDeploy, all)
 	if err != nil {
 		return emptyPlan, fmt.Errorf("unable to group instances by shard set id: %v", err)
@@ -88,14 +67,14 @@ func (p planner) GeneratePlan(
 	return p.generatePlan(grouped, len(toDeploy), p.maxStepSize), nil
 }
 
-func (p planner) generatePlan(
+func (p deploymentPlanner) generatePlan(
 	instances map[string]*instanceGroup,
 	numInstances int,
 	maxStepSize int,
-) Plan {
+) deploymentPlan {
 	var (
-		step  Step
-		plan  Plan
+		step  deploymentStep
+		plan  deploymentPlan
 		total = numInstances
 	)
 	for total > 0 {
@@ -106,10 +85,10 @@ func (p planner) generatePlan(
 	return plan
 }
 
-func (p planner) generateStep(
+func (p deploymentPlanner) generateStep(
 	instances map[string]*instanceGroup,
 	maxStepSize int,
-) Step {
+) deploymentStep {
 	// NB(xichen): we always choose instances that are currently in the follower state first,
 	// unless there are no more follower instances, in which case we'll deploy the leader instances.
 	// This is to reduce the overall deployment time due to reduced number of leader promotions and
@@ -128,22 +107,22 @@ func (p planner) generateStep(
 	return p.generateStepFromTargetType(instances, maxStepSize, leaderTarget)
 }
 
-func (p planner) generateStepFromTargetType(
+func (p deploymentPlanner) generateStepFromTargetType(
 	instances map[string]*instanceGroup,
 	maxStepSize int,
 	targetType targetType,
-) Step {
-	step := Step{Targets: make([]Target, 0, maxStepSize)}
+) deploymentStep {
+	step := deploymentStep{Targets: make([]deploymentTarget, 0, maxStepSize)}
 	for shardSetID, group := range instances {
 		if len(group.ToDeploy) == 0 {
 			delete(instances, shardSetID)
 			continue
 		}
 		for i, instance := range group.ToDeploy {
-			if !matchTargetType(instance.ID(), group.LeaderID, targetType) {
+			if !matchTargetType(instance.PlacementID, group.LeaderID, targetType) {
 				continue
 			}
-			target := Target{
+			target := deploymentTarget{
 				Instance:  instance,
 				Validator: p.validatorFactory.ValidatorFor(instance, group, targetType),
 			}
@@ -158,19 +137,19 @@ func (p planner) generateStepFromTargetType(
 	return step
 }
 
-func (p planner) groupInstancesByShardSetID(
-	toDeploy, all []services.PlacementInstance,
+func (p deploymentPlanner) groupInstancesByShardSetID(
+	toDeploy, all instanceMetadatas,
 ) (map[string]*instanceGroup, error) {
 	grouped := make(map[string]*instanceGroup, len(toDeploy))
 
 	// Group the instances to be deployed by shard set id.
 	for _, instance := range toDeploy {
-		shardSetID := instance.ShardSetID()
+		shardSetID := instance.ShardSetID
 		group, exists := grouped[shardSetID]
 		if !exists {
 			group = &instanceGroup{
-				ToDeploy: make([]services.PlacementInstance, 0, 2),
-				All:      make([]services.PlacementInstance, 0, 2),
+				ToDeploy: make(instanceMetadatas, 0, 2),
+				All:      make(instanceMetadatas, 0, 2),
 			}
 		}
 		group.ToDeploy = append(group.ToDeploy, instance)
@@ -179,7 +158,7 @@ func (p planner) groupInstancesByShardSetID(
 
 	// Determine the full set of instances in each group.
 	for _, instance := range all {
-		shardSetID := instance.ShardSetID()
+		shardSetID := instance.ShardSetID
 		group, exists := grouped[shardSetID]
 		if !exists {
 			continue
@@ -209,8 +188,8 @@ func (p planner) groupInstancesByShardSetID(
 				return
 			}
 			for _, instance := range group.All {
-				if instance.ID() == leader {
-					group.LeaderID = instance.ID()
+				if instance.PlacementID == leader {
+					group.LeaderID = instance.PlacementID
 					return
 				}
 			}
@@ -228,6 +207,24 @@ func (p planner) groupInstancesByShardSetID(
 		return nil, err
 	}
 	return grouped, nil
+}
+
+// deploymentTarget is a deployment target.
+type deploymentTarget struct {
+	Instance  instanceMetadata
+	Validator validator
+}
+
+func (t deploymentTarget) String() string { return t.Instance.PlacementID }
+
+// deploymentStep is a deployment step.
+type deploymentStep struct {
+	Targets []deploymentTarget
+}
+
+// deploymentPlan is a deployment plan.
+type deploymentPlan struct {
+	Steps []deploymentStep
 }
 
 type targetType int
@@ -253,10 +250,10 @@ type instanceGroup struct {
 	LeaderID string
 
 	// ToDeploy are the instances to be deployed in the group.
-	ToDeploy []services.PlacementInstance
+	ToDeploy instanceMetadatas
 
 	// All include all the instances in the group regardless of whether they need to be deployed.
-	All []services.PlacementInstance
+	All instanceMetadatas
 }
 
 func (group *instanceGroup) removeInstanceToDeploy(i int) {

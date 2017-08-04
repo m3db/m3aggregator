@@ -26,48 +26,47 @@ import (
 	"sync"
 
 	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3x/sync"
 )
 
-// Validator performs validation on a deployment target, returning nil if
+// validator performs validation on a deployment target, returning nil if
 // validation succeeds, and an error otherwise.
-type Validator func() error
+type validator func() error
 
 // validatorFactory is a factory of validators.
 type validatorFactory interface {
 	// ValidatorFor generates a validator based on the instance,
 	// the instance group, and the instance target type.
 	ValidatorFor(
-		instance services.PlacementInstance,
+		instance instanceMetadata,
 		group *instanceGroup,
 		targetType targetType,
-	) Validator
+	) validator
 }
 
 type factory struct {
-	client  AggregatorClient
+	client  aggregatorClient
 	workers xsync.WorkerPool
 }
 
-func newValidatorFactory(client AggregatorClient, workers xsync.WorkerPool) validatorFactory {
+func newValidatorFactory(client aggregatorClient, workers xsync.WorkerPool) validatorFactory {
 	return factory{client: client, workers: workers}
 }
 
 func (f factory) ValidatorFor(
-	instance services.PlacementInstance,
+	instance instanceMetadata,
 	group *instanceGroup,
 	targetType targetType,
-) Validator {
+) validator {
 	if targetType == leaderTarget {
 		return f.validatorForLeader(instance, group)
 	}
 	return f.validatorForFollower(instance)
 }
 
-func (f factory) validatorForFollower(instance services.PlacementInstance) Validator {
+func (f factory) validatorForFollower(instance instanceMetadata) validator {
 	return func() error {
-		status, err := f.client.Status(instance.Endpoint())
+		status, err := f.client.Status(instance.Endpoint)
 		if err != nil {
 			return err
 		}
@@ -80,11 +79,11 @@ func (f factory) validatorForFollower(instance services.PlacementInstance) Valid
 }
 
 func (f factory) validatorForLeader(
-	instance services.PlacementInstance,
+	instance instanceMetadata,
 	group *instanceGroup,
-) Validator {
+) validator {
 	return func() error {
-		status, err := f.client.Status(instance.Endpoint())
+		status, err := f.client.Status(instance.Endpoint)
 		if err != nil {
 			return err
 		}
@@ -101,7 +100,7 @@ func (f factory) validatorForLeader(
 		)
 		for _, instance := range group.All {
 			// Skip check if the instance is the leader.
-			if instance.ID() == group.LeaderID {
+			if instance.PlacementID == group.LeaderID {
 				found = true
 				continue
 			}
@@ -110,7 +109,7 @@ func (f factory) validatorForLeader(
 			f.workers.Go(func() {
 				defer wg.Done()
 
-				status, err := f.client.Status(instance.Endpoint())
+				status, err := f.client.Status(instance.Endpoint)
 				if err != nil {
 					return
 				}
@@ -132,7 +131,7 @@ func (f factory) validatorForLeader(
 		})
 
 		if !found {
-			return fmt.Errorf("instance %s not in the instance group", instance.ID())
+			return fmt.Errorf("instance %s not in the instance group", instance.PlacementID)
 		}
 		if canLead := <-canLeadCh; !canLead {
 			return errors.New("no follower instance is ready to lead")

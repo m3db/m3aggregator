@@ -31,8 +31,8 @@ import (
 	httpserver "github.com/m3db/m3aggregator/server/http"
 )
 
-// AggregatorClient interacts with aggregator instances via aggregator HTTP endpoints.
-type AggregatorClient interface {
+// aggregatorClient interacts with aggregator instances via aggregator endpoints.
+type aggregatorClient interface {
 	// IsHealthy determines whether an instance is healthy.
 	IsHealthy(instance string) error
 
@@ -49,8 +49,8 @@ type client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new client.
-func NewClient(httpClient *http.Client) AggregatorClient {
+// newAggregatorClient creates a new aggregator client.
+func newAggregatorClient(httpClient *http.Client) aggregatorClient {
 	return &client{httpClient: httpClient}
 }
 

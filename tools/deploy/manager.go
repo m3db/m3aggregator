@@ -20,8 +20,6 @@
 
 package deploy
 
-import "github.com/m3db/m3cluster/services"
-
 // Instance represents an instance in the deployment.
 type Instance interface {
 	// ID returns the instance id.
@@ -40,9 +38,12 @@ type Instance interface {
 // Manager manages the state of deployments and interacts with
 // instances to perform the actual deployment.
 type Manager interface {
+	// QueryAll returns the full list of instances in the deployment.
+	QueryAll() ([]Instance, error)
+
 	// Query returns the deployment instances for given set of ids.
-	Query(instances []services.PlacementInstance) ([]Instance, error)
+	Query(instanceIDs []string) ([]Instance, error)
 
 	// Deploy deploys the given revision to the given set of instances.
-	Deploy(instances []services.PlacementInstance, revision string) error
+	Deploy(instanceIDs []string, revision string) error
 }

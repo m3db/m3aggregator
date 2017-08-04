@@ -21,6 +21,7 @@
 package deploy
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/m3db/m3cluster/kv"
@@ -35,6 +36,10 @@ const (
 	defaultHelperWorkerPoolSize       = 16
 )
 
+// ToPlacementInstanceIDFn converts a deployment instance id to the corresponding
+// placement instance id.
+type ToPlacementInstanceIDFn func(deploymentInstanceID string) (string, error)
+
 // HelperOptions provide a set of options for the deployment helper.
 type HelperOptions interface {
 	// SetInstrumentOptions sets the instrument options.
@@ -43,23 +48,23 @@ type HelperOptions interface {
 	// InstrumentOptions returns the instrument options.
 	InstrumentOptions() instrument.Options
 
+	// SetPlannerOptions sets the deployment planner options.
+	SetPlannerOptions(value PlannerOptions) HelperOptions
+
+	// PlannerOptions returns the deployment planner options.
+	PlannerOptions() PlannerOptions
+
 	// SetManager sets the deployment manager.
 	SetManager(value Manager) HelperOptions
 
 	// Manager returns the deployment manager.
 	Manager() Manager
 
-	// SetPlanner sets the deployment planner.
-	SetPlanner(value Planner) HelperOptions
+	// SetHTTPClient sets the http client.
+	SetHTTPClient(value *http.Client) HelperOptions
 
-	// Planner returns the deployment planner.
-	Planner() Planner
-
-	// SetAggregatorClient sets the aggregator client.
-	SetAggregatorClient(value AggregatorClient) HelperOptions
-
-	// AggregatorClient returns the aggregator client.
-	AggregatorClient() AggregatorClient
+	// HTTPClient returns the http client.
+	HTTPClient() *http.Client
 
 	// SetKVStore sets the kv store.
 	SetKVStore(value kv.Store) HelperOptions
@@ -79,6 +84,14 @@ type HelperOptions interface {
 	// WorkerPool returns the worker pool.
 	WorkerPool() xsync.WorkerPool
 
+	// SetToPlacementInstanceIDFn sets the function that converts a deployment
+	// instance id to the corresponding placement instance id.
+	SetToPlacementInstanceIDFn(value ToPlacementInstanceIDFn) HelperOptions
+
+	// ToPlacementInstanceIDFn returns the function that converts a deployment
+	// instance id to the corresponding placement instance id.
+	ToPlacementInstanceIDFn() ToPlacementInstanceIDFn
+
 	// SetStagedPlacementWatcherOptions sets the staged placement watcher options.
 	SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) HelperOptions
 
@@ -93,15 +106,16 @@ type HelperOptions interface {
 }
 
 type helperOptions struct {
-	instrumentOpts instrument.Options
-	manager        Manager
-	planner        Planner
-	client         AggregatorClient
-	store          kv.Store
-	retrier        xretry.Retrier
-	workerPool     xsync.WorkerPool
-	watcherOpts    services.StagedPlacementWatcherOptions
-	settleDuration time.Duration
+	instrumentOpts  instrument.Options
+	plannerOpts     PlannerOptions
+	manager         Manager
+	httpClient      *http.Client
+	store           kv.Store
+	retrier         xretry.Retrier
+	workerPool      xsync.WorkerPool
+	toPlacementIDFn ToPlacementInstanceIDFn
+	watcherOpts     services.StagedPlacementWatcherOptions
+	settleDuration  time.Duration
 }
 
 // NewHelperOptions create a set of deployment helper options.
@@ -126,6 +140,16 @@ func (o *helperOptions) InstrumentOptions() instrument.Options {
 	return o.instrumentOpts
 }
 
+func (o *helperOptions) SetPlannerOptions(value PlannerOptions) HelperOptions {
+	opts := *o
+	opts.plannerOpts = value
+	return &opts
+}
+
+func (o *helperOptions) PlannerOptions() PlannerOptions {
+	return o.plannerOpts
+}
+
 func (o *helperOptions) SetManager(value Manager) HelperOptions {
 	opts := *o
 	opts.manager = value
@@ -136,24 +160,14 @@ func (o *helperOptions) Manager() Manager {
 	return o.manager
 }
 
-func (o *helperOptions) SetPlanner(value Planner) HelperOptions {
+func (o *helperOptions) SetHTTPClient(value *http.Client) HelperOptions {
 	opts := *o
-	opts.planner = value
+	opts.httpClient = value
 	return &opts
 }
 
-func (o *helperOptions) Planner() Planner {
-	return o.planner
-}
-
-func (o *helperOptions) SetAggregatorClient(value AggregatorClient) HelperOptions {
-	opts := *o
-	opts.client = value
-	return &opts
-}
-
-func (o *helperOptions) AggregatorClient() AggregatorClient {
-	return o.client
+func (o *helperOptions) HTTPClient() *http.Client {
+	return o.httpClient
 }
 
 func (o *helperOptions) SetKVStore(value kv.Store) HelperOptions {
@@ -184,6 +198,16 @@ func (o *helperOptions) SetWorkerPool(value xsync.WorkerPool) HelperOptions {
 
 func (o *helperOptions) WorkerPool() xsync.WorkerPool {
 	return o.workerPool
+}
+
+func (o *helperOptions) SetToPlacementInstanceIDFn(value ToPlacementInstanceIDFn) HelperOptions {
+	opts := *o
+	opts.toPlacementIDFn = value
+	return &opts
+}
+
+func (o *helperOptions) ToPlacementInstanceIDFn() ToPlacementInstanceIDFn {
+	return o.toPlacementIDFn
 }
 
 func (o *helperOptions) SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) HelperOptions {
