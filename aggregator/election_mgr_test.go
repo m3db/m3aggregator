@@ -195,6 +195,7 @@ func TestElectionManagerResignSuccess(t *testing.T) {
 				mgr.Lock()
 				mgr.electionState = FollowerState
 				mgr.Unlock()
+				mgr.notifyStateChange()
 			}()
 			return nil
 		},

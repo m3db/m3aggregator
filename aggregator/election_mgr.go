@@ -119,6 +119,7 @@ type electionManagerMetrics struct {
 	leaderErrors         tally.Counter
 	leaderNotChanged     tally.Counter
 	resignErrors         tally.Counter
+	followerResign       tally.Counter
 	resignNotFollower    tally.Counter
 	followerToLeader     tally.Counter
 	leaderToFollower     tally.Counter
@@ -133,6 +134,7 @@ func newElectionManagerMetrics(scope tally.Scope) electionManagerMetrics {
 		leaderNotChanged:     scope.Counter("leader-not-changed"),
 		resignErrors:         scope.Counter("resign-errors"),
 		resignNotFollower:    scope.Counter("resign-not-follower"),
+		followerResign:       scope.Counter("follower-resign"),
 		followerToLeader:     scope.Counter("follower-to-leader"),
 		leaderToFollower:     scope.Counter("leader-to-follower"),
 		electionState:        scope.Gauge("election-state"),
@@ -155,6 +157,7 @@ type electionManager struct {
 
 	state            electionManagerState
 	doneCh           chan struct{}
+	notifyCh         chan struct{}
 	resignWg         *sync.WaitGroup
 	electionKey      string
 	electionState    ElectionState
@@ -184,6 +187,7 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		leaderValue:     campaignOpts.LeaderValue(),
 		state:           electionManagerNotOpen,
 		doneCh:          make(chan struct{}),
+		notifyCh:        make(chan struct{}, 1),
 		electionState:   FollowerState,
 		sleepFn:         time.Sleep,
 		metrics:         newElectionManagerMetrics(instrumentOpts.MetricsScope()),
@@ -220,6 +224,7 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 	}
 	if mgr.electionState == FollowerState {
 		mgr.Unlock()
+		mgr.metrics.followerResign.Inc(1)
 		return nil
 	}
 	mgr.state = electionManagerResigning
@@ -248,22 +253,20 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 
 	// Now wait for the current instance to become a follower.
 	var (
-		ctxDone          = false
-		isFollower       = false
-		stateCheckPeriod = time.Second
+		ctxDone    = false
+		isFollower = false
 	)
 
 	for {
 		select {
 		case <-ctx.Done():
 			ctxDone = true
-		default:
+		case <-mgr.notifyCh:
 			isFollower = mgr.ElectionState() == FollowerState
 		}
 		if ctxDone || isFollower {
 			break
 		}
-		mgr.sleepFn(stateCheckPeriod)
 	}
 
 	// If the context expires, we cancel the in progress change and re-check
@@ -394,6 +397,7 @@ func (mgr *electionManager) changeElectionState(currState, newState ElectionStat
 			mgr.Lock()
 			mgr.electionState = LeaderState
 			mgr.Unlock()
+			mgr.notifyStateChange()
 		}
 		return
 	}
@@ -403,6 +407,7 @@ func (mgr *electionManager) changeElectionState(currState, newState ElectionStat
 		mgr.Lock()
 		mgr.electionState = newState
 		mgr.Unlock()
+		mgr.notifyStateChange()
 		mgr.metrics.followerToLeader.Inc(1)
 		mgr.logger.Info("election state changed from follower to leader")
 		return
@@ -475,10 +480,18 @@ func (mgr *electionManager) leaderToFollower(ctx context.Context) {
 		mgr.changeCancelFn = nil
 		mgr.changeInProgress = false
 		mgr.Unlock()
+		mgr.notifyStateChange()
 		mgr.metrics.leaderToFollower.Inc(1)
 		mgr.logger.Info("election state changed from leader to follower")
 		return nil
 	})
+}
+
+func (mgr *electionManager) notifyStateChange() {
+	select {
+	case mgr.notifyCh <- struct{}{}:
+	default:
+	}
 }
 
 func (mgr *electionManager) reportMetrics() {

@@ -279,7 +279,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 
 	// Set election manager.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("election-manager"))
-	electionManager, err := c.ElectionManager.NewElectionManager(client, iOpts)
+	electionManager, err := c.ElectionManager.NewElectionManager(client, instanceID, iOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -557,6 +557,7 @@ type electionManagerConfiguration struct {
 
 func (c electionManagerConfiguration) NewElectionManager(
 	client client.Client,
+	instanceID string,
 	instrumentOpts instrument.Options,
 ) (aggregator.ElectionManager, error) {
 	electionOpts, err := c.Election.NewElectionOptions()
@@ -576,9 +577,11 @@ func (c electionManagerConfiguration) NewElectionManager(
 	if err != nil {
 		return nil, err
 	}
+	leaderValue := instanceID
 	if c.LeaderValue != "" {
-		campaignOpts = campaignOpts.SetLeaderValue(c.LeaderValue)
+		leaderValue = c.LeaderValue
 	}
+	campaignOpts = campaignOpts.SetLeaderValue(leaderValue)
 	scope := instrumentOpts.MetricsScope()
 	campaignRetryOpts := c.CampaignRetrier.NewOptions(scope.SubScope("campaign"))
 	changeRetryOpts := c.ChangeRetrier.NewOptions(scope.SubScope("change"))

@@ -76,7 +76,7 @@ type followerFlushManager struct {
 	scope                 tally.Scope
 
 	doneCh          <-chan struct{}
-	proto           schema.ShardSetFlushTimes
+	proto           *schema.ShardSetFlushTimes
 	flushTimesKey   string
 	flushTimesState flushTimesState
 	lastFlushed     time.Time
@@ -104,6 +104,7 @@ func newFollowerFlushManager(
 		logger:                instrumentOpts.Logger(),
 		scope:                 scope,
 		doneCh:                doneCh,
+		proto:                 &schema.ShardSetFlushTimes{},
 		flushTimesState:       flushTimesUninitialized,
 		lastFlushed:           nowFn(),
 		sleepFn:               time.Sleep,
@@ -136,22 +137,25 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 	now := mgr.nowFn()
 	mgr.Lock()
 	if mgr.flushTimesState == flushTimesUpdated {
-		mgr.metrics.kvUpdateFlush.Inc(1)
-		shouldFlush = true
 		mgr.lastFlushed = now
 		mgr.flushTimesState = flushTimesProcessed
 		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
+		mgr.Unlock()
+		shouldFlush = true
+		mgr.metrics.kvUpdateFlush.Inc(1)
 	} else {
 		durationSinceLastFlush := now.Sub(mgr.lastFlushed)
 		if durationSinceLastFlush > mgr.maxNoFlushDuration {
-			mgr.metrics.forcedFlush.Inc(1)
-			shouldFlush = true
 			mgr.lastFlushed = now
+			mgr.Unlock()
+			shouldFlush = true
+			mgr.metrics.forcedFlush.Inc(1)
 			flushBeforeNanos := now.Add(-mgr.maxNoFlushDuration).Add(mgr.forcedFlushWindowSize).UnixNano()
-			flushersByInterval = mgr.flushersFromForcedFlushWithLock(buckets, flushBeforeNanos)
+			flushersByInterval = mgr.flushersFromForcedFlush(buckets, flushBeforeNanos)
+		} else {
+			mgr.Unlock()
 		}
 	}
-	mgr.Unlock()
 
 	if !shouldFlush {
 		return nil, mgr.checkEvery
@@ -235,7 +239,7 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 	return flushersByInterval
 }
 
-func (mgr *followerFlushManager) flushersFromForcedFlushWithLock(
+func (mgr *followerFlushManager) flushersFromForcedFlush(
 	buckets []*flushBucket,
 	flushBeforeNanos int64,
 ) []flushersGroup {
@@ -282,18 +286,20 @@ func (mgr *followerFlushManager) watchFlushTimes() {
 			return
 		}
 
-		value := flushTimesWatch.Get()
-		mgr.Lock()
-		mgr.proto.Reset()
-		if err = value.Unmarshal(&mgr.proto); err != nil {
+		var (
+			value = flushTimesWatch.Get()
+			proto schema.ShardSetFlushTimes
+		)
+		if err = value.Unmarshal(&proto); err != nil {
 			mgr.metrics.unmarshalErrors.Inc(1)
 			mgr.logger.WithFields(
 				xlog.NewLogField("flushTimesKey", mgr.flushTimesKey),
 				xlog.NewLogErrField(err),
 			).Error("flush times unmarshal error")
-			mgr.Unlock()
 			continue
 		}
+		mgr.Lock()
+		mgr.proto = &proto
 		mgr.flushTimesState = flushTimesUpdated
 		mgr.Unlock()
 	}
