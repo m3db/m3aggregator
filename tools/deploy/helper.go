@@ -63,6 +63,7 @@ type helper struct {
 	mgr                Manager
 	store              kv.Store
 	retrier            xretry.Retrier
+	foreverRetrier     xretry.Retrier
 	workers            xsync.WorkerPool
 	toPlacementIDFn    ToPlacementInstanceIDFn
 	placementWatcher   services.StagedPlacementWatcher
@@ -78,13 +79,17 @@ func NewHelper(opts HelperOptions) (Helper, error) {
 	if err := placementWatcher.Watch(); err != nil {
 		return nil, err
 	}
+	retryOpts := opts.RetryOptions()
+	retrier := xretry.NewRetrier(retryOpts)
+	foreverRetrier := xretry.NewRetrier(retryOpts.SetForever(true))
 	return helper{
 		logger:             opts.InstrumentOptions().Logger(),
 		planner:            planner,
 		client:             client,
 		mgr:                opts.Manager(),
 		store:              opts.KVStore(),
-		retrier:            opts.Retrier(),
+		retrier:            retrier,
+		foreverRetrier:     foreverRetrier,
 		workers:            opts.WorkerPool(),
 		toPlacementIDFn:    opts.ToPlacementInstanceIDFn(),
 		placementWatcher:   placementWatcher,
@@ -185,7 +190,7 @@ func (h helper) executeStep(
 
 func (h helper) waitUntilSafe(instances instanceMetadatas) error {
 	deploymentIDs := instances.DeploymentIDs()
-	return h.retrier.Attempt(func() error {
+	return h.foreverRetrier.Attempt(func() error {
 		deploymentInstances, err := h.mgr.Query(deploymentIDs)
 		if err != nil {
 			return fmt.Errorf("error querying instances: %v", err)
@@ -220,7 +225,7 @@ func (h helper) waitUntilSafe(instances instanceMetadatas) error {
 }
 
 func (h helper) validate(targets []deploymentTarget) error {
-	return h.retrier.Attempt(func() error {
+	return h.foreverRetrier.Attempt(func() error {
 		var (
 			wg    sync.WaitGroup
 			errCh = make(chan error, 1)
@@ -293,7 +298,7 @@ func (h helper) waitUntilProgressing(
 	revision string,
 ) error {
 	deploymentIDs := instances.DeploymentIDs()
-	return h.retrier.Attempt(func() error {
+	return h.foreverRetrier.Attempt(func() error {
 		deploymentInstances, err := h.mgr.Query(deploymentIDs)
 		if err != nil {
 			return fmt.Errorf("error querying instances: %v", err)

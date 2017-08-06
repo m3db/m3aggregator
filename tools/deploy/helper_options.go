@@ -72,11 +72,11 @@ type HelperOptions interface {
 	// KVStore returns the kv store.
 	KVStore() kv.Store
 
-	// SetRetrier sets the retrier.
-	SetRetrier(value xretry.Retrier) HelperOptions
+	// SetRetryOptions sets the retry options.
+	SetRetryOptions(value xretry.Options) HelperOptions
 
-	// Retrier returns the retrier.
-	Retrier() xretry.Retrier
+	// RetryOptions returns the retry options.
+	RetryOptions() xretry.Options
 
 	// SetWorkerPool sets the worker pool.
 	SetWorkerPool(value xsync.WorkerPool) HelperOptions
@@ -111,7 +111,7 @@ type helperOptions struct {
 	manager         Manager
 	httpClient      *http.Client
 	store           kv.Store
-	retrier         xretry.Retrier
+	retryOpts       xretry.Options
 	workerPool      xsync.WorkerPool
 	toPlacementIDFn ToPlacementInstanceIDFn
 	watcherOpts     services.StagedPlacementWatcherOptions
@@ -124,7 +124,7 @@ func NewHelperOptions() HelperOptions {
 	workers.Init()
 	return &helperOptions{
 		instrumentOpts: instrument.NewOptions(),
-		retrier:        xretry.NewRetrier(xretry.NewOptions()),
+		retryOpts:      xretry.NewOptions(),
 		workerPool:     workers,
 		settleDuration: defaultSettleDurationBetweenSteps,
 	}
@@ -180,14 +180,14 @@ func (o *helperOptions) KVStore() kv.Store {
 	return o.store
 }
 
-func (o *helperOptions) SetRetrier(value xretry.Retrier) HelperOptions {
+func (o *helperOptions) SetRetryOptions(value xretry.Options) HelperOptions {
 	opts := *o
-	opts.retrier = value
+	opts.retryOpts = value
 	return &opts
 }
 
-func (o *helperOptions) Retrier() xretry.Retrier {
-	return o.retrier
+func (o *helperOptions) RetryOptions() xretry.Options {
+	return o.retryOpts
 }
 
 func (o *helperOptions) SetWorkerPool(value xsync.WorkerPool) HelperOptions {
