@@ -40,6 +40,10 @@ const (
 // placement instance id.
 type ToPlacementInstanceIDFn func(deploymentInstanceID string) (string, error)
 
+// ToAPIEndpointFn converts a placement instance endpoint to the corresponding
+// aggregator instance api endpoint.
+type ToAPIEndpointFn func(placementEndpoint string) (string, error)
+
 // HelperOptions provide a set of options for the deployment helper.
 type HelperOptions interface {
 	// SetInstrumentOptions sets the instrument options.
@@ -92,6 +96,14 @@ type HelperOptions interface {
 	// instance id to the corresponding placement instance id.
 	ToPlacementInstanceIDFn() ToPlacementInstanceIDFn
 
+	// SetToAPIEndpointFn sets the function that converts a placement
+	// instance endpoint to the corresponding aggregator instance api endpoint.
+	SetToAPIEndpointFn(value ToAPIEndpointFn) HelperOptions
+
+	// ToAPIEndpointFn returns the function that converts a placement
+	// instance endpoint to the corresponding aggregator instance api endpoint.
+	ToAPIEndpointFn() ToAPIEndpointFn
+
 	// SetStagedPlacementWatcherOptions sets the staged placement watcher options.
 	SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) HelperOptions
 
@@ -114,6 +126,7 @@ type helperOptions struct {
 	retryOpts       xretry.Options
 	workerPool      xsync.WorkerPool
 	toPlacementIDFn ToPlacementInstanceIDFn
+	toAPIEndpointFn ToAPIEndpointFn
 	watcherOpts     services.StagedPlacementWatcherOptions
 	settleDuration  time.Duration
 }
@@ -208,6 +221,16 @@ func (o *helperOptions) SetToPlacementInstanceIDFn(value ToPlacementInstanceIDFn
 
 func (o *helperOptions) ToPlacementInstanceIDFn() ToPlacementInstanceIDFn {
 	return o.toPlacementIDFn
+}
+
+func (o *helperOptions) SetToAPIEndpointFn(value ToAPIEndpointFn) HelperOptions {
+	opts := *o
+	opts.toAPIEndpointFn = value
+	return &opts
+}
+
+func (o *helperOptions) ToAPIEndpointFn() ToAPIEndpointFn {
+	return o.toAPIEndpointFn
 }
 
 func (o *helperOptions) SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) HelperOptions {

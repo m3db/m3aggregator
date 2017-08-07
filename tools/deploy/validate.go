@@ -64,9 +64,9 @@ func (f factory) ValidatorFor(
 	return f.validatorForFollower(instance)
 }
 
-func (f factory) validatorForFollower(instance instanceMetadata) validator {
+func (f factory) validatorForFollower(follower instanceMetadata) validator {
 	return func() error {
-		status, err := f.client.Status(instance.Endpoint)
+		status, err := f.client.Status(follower.APIEndpoint)
 		if err != nil {
 			return err
 		}
@@ -79,11 +79,11 @@ func (f factory) validatorForFollower(instance instanceMetadata) validator {
 }
 
 func (f factory) validatorForLeader(
-	instance instanceMetadata,
+	leader instanceMetadata,
 	group *instanceGroup,
 ) validator {
 	return func() error {
-		status, err := f.client.Status(instance.Endpoint)
+		status, err := f.client.Status(leader.APIEndpoint)
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ func (f factory) validatorForLeader(
 			f.workers.Go(func() {
 				defer wg.Done()
 
-				status, err := f.client.Status(instance.Endpoint)
+				status, err := f.client.Status(instance.APIEndpoint)
 				if err != nil {
 					return
 				}
@@ -131,7 +131,7 @@ func (f factory) validatorForLeader(
 		})
 
 		if !found {
-			return fmt.Errorf("instance %s not in the instance group", instance.PlacementID)
+			return fmt.Errorf("instance %s is not in the instance group", leader.PlacementID)
 		}
 		if canLead := <-canLeadCh; !canLead {
 			return errors.New("no follower instance is ready to lead")

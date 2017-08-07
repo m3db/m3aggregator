@@ -66,6 +66,7 @@ type helper struct {
 	foreverRetrier     xretry.Retrier
 	workers            xsync.WorkerPool
 	toPlacementIDFn    ToPlacementInstanceIDFn
+	toAPIEndpointFn    ToAPIEndpointFn
 	placementWatcher   services.StagedPlacementWatcher
 	settleBetweenSteps time.Duration
 }
@@ -92,6 +93,7 @@ func NewHelper(opts HelperOptions) (Helper, error) {
 		foreverRetrier:     foreverRetrier,
 		workers:            opts.WorkerPool(),
 		toPlacementIDFn:    opts.ToPlacementInstanceIDFn(),
+		toAPIEndpointFn:    opts.ToAPIEndpointFn(),
 		placementWatcher:   placementWatcher,
 		settleBetweenSteps: opts.SettleDurationBetweenSteps(),
 	}, nil
@@ -209,7 +211,7 @@ func (h helper) waitUntilSafe(instances instanceMetadatas) error {
 				if !deploymentInstances[i].IsHealthy() || deploymentInstances[i].IsDeploying() {
 					return
 				}
-				if err := h.client.IsHealthy(instances[i].Endpoint); err != nil {
+				if err := h.client.IsHealthy(instances[i].APIEndpoint); err != nil {
 					return
 				}
 				atomic.AddInt64(&safe, 1)
@@ -268,7 +270,7 @@ func (h helper) resign(targets []deploymentTarget) error {
 				defer wg.Done()
 
 				instance := targets[i].Instance
-				if err := h.client.Resign(instance.Endpoint); err != nil {
+				if err := h.client.Resign(instance.APIEndpoint); err != nil {
 					err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementID, err)
 					select {
 					case errCh <- err:
@@ -351,10 +353,15 @@ func (h helper) computeInstanceMetadatas(
 		if exists {
 			return nil, fmt.Errorf("instance %s not unique in the placement", id)
 		}
+		endpoint := pi.Endpoint()
+		apiEndpoint, err := h.toAPIEndpointFn(endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("unable to convert placement endpoint %s to api endpoint: %v", endpoint, err)
+		}
 		unique[id] = i
 		metadatas[i].PlacementID = id
 		metadatas[i].ShardSetID = pi.ShardSetID()
-		metadatas[i].Endpoint = pi.Endpoint()
+		metadatas[i].APIEndpoint = apiEndpoint
 	}
 
 	// Populate instance metadata from deployment information.
@@ -409,7 +416,7 @@ func filterByRevision(metadatas instanceMetadatas, revision string) instanceMeta
 type instanceMetadata struct {
 	PlacementID  string
 	ShardSetID   string
-	Endpoint     string
+	APIEndpoint  string
 	DeploymentID string
 	Revision     string
 }
