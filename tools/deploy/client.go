@@ -68,8 +68,7 @@ func (c *client) Status(instance string) (aggregator.RuntimeStatus, error) {
 	if err != nil {
 		return status, err
 	}
-	status = response.Data.(aggregator.RuntimeStatus)
-	return status, nil
+	return response.Status, nil
 }
 
 func (c *client) Resign(instance string) error {
@@ -79,7 +78,7 @@ func (c *client) Resign(instance string) error {
 
 func (c *client) doRequest(
 	hostPort, method, path string,
-	response *httpserver.Response,
+	response interface{},
 ) error {
 	url := fmt.Sprintf("http://%s%s", hostPort, path)
 	req, err := http.NewRequest(method, url, nil)
@@ -114,7 +113,14 @@ func (c *client) doRequest(
 		return fmt.Errorf("unable to unmarshal response body: %v", err)
 	}
 
-	if response.Error != "" {
+	var responseErr string
+	switch t := response.(type) {
+	case *httpserver.Response:
+		responseErr = t.Error
+	case *httpserver.StatusResponse:
+		responseErr = t.Error
+	}
+	if responseErr != "" {
 		return fmt.Errorf("received error response: %v", response)
 	}
 

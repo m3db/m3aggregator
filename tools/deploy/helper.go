@@ -227,62 +227,72 @@ func (h helper) waitUntilSafe(instances instanceMetadatas) error {
 }
 
 func (h helper) validate(targets []deploymentTarget) error {
-	return h.foreverRetrier.Attempt(func() error {
-		var (
-			wg    sync.WaitGroup
-			errCh = make(chan error, 1)
-		)
-		for i := range targets {
-			i := i
-			wg.Add(1)
-			h.workers.Go(func() {
-				defer wg.Done()
+	var (
+		wg    sync.WaitGroup
+		errCh = make(chan error, 1)
+	)
+	for i := range targets {
+		i := i
+		wg.Add(1)
+		h.workers.Go(func() {
+			defer wg.Done()
 
+			err := h.foreverRetrier.Attempt(func() error {
 				validator := targets[i].Validator
 				if validator == nil {
-					return
+					return nil
 				}
 				if err := validator(); err != nil {
 					err = fmt.Errorf("validation error for instance %s: %v", targets[i].Instance.PlacementID, err)
-					select {
-					case errCh <- err:
-					default:
-					}
+					return err
 				}
+				return nil
 			})
-		}
-		wg.Wait()
-		close(errCh)
-		return <-errCh
-	})
+			if err == nil {
+				return
+			}
+			select {
+			case errCh <- err:
+			default:
+			}
+		})
+	}
+	wg.Wait()
+	close(errCh)
+	return <-errCh
 }
 
 func (h helper) resign(targets []deploymentTarget) error {
-	return h.retrier.Attempt(func() error {
-		var (
-			wg    sync.WaitGroup
-			errCh = make(chan error, 1)
-		)
-		for i := range targets {
-			i := i
-			wg.Add(1)
-			h.workers.Go(func() {
-				defer wg.Done()
+	var (
+		wg    sync.WaitGroup
+		errCh = make(chan error, 1)
+	)
+	for i := range targets {
+		i := i
+		wg.Add(1)
+		h.workers.Go(func() {
+			defer wg.Done()
 
+			err := h.retrier.Attempt(func() error {
 				instance := targets[i].Instance
 				if err := h.client.Resign(instance.APIEndpoint); err != nil {
 					err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementID, err)
-					select {
-					case errCh <- err:
-					default:
-					}
+					return err
 				}
+				return nil
 			})
-		}
-		wg.Wait()
-		close(errCh)
-		return <-errCh
-	})
+			if err == nil {
+				return
+			}
+			select {
+			case errCh <- err:
+			default:
+			}
+		})
+	}
+	wg.Wait()
+	close(errCh)
+	return <-errCh
 }
 
 func (h helper) deploy(targets []deploymentTarget, revision string) error {
