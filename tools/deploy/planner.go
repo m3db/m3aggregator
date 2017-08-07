@@ -217,9 +217,20 @@ type deploymentTarget struct {
 
 func (t deploymentTarget) String() string { return t.Instance.PlacementID }
 
+// deploymentTargets is a list of deployment targets.
+type deploymentTargets []deploymentTarget
+
+func (targets deploymentTargets) DeploymentIDs() []string {
+	deploymentIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		deploymentIDs = append(deploymentIDs, target.Instance.DeploymentID)
+	}
+	return deploymentIDs
+}
+
 // deploymentStep is a deployment step.
 type deploymentStep struct {
-	Targets []deploymentTarget
+	Targets deploymentTargets
 }
 
 // deploymentPlan is a deployment plan.

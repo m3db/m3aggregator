@@ -108,6 +108,7 @@ func (h helper) Deploy(revision string, mode Mode) error {
 		return fmt.Errorf("unable to get all instance metadatas: %v", err)
 	}
 	filtered := filterByRevision(all, revision)
+
 	plan, err := h.planner.GeneratePlan(filtered, all)
 	if err != nil {
 		return fmt.Errorf("unable to generate deployment plan: %v", err)
@@ -119,9 +120,10 @@ func (h helper) Deploy(revision string, mode Mode) error {
 		return nil
 	}
 
-	if err = h.execute(plan, revision, filtered, all); err != nil {
+	if err = h.execute(plan, revision, all); err != nil {
 		return fmt.Errorf("unable to execute deployment plan: %v", err)
 	}
+
 	return nil
 }
 
@@ -136,12 +138,12 @@ func (h helper) Close() error {
 func (h helper) execute(
 	plan deploymentPlan,
 	revision string,
-	toDeploy, all instanceMetadatas,
+	all instanceMetadatas,
 ) error {
 	numSteps := len(plan.Steps)
 	for i, step := range plan.Steps {
 		h.logger.Infof("deploying step %d of %d", i+1, numSteps)
-		if err := h.executeStep(step, revision, toDeploy, all); err != nil {
+		if err := h.executeStep(step, revision, all); err != nil {
 			return err
 		}
 		if i < numSteps-1 && h.settleBetweenSteps > 0 {
@@ -156,7 +158,7 @@ func (h helper) execute(
 func (h helper) executeStep(
 	step deploymentStep,
 	revision string,
-	toDeploy, all instanceMetadatas,
+	all instanceMetadatas,
 ) error {
 	h.logger.Infof("waiting until safe to deploy for step %v", step)
 	if err := h.waitUntilSafe(all); err != nil {
@@ -174,12 +176,13 @@ func (h helper) executeStep(
 	}
 
 	h.logger.Infof("beginning to deploy instances for step %v", step)
-	if err := h.deploy(step.Targets, revision); err != nil {
+	targetIDs := step.Targets.DeploymentIDs()
+	if err := h.deploy(targetIDs, revision); err != nil {
 		return err
 	}
 
 	h.logger.Infof("deployment started, waiting for progress: %v", step)
-	if err := h.waitUntilProgressing(toDeploy, revision); err != nil {
+	if err := h.waitUntilProgressing(targetIDs, revision); err != nil {
 		return err
 	}
 
@@ -187,6 +190,7 @@ func (h helper) executeStep(
 	if err := h.waitUntilSafe(all); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -226,7 +230,7 @@ func (h helper) waitUntilSafe(instances instanceMetadatas) error {
 	})
 }
 
-func (h helper) validate(targets []deploymentTarget) error {
+func (h helper) validate(targets deploymentTargets) error {
 	var (
 		wg    sync.WaitGroup
 		errCh = make(chan error, 1)
@@ -295,28 +299,20 @@ func (h helper) resign(targets []deploymentTarget) error {
 	return <-errCh
 }
 
-func (h helper) deploy(targets []deploymentTarget, revision string) error {
-	deploymentIDs := make([]string, 0, len(targets))
-	for _, target := range targets {
-		deploymentIDs = append(deploymentIDs, target.Instance.DeploymentID)
-	}
+func (h helper) deploy(targetIDs []string, revision string) error {
 	return h.retrier.Attempt(func() error {
-		return h.mgr.Deploy(deploymentIDs, revision)
+		return h.mgr.Deploy(targetIDs, revision)
 	})
 }
 
-func (h helper) waitUntilProgressing(
-	instances instanceMetadatas,
-	revision string,
-) error {
-	deploymentIDs := instances.DeploymentIDs()
+func (h helper) waitUntilProgressing(targetIDs []string, revision string) error {
 	return h.foreverRetrier.Attempt(func() error {
-		deploymentInstances, err := h.mgr.Query(deploymentIDs)
+		targetInstances, err := h.mgr.Query(targetIDs)
 		if err != nil {
 			return fmt.Errorf("error querying instances: %v", err)
 		}
 
-		for _, di := range deploymentInstances {
+		for _, di := range targetInstances {
 			if di.IsDeploying() || di.Revision() == revision {
 				return nil
 			}
