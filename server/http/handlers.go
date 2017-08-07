@@ -57,7 +57,7 @@ func registerHealthHandler(mux *http.ServeMux) {
 			writeErrorResponse(w, errRequestMustBeGet)
 			return
 		}
-		writeSuccessResponse(w, nil)
+		writeSuccessResponse(w)
 	})
 }
 
@@ -74,7 +74,7 @@ func registerResignHandler(mux *http.ServeMux, aggregator aggregator.Aggregator)
 			writeErrorResponse(w, err)
 			return
 		}
-		writeSuccessResponse(w, nil)
+		writeSuccessResponse(w)
 	})
 }
 
@@ -88,53 +88,60 @@ func registerStatusHandler(mux *http.ServeMux, aggregator aggregator.Aggregator)
 		}
 
 		status := aggregator.Status()
-		writeSuccessResponse(w, status)
+		writeStatusResponse(w, status)
 	})
 }
 
 // Response is an HTTP response.
 type Response struct {
-	Status string      `json:"status,omitempty"`
-	Error  string      `json:"error,omitempty"`
-	Data   interface{} `json:"data,omitempty"`
+	State string `json:"state,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// StatusResponse is a status response.
+type StatusResponse struct {
+	Response
+	Status aggregator.RuntimeStatus `json:"status,omitempty"`
 }
 
 // NewResponse creates a new empty response.
 func NewResponse() Response { return Response{} }
 
 // NewStatusResponse creates a new empty status response.
-func NewStatusResponse() Response { return Response{Data: aggregator.RuntimeStatus{}} }
+func NewStatusResponse() StatusResponse { return StatusResponse{} }
 
-func newSuccessResponse(data interface{}) Response {
-	return Response{Status: "OK", Data: data}
+func newSuccessResponse() Response {
+	return Response{State: "OK"}
 }
 
-func newErrorResponse(err error, data interface{}) Response {
+func newErrorResponse(err error) Response {
 	var errStr string
 	if err != nil {
 		errStr = err.Error()
 	}
-	return Response{Status: "Error", Error: errStr, Data: data}
+	return Response{State: "Error", Error: errStr}
 }
 
-func writeSuccessResponse(w http.ResponseWriter, data interface{}) {
-	writeResponse(w, data, nil)
+func writeSuccessResponse(w http.ResponseWriter) {
+	response := newSuccessResponse()
+	writeResponse(w, response, nil)
 }
 
 func writeErrorResponse(w http.ResponseWriter, err error) {
 	writeResponse(w, nil, err)
 }
 
-func writeResponse(w http.ResponseWriter, data interface{}, err error) {
-	resp := newSuccessResponse(data)
-	if err != nil {
-		resp = newErrorResponse(err, data)
-	}
+func writeStatusResponse(w http.ResponseWriter, status aggregator.RuntimeStatus) {
+	response := NewStatusResponse()
+	response.Status = status
+	writeResponse(w, response, nil)
+}
 
+func writeResponse(w http.ResponseWriter, resp interface{}, err error) {
 	buf := bytes.NewBuffer(nil)
 	if encodeErr := json.NewEncoder(buf).Encode(&resp); encodeErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		resp = newErrorResponse(encodeErr, data)
+		resp = newErrorResponse(encodeErr)
 		json.NewEncoder(w).Encode(&resp)
 		return
 	}
