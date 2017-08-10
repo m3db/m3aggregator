@@ -28,12 +28,18 @@ import (
 	"github.com/m3db/m3x/sync"
 )
 
-var emptyPlan deploymentPlan
+var (
+	emptyPlan deploymentPlan
+	emptyStep deploymentStep
+)
 
 // planner generates deployment plans for given instances under constraints.
 type planner interface {
 	// GeneratePlan generates a deployment plan for given target instances.
 	GeneratePlan(toDeploy, all instanceMetadatas) (deploymentPlan, error)
+
+	// GenerateOneStep generates one deployment step for given target instances.
+	GenerateOneStep(toDeploy, all instanceMetadatas) (deploymentStep, error)
 }
 
 type deploymentPlanner struct {
@@ -65,6 +71,16 @@ func (p deploymentPlanner) GeneratePlan(
 		return emptyPlan, fmt.Errorf("unable to group instances by shard set id: %v", err)
 	}
 	return p.generatePlan(grouped, len(toDeploy), p.maxStepSize), nil
+}
+
+func (p deploymentPlanner) GenerateOneStep(
+	toDeploy, all instanceMetadatas,
+) (deploymentStep, error) {
+	grouped, err := p.groupInstancesByShardSetID(toDeploy, all)
+	if err != nil {
+		return emptyStep, fmt.Errorf("unable to group instances by shard set id: %v", err)
+	}
+	return p.generateStep(grouped, p.maxStepSize), nil
 }
 
 func (p deploymentPlanner) generatePlan(

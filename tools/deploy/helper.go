@@ -30,6 +30,7 @@ import (
 	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/placement"
+	"github.com/m3db/m3x/errors"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/sync"
@@ -146,11 +147,11 @@ func (h helper) execute(
 		if err := h.executeStep(step, revision, all); err != nil {
 			return err
 		}
+		h.logger.Infof("deploying step %d succeeded", i+1)
 		if i < numSteps-1 && h.settleBetweenSteps > 0 {
 			h.logger.Infof("waiting settle duration after step: %s", h.settleBetweenSteps.String())
 			time.Sleep(h.settleBetweenSteps)
 		}
-		h.logger.Infof("deploying step %d succeeded", i+1)
 	}
 	return nil
 }
@@ -231,72 +232,32 @@ func (h helper) waitUntilSafe(instances instanceMetadatas) error {
 }
 
 func (h helper) validate(targets deploymentTargets) error {
-	var (
-		wg    sync.WaitGroup
-		errCh = make(chan error, 1)
-	)
-	for i := range targets {
-		i := i
-		wg.Add(1)
-		h.workers.Go(func() {
-			defer wg.Done()
-
-			err := h.foreverRetrier.Attempt(func() error {
-				validator := targets[i].Validator
-				if validator == nil {
-					return nil
-				}
-				if err := validator(); err != nil {
-					err = fmt.Errorf("validation error for instance %s: %v", targets[i].Instance.PlacementID, err)
-					return err
-				}
+	return h.forEachTarget(targets, func(target deploymentTarget) error {
+		return h.foreverRetrier.Attempt(func() error {
+			validator := target.Validator
+			if validator == nil {
 				return nil
-			})
-			if err == nil {
-				return
 			}
-			select {
-			case errCh <- err:
-			default:
+			if err := validator(); err != nil {
+				err = fmt.Errorf("validation error for instance %s: %v", target.Instance.PlacementID, err)
+				return err
 			}
+			return nil
 		})
-	}
-	wg.Wait()
-	close(errCh)
-	return <-errCh
+	})
 }
 
-func (h helper) resign(targets []deploymentTarget) error {
-	var (
-		wg    sync.WaitGroup
-		errCh = make(chan error, 1)
-	)
-	for i := range targets {
-		i := i
-		wg.Add(1)
-		h.workers.Go(func() {
-			defer wg.Done()
-
-			err := h.retrier.Attempt(func() error {
-				instance := targets[i].Instance
-				if err := h.client.Resign(instance.APIEndpoint); err != nil {
-					err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementID, err)
-					return err
-				}
-				return nil
-			})
-			if err == nil {
-				return
+func (h helper) resign(targets deploymentTargets) error {
+	return h.forEachTarget(targets, func(target deploymentTarget) error {
+		return h.retrier.Attempt(func() error {
+			instance := target.Instance
+			if err := h.client.Resign(instance.APIEndpoint); err != nil {
+				err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementID, err)
+				return err
 			}
-			select {
-			case errCh <- err:
-			default:
-			}
+			return nil
 		})
-	}
-	wg.Wait()
-	close(errCh)
-	return <-errCh
+	})
 }
 
 func (h helper) deploy(targetIDs []string, revision string) error {
@@ -320,6 +281,32 @@ func (h helper) waitUntilProgressing(targetIDs []string, revision string) error 
 
 		return errNoDeploymentProgress
 	})
+}
+
+func (h helper) forEachTarget(targets deploymentTargets, workFn targetWorkFn) error {
+	var (
+		wg    sync.WaitGroup
+		errCh = make(chan error, len(targets))
+	)
+	for i := range targets {
+		i := i
+		wg.Add(1)
+		h.workers.Go(func() {
+			defer wg.Done()
+
+			if err := workFn(targets[i]); err != nil {
+				errCh <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(errCh)
+
+	multiErr := xerrors.NewMultiError()
+	for err := range errCh {
+		multiErr = multiErr.Add(err)
+	}
+	return multiErr.FinalError()
 }
 
 func (h helper) allInstanceMetadatas() (instanceMetadatas, error) {
@@ -436,3 +423,5 @@ func (m instanceMetadatas) DeploymentIDs() []string {
 	}
 	return res
 }
+
+type targetWorkFn func(target deploymentTarget) error
