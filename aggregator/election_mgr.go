@@ -61,10 +61,10 @@ const (
 )
 
 var (
-	errElectionManagerExpectNotOpen = errors.New("election manager is expected to be not open")
-	errElectionManagerExpectOpen    = errors.New("election manager is expected to be open")
-	errLeaderNotChanged             = errors.New("leader has not changed")
-	errResignActionAlreadyEnqueued  = errors.New("resign action already enqueued")
+	errElectionManagerAlreadyOpenOrClosed = errors.New("election manager is already open or closed")
+	errElectionManagerNotOpenOrClosed     = errors.New("election manager is not open or closed")
+	errLeaderNotChanged                   = errors.New("leader has not changed")
+	errResignActionAlreadyEnqueued        = errors.New("resign action already enqueued")
 )
 
 type electionManagerState int
@@ -93,7 +93,7 @@ const (
 	PendingFollowerState
 )
 
-func toElectionState(state campaign.State) (ElectionState, error) {
+func newElectionState(state campaign.State) (ElectionState, error) {
 	switch state {
 	case campaign.Leader:
 		return LeaderState, nil
@@ -200,16 +200,16 @@ type electionManager struct {
 	leaderService       services.LeaderService
 	leaderValue         string
 
-	state              electionManagerState
-	doneCh             chan struct{}
-	electionKey        string
-	electionState      ElectionState
-	goalStateLock      sync.Mutex
-	goalStateID        int64
-	goalStateWatchable xwatch.Watchable
-	resignCh           chan resignAction
-	sleepFn            sleepFn
-	metrics            electionManagerMetrics
+	state                  electionManagerState
+	doneCh                 chan struct{}
+	electionKey            string
+	electionStateWatchable xwatch.Watchable
+	goalStateLock          sync.Mutex
+	goalStateID            int64
+	goalStateWatchable     xwatch.Watchable
+	resignCh               chan resignAction
+	sleepFn                sleepFn
+	metrics                electionManagerMetrics
 }
 
 // NewElectionManager creates a new election manager.
@@ -218,25 +218,27 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 	campaignOpts := opts.CampaignOptions()
 	campaignRetrier := xretry.NewRetrier(opts.CampaignRetryOptions().SetForever(true))
 	changeRetrier := xretry.NewRetrier(opts.ChangeRetryOptions().SetForever(true))
+	electionStateWatchable := xwatch.NewWatchable()
+	electionStateWatchable.Update(FollowerState)
 	return &electionManager{
-		nowFn:               opts.ClockOptions().NowFn(),
-		logger:              instrumentOpts.Logger(),
-		reportInterval:      instrumentOpts.ReportInterval(),
-		campaignOpts:        campaignOpts,
-		electionOpts:        opts.ElectionOptions(),
-		campaignRetrier:     campaignRetrier,
-		changeRetrier:       changeRetrier,
-		changeVerifyTimeout: opts.ChangeVerifyTimeout(),
-		electionKeyFmt:      opts.ElectionKeyFmt(),
-		leaderService:       opts.LeaderService(),
-		leaderValue:         campaignOpts.LeaderValue(),
-		state:               electionManagerNotOpen,
-		doneCh:              make(chan struct{}),
-		electionState:       FollowerState,
-		goalStateWatchable:  xwatch.NewWatchable(),
-		resignCh:            make(chan resignAction, 1),
-		sleepFn:             time.Sleep,
-		metrics:             newElectionManagerMetrics(instrumentOpts.MetricsScope()),
+		nowFn:                  opts.ClockOptions().NowFn(),
+		logger:                 instrumentOpts.Logger(),
+		reportInterval:         instrumentOpts.ReportInterval(),
+		campaignOpts:           campaignOpts,
+		electionOpts:           opts.ElectionOptions(),
+		campaignRetrier:        campaignRetrier,
+		changeRetrier:          changeRetrier,
+		changeVerifyTimeout:    opts.ChangeVerifyTimeout(),
+		electionKeyFmt:         opts.ElectionKeyFmt(),
+		leaderService:          opts.LeaderService(),
+		leaderValue:            campaignOpts.LeaderValue(),
+		state:                  electionManagerNotOpen,
+		doneCh:                 make(chan struct{}),
+		electionStateWatchable: electionStateWatchable,
+		goalStateWatchable:     xwatch.NewWatchable(),
+		resignCh:               make(chan resignAction, 1),
+		sleepFn:                time.Sleep,
+		metrics:                newElectionManagerMetrics(instrumentOpts.MetricsScope()),
 	}
 }
 
@@ -245,7 +247,7 @@ func (mgr *electionManager) Open(shardSetID string) error {
 	defer mgr.Unlock()
 
 	if mgr.state != electionManagerNotOpen {
-		return errElectionManagerExpectNotOpen
+		return errElectionManagerAlreadyOpenOrClosed
 	}
 	mgr.state = electionManagerOpen
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
@@ -268,14 +270,11 @@ func (mgr *electionManager) Open(shardSetID string) error {
 }
 
 func (mgr *electionManager) ElectionState() ElectionState {
-	mgr.RLock()
-	electionState := mgr.electionState
-	mgr.RUnlock()
-	return electionState
+	return mgr.electionStateWatchable.Get().(ElectionState)
 }
 
 func (mgr *electionManager) Resign(ctx context.Context) error {
-	_, watch, err := mgr.goalStateWatchable.Watch()
+	_, watch, err := mgr.electionStateWatchable.Watch()
 	if err != nil {
 		return fmt.Errorf("error creating watch when resigning: %v", err)
 	}
@@ -291,7 +290,7 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 	for {
 		select {
 		case <-watch.C():
-			if goalState := watch.Get().(goalState); goalState.state == FollowerState {
+			if state := watch.Get().(ElectionState); state == FollowerState {
 				return nil
 			}
 		case <-ctx.Done():
@@ -311,7 +310,7 @@ func (mgr *electionManager) Close() error {
 	defer mgr.Unlock()
 
 	if mgr.state != electionManagerOpen {
-		return errElectionManagerExpectOpen
+		return errElectionManagerNotOpenOrClosed
 	}
 	close(mgr.doneCh)
 	mgr.state = electionManagerClosed
@@ -334,10 +333,7 @@ func (mgr *electionManager) watchGoalStateChanges(watch xwatch.Watch) {
 }
 
 func (mgr *electionManager) processGoalState(goalState goalState) {
-	mgr.Lock()
-	defer mgr.Unlock()
-
-	currState := mgr.electionState
+	currState := mgr.ElectionState()
 	newState := goalState.state
 	if currState == newState {
 		return
@@ -350,7 +346,7 @@ func (mgr *electionManager) processGoalState(goalState goalState) {
 	if currState == FollowerState && newState == PendingFollowerState {
 		return
 	}
-	mgr.electionState = newState
+	mgr.electionStateWatchable.Update(newState)
 	mgr.metrics.stateChanges.Inc(1)
 	mgr.logger.Info(fmt.Sprintf("election state changed from %v to %v", currState, newState))
 }
@@ -432,17 +428,17 @@ func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
 func (mgr *electionManager) resign(action resignAction) {
 	mgr.RLock()
 	if mgr.state != electionManagerOpen {
-		action.errCh <- errElectionManagerExpectOpen
-		mgr.RUnlock()
-		return
-	}
-	if mgr.electionState == FollowerState {
-		mgr.metrics.followerResign.Inc(1)
-		action.errCh <- nil
+		action.errCh <- errElectionManagerNotOpenOrClosed
 		mgr.RUnlock()
 		return
 	}
 	mgr.RUnlock()
+
+	if mgr.ElectionState() == FollowerState {
+		mgr.metrics.followerResign.Inc(1)
+		action.errCh <- nil
+		return
+	}
 
 	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
 		action.errCh <- err
@@ -506,7 +502,7 @@ func (mgr *electionManager) processCampaignUpdate(campaignStatus campaign.Status
 		return
 	}
 
-	newState, err := toElectionState(campaignStatus.State)
+	newState, err := newElectionState(campaignStatus.State)
 	if err != nil {
 		mgr.metrics.campaignUnknownState.Inc(1)
 		mgr.logError("unknown campaign state", err)
