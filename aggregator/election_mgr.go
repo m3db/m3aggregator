@@ -33,6 +33,7 @@ import (
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
+	"github.com/m3db/m3x/watch"
 
 	"github.com/uber-go/tally"
 )
@@ -55,10 +56,15 @@ type ElectionManager interface {
 	Close() error
 }
 
+const (
+	backOffOnResignOrElectionError = time.Second
+)
+
 var (
 	errElectionManagerExpectNotOpen = errors.New("election manager is expected to be not open")
 	errElectionManagerExpectOpen    = errors.New("election manager is expected to be open")
 	errLeaderNotChanged             = errors.New("leader has not changed")
+	errResignActionAlreadyEnqueued  = errors.New("resign action already enqueued")
 )
 
 type electionManagerState int
@@ -66,7 +72,6 @@ type electionManagerState int
 const (
 	electionManagerNotOpen electionManagerState = iota
 	electionManagerOpen
-	electionManagerResigning
 	electionManagerClosed
 )
 
@@ -75,18 +80,42 @@ type ElectionState int
 
 // A list of supported election states.
 const (
-	FollowerState ElectionState = iota
+	// Unknown election state.
+	UnknownState ElectionState = iota
+
+	// Leader state.
 	LeaderState
+
+	// Follower state.
+	FollowerState
+
+	// Pending follower state.
+	PendingFollowerState
 )
+
+func toElectionState(state campaign.State) (ElectionState, error) {
+	switch state {
+	case campaign.Leader:
+		return LeaderState, nil
+	case campaign.Follower:
+		// NB(xichen): Follower state from campaign is not verified and as such
+		// we map it to pending follower state.
+		return PendingFollowerState, nil
+	default:
+		return UnknownState, fmt.Errorf("unknown campaign state %s", state.String())
+	}
+}
 
 func (state ElectionState) String() string {
 	switch state {
 	case FollowerState:
 		return "follower"
+	case PendingFollowerState:
+		return "pendingFollower"
 	case LeaderState:
 		return "leader"
 	default:
-		panic(fmt.Sprintf("unknown election state %v", int(state)))
+		return "unknown"
 	}
 }
 
@@ -105,6 +134,8 @@ func (state *ElectionState) UnmarshalJSON(data []byte) error {
 	switch str {
 	case FollowerState.String():
 		*state = FollowerState
+	case PendingFollowerState.String():
+		*state = PendingFollowerState
 	case LeaderState.String():
 		*state = LeaderState
 	default:
@@ -114,58 +145,71 @@ func (state *ElectionState) UnmarshalJSON(data []byte) error {
 }
 
 type electionManagerMetrics struct {
-	campaignCreateErrors tally.Counter
-	campaignErrors       tally.Counter
-	leaderErrors         tally.Counter
-	leaderNotChanged     tally.Counter
-	resignErrors         tally.Counter
-	followerResign       tally.Counter
-	resignNotFollower    tally.Counter
-	followerToLeader     tally.Counter
-	leaderToFollower     tally.Counter
-	electionState        tally.Gauge
+	campaignCreateErrors     tally.Counter
+	campaignErrors           tally.Counter
+	campaignUnknownState     tally.Counter
+	verifyLeaderErrors       tally.Counter
+	verifyLeaderNotChanged   tally.Counter
+	verifyPendingChangeStale tally.Counter
+	verifyNoKnownLeader      tally.Counter
+	followerResign           tally.Counter
+	resignTimeout            tally.Counter
+	resignErrors             tally.Counter
+	stateChanges             tally.Counter
+	electionState            tally.Gauge
 }
 
 func newElectionManagerMetrics(scope tally.Scope) electionManagerMetrics {
 	return electionManagerMetrics{
-		campaignCreateErrors: scope.Counter("campaign-create-errors"),
-		campaignErrors:       scope.Counter("campaign-errors"),
-		leaderErrors:         scope.Counter("leader-errors"),
-		leaderNotChanged:     scope.Counter("leader-not-changed"),
-		resignErrors:         scope.Counter("resign-errors"),
-		resignNotFollower:    scope.Counter("resign-not-follower"),
-		followerResign:       scope.Counter("follower-resign"),
-		followerToLeader:     scope.Counter("follower-to-leader"),
-		leaderToFollower:     scope.Counter("leader-to-follower"),
-		electionState:        scope.Gauge("election-state"),
+		campaignCreateErrors:     scope.Counter("campaign-create-errors"),
+		campaignErrors:           scope.Counter("campaign-errors"),
+		campaignUnknownState:     scope.Counter("campaign-unknown-state"),
+		verifyLeaderErrors:       scope.Counter("verify-leader-errors"),
+		verifyLeaderNotChanged:   scope.Counter("verify-leader-not-changed"),
+		verifyPendingChangeStale: scope.Counter("verify-pending-change-stale"),
+		verifyNoKnownLeader:      scope.Counter("verify-no-known-leader"),
+		followerResign:           scope.Counter("follower-resign"),
+		resignTimeout:            scope.Counter("resign-timeout"),
+		resignErrors:             scope.Counter("resign-errors"),
+		stateChanges:             scope.Counter("state-changes"),
+		electionState:            scope.Gauge("election-state"),
 	}
+}
+
+type goalState struct {
+	id    int64
+	state ElectionState
+}
+
+type resignAction struct {
+	errCh chan error
 }
 
 type electionManager struct {
 	sync.RWMutex
 
-	nowFn           clock.NowFn
-	logger          xlog.Logger
-	reportInterval  time.Duration
-	campaignOpts    services.CampaignOptions
-	electionOpts    services.ElectionOptions
-	campaignRetrier xretry.Retrier
-	changeRetrier   xretry.Retrier
-	electionKeyFmt  string
-	leaderService   services.LeaderService
-	leaderValue     string
+	nowFn               clock.NowFn
+	logger              xlog.Logger
+	reportInterval      time.Duration
+	campaignOpts        services.CampaignOptions
+	electionOpts        services.ElectionOptions
+	campaignRetrier     xretry.Retrier
+	changeRetrier       xretry.Retrier
+	changeVerifyTimeout time.Duration
+	electionKeyFmt      string
+	leaderService       services.LeaderService
+	leaderValue         string
 
-	state            electionManagerState
-	doneCh           chan struct{}
-	notifyCh         chan struct{}
-	resignWg         *sync.WaitGroup
-	electionKey      string
-	electionState    ElectionState
-	changeInProgress bool
-	changeCancelFn   context.CancelFunc
-	changeWg         sync.WaitGroup
-	sleepFn          sleepFn
-	metrics          electionManagerMetrics
+	state              electionManagerState
+	doneCh             chan struct{}
+	electionKey        string
+	electionState      ElectionState
+	goalStateLock      sync.Mutex
+	goalStateID        int64
+	goalStateWatchable xwatch.Watchable
+	resignCh           chan resignAction
+	sleepFn            sleepFn
+	metrics            electionManagerMetrics
 }
 
 // NewElectionManager creates a new election manager.
@@ -174,26 +218,26 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 	campaignOpts := opts.CampaignOptions()
 	campaignRetrier := xretry.NewRetrier(opts.CampaignRetryOptions().SetForever(true))
 	changeRetrier := xretry.NewRetrier(opts.ChangeRetryOptions().SetForever(true))
-	mgr := &electionManager{
-		nowFn:           opts.ClockOptions().NowFn(),
-		logger:          instrumentOpts.Logger(),
-		reportInterval:  instrumentOpts.ReportInterval(),
-		campaignOpts:    campaignOpts,
-		electionOpts:    opts.ElectionOptions(),
-		campaignRetrier: campaignRetrier,
-		changeRetrier:   changeRetrier,
-		electionKeyFmt:  opts.ElectionKeyFmt(),
-		leaderService:   opts.LeaderService(),
-		leaderValue:     campaignOpts.LeaderValue(),
-		state:           electionManagerNotOpen,
-		doneCh:          make(chan struct{}),
-		notifyCh:        make(chan struct{}, 1),
-		electionState:   FollowerState,
-		sleepFn:         time.Sleep,
-		metrics:         newElectionManagerMetrics(instrumentOpts.MetricsScope()),
+	return &electionManager{
+		nowFn:               opts.ClockOptions().NowFn(),
+		logger:              instrumentOpts.Logger(),
+		reportInterval:      instrumentOpts.ReportInterval(),
+		campaignOpts:        campaignOpts,
+		electionOpts:        opts.ElectionOptions(),
+		campaignRetrier:     campaignRetrier,
+		changeRetrier:       changeRetrier,
+		changeVerifyTimeout: opts.ChangeVerifyTimeout(),
+		electionKeyFmt:      opts.ElectionKeyFmt(),
+		leaderService:       opts.LeaderService(),
+		leaderValue:         campaignOpts.LeaderValue(),
+		state:               electionManagerNotOpen,
+		doneCh:              make(chan struct{}),
+		electionState:       FollowerState,
+		goalStateWatchable:  xwatch.NewWatchable(),
+		resignCh:            make(chan resignAction, 1),
+		sleepFn:             time.Sleep,
+		metrics:             newElectionManagerMetrics(instrumentOpts.MetricsScope()),
 	}
-	go mgr.reportMetrics()
-	return mgr
 }
 
 func (mgr *electionManager) Open(shardSetID string) error {
@@ -205,7 +249,21 @@ func (mgr *electionManager) Open(shardSetID string) error {
 	}
 	mgr.state = electionManagerOpen
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
-	go mgr.startElectionLoop()
+
+	_, stateChangeWatch, err := mgr.goalStateWatchable.Watch()
+	if err != nil {
+		return err
+	}
+	go mgr.watchGoalStateChanges(stateChangeWatch)
+
+	_, verifyWatch, err := mgr.goalStateWatchable.Watch()
+	if err != nil {
+		return err
+	}
+	go mgr.verifyPendingFollower(verifyWatch)
+
+	go mgr.campaignLoop()
+	go mgr.reportMetrics()
 	return nil
 }
 
@@ -217,80 +275,35 @@ func (mgr *electionManager) ElectionState() ElectionState {
 }
 
 func (mgr *electionManager) Resign(ctx context.Context) error {
-	mgr.Lock()
-	if mgr.state != electionManagerOpen {
-		mgr.Unlock()
-		return errElectionManagerExpectOpen
-	}
-	if mgr.electionState == FollowerState {
-		mgr.Unlock()
-		mgr.metrics.followerResign.Inc(1)
-		return nil
-	}
-	mgr.state = electionManagerResigning
-	mgr.resignWg = &sync.WaitGroup{}
-	resignWg := mgr.resignWg
-	resignWg.Add(1)
-	mgr.Unlock()
-
-	err := mgr.leaderService.Resign(mgr.electionKey)
+	_, watch, err := mgr.goalStateWatchable.Watch()
 	if err != nil {
-		resignWg.Done()
-		mgr.Lock()
-		mgr.state = electionManagerOpen
-		mgr.resignWg = nil
-		mgr.Unlock()
-		err := fmt.Errorf("leader service resign failed: %v", err)
-		mgr.metrics.resignErrors.Inc(1)
-		mgr.logError("resign failed", err)
-		return err
+		return fmt.Errorf("error creating watch when resigning: %v", err)
 	}
+	defer watch.Close()
 
-	// Wait for TTL to give the follower instance some time to take over the
-	// leader role before starting a new campaign after resigning.
-	mgr.sleepFn(time.Duration(mgr.electionOpts.TTLSecs()) * time.Second)
-	resignWg.Done()
-
-	// Now wait for the current instance to become a follower.
-	var (
-		ctxDone    = false
-		isFollower = false
-	)
+	resignAction := resignAction{errCh: make(chan error, 1)}
+	select {
+	case mgr.resignCh <- resignAction:
+	default:
+		return errResignActionAlreadyEnqueued
+	}
 
 	for {
 		select {
+		case <-watch.C():
+			if goalState := watch.Get().(goalState); goalState.state == FollowerState {
+				return nil
+			}
 		case <-ctx.Done():
-			ctxDone = true
-		case <-mgr.notifyCh:
-			isFollower = mgr.ElectionState() == FollowerState
+			mgr.metrics.resignTimeout.Inc(1)
+			mgr.logError("resign error", ctx.Err())
+			return ctx.Err()
+		case err := <-resignAction.errCh:
+			mgr.metrics.resignErrors.Inc(1)
+			mgr.logError("resign error", err)
+			return err
 		}
-		if ctxDone || isFollower {
-			break
-		}
 	}
-
-	// If the context expires, we cancel the in progress change and re-check
-	// the election state.
-	if !isFollower {
-		mgr.cancelInProgressChange()
-		isFollower = mgr.ElectionState() == FollowerState
-	}
-
-	mgr.Lock()
-	mgr.state = electionManagerOpen
-	mgr.resignWg = nil
-	mgr.Unlock()
-
-	if isFollower {
-		return nil
-	}
-
-	// If the election state is not follower, it means we failed to establish
-	// the follower state with kv.
-	err = fmt.Errorf("instance resigned but is not follower: %v", ctx.Err())
-	mgr.metrics.resignNotFollower.Inc(1)
-	mgr.logError("resign failed", err)
-	return err
 }
 
 func (mgr *electionManager) Close() error {
@@ -305,7 +318,138 @@ func (mgr *electionManager) Close() error {
 	return nil
 }
 
-func (mgr *electionManager) startElectionLoop() {
+func (mgr *electionManager) watchGoalStateChanges(watch xwatch.Watch) {
+	defer watch.Close()
+
+	for {
+		select {
+		case <-mgr.doneCh:
+			return
+		case <-watch.C():
+			mgr.processGoalState(watch.Get().(goalState))
+		case action := <-mgr.resignCh:
+			mgr.resign(action)
+		}
+	}
+}
+
+func (mgr *electionManager) processGoalState(goalState goalState) {
+	mgr.Lock()
+	defer mgr.Unlock()
+
+	currState := mgr.electionState
+	newState := goalState.state
+	if currState == newState {
+		return
+	}
+	// NB(xichen): the follower to pending follower transition is conceptually invalid
+	// but because the leader election API currently does not verify states, if the client
+	// receives a follower state, it can only treat it as a "pendingFollower" state. This
+	// is no longer needed once the leader election logic is adapted to only notify clients
+	// of states that have been verified.
+	if currState == FollowerState && newState == PendingFollowerState {
+		return
+	}
+	mgr.electionState = newState
+	mgr.metrics.stateChanges.Inc(1)
+	mgr.logger.Info(fmt.Sprintf("election state changed from %v to %v", currState, newState))
+}
+
+func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
+	defer watch.Close()
+
+	for {
+		select {
+		case <-mgr.doneCh:
+			return
+		case <-watch.C():
+		}
+
+		currState := mgr.goalStateWatchable.Get().(goalState)
+		if currState.state != PendingFollowerState {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), mgr.changeVerifyTimeout)
+		continueFn := func(int) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+				return true
+			}
+		}
+
+		var (
+			knownLeader bool
+			isLeader    bool
+		)
+		mgr.changeRetrier.AttemptWhile(continueFn, func() error {
+			leader, err := mgr.leaderService.Leader(mgr.electionKey)
+			if err != nil {
+				knownLeader = false
+				mgr.metrics.verifyLeaderErrors.Inc(1)
+				mgr.logError("error determining the leader", err)
+				return err
+			}
+
+			knownLeader = true
+			if leader == mgr.leaderValue {
+				isLeader = true
+				mgr.metrics.verifyLeaderNotChanged.Inc(1)
+				mgr.logError("leader has not changed", errLeaderNotChanged)
+				return errLeaderNotChanged
+			}
+			isLeader = false
+			return nil
+		})
+		cancel()
+
+		mgr.goalStateLock.Lock()
+		state := mgr.goalStateWatchable.Get().(goalState)
+		// If the latest goal state is different from the goal state before verification, this
+		// means the goal state has been updated since verification started and the pending follower
+		// to follower transition is no longer valid.
+		if !(state.id == currState.id && state.state == currState.state) {
+			mgr.metrics.verifyPendingChangeStale.Inc(1)
+			mgr.goalStateLock.Unlock()
+			continue
+		}
+		if !knownLeader {
+			mgr.metrics.verifyNoKnownLeader.Inc(1)
+			mgr.goalStateLock.Unlock()
+			continue
+		}
+		if isLeader {
+			mgr.setGoalStateWithLock(LeaderState)
+		} else {
+			mgr.setGoalStateWithLock(FollowerState)
+		}
+		mgr.goalStateLock.Unlock()
+	}
+}
+
+func (mgr *electionManager) resign(action resignAction) {
+	mgr.RLock()
+	if mgr.state != electionManagerOpen {
+		action.errCh <- errElectionManagerExpectOpen
+		mgr.RUnlock()
+		return
+	}
+	if mgr.electionState == FollowerState {
+		mgr.metrics.followerResign.Inc(1)
+		action.errCh <- nil
+		mgr.RUnlock()
+		return
+	}
+	mgr.RUnlock()
+
+	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
+		action.errCh <- err
+	}
+}
+
+func (mgr *electionManager) campaignLoop() {
 	var campaignStatusCh <-chan campaign.Status
 	notDone := func(int) bool {
 		select {
@@ -318,18 +462,6 @@ func (mgr *electionManager) startElectionLoop() {
 
 	for {
 		if campaignStatusCh == nil {
-			mgr.RLock()
-			state := mgr.state
-			resignWg := mgr.resignWg
-			mgr.RUnlock()
-
-			// NB(xichen): need to wait for the result of the leader service resign call
-			// because resigning is done in a different goroutine and when/whether we need
-			// to restart the campaign depends on the result of the resign call.
-			if state == electionManagerResigning {
-				resignWg.Wait()
-			}
-
 			// NB(xichen): campaign retrier retries forever until either the Campaign call succeeds,
 			// or the election manager has resigned.
 			if err := mgr.campaignRetrier.AttemptWhile(notDone, func() error {
@@ -352,146 +484,45 @@ func (mgr *electionManager) startElectionLoop() {
 		)
 		select {
 		case campaignStatus, ok = <-campaignStatusCh:
-			// If the campaign status channel is closed (e.g., because session has expired, or
-			// we have resigned from the campaign, or there are issues with the underlying etcd
-			// cluster), we restart the campaign loop.
+			// If the campaign status channel is closed, this is either because session has expired,
+			// or we have resigned from the campaign, or there are issues with the underlying etcd
+			// cluster, in which case we back off a little and restart the campaign.
 			if !ok {
 				campaignStatusCh = nil
+				mgr.sleepFn(backOffOnResignOrElectionError)
 				continue
 			}
 		case <-mgr.doneCh:
 			return
 		}
-		mgr.processStatusUpdate(campaignStatus)
+		mgr.processCampaignUpdate(campaignStatus)
 	}
 }
 
-func (mgr *electionManager) processStatusUpdate(campaignStatus campaign.Status) {
+func (mgr *electionManager) processCampaignUpdate(campaignStatus campaign.Status) {
 	if campaignStatus.State == campaign.Error {
 		mgr.metrics.campaignErrors.Inc(1)
 		mgr.logError("error campaigning", campaignStatus.Err)
 		return
 	}
 
-	currState := mgr.ElectionState()
-	newState := FollowerState
-	if campaignStatus.State == campaign.Leader {
-		newState = LeaderState
-	}
-	mgr.changeElectionState(currState, newState)
-}
-
-func (mgr *electionManager) changeElectionState(currState, newState ElectionState) {
-	if currState == newState {
-		if newState != LeaderState {
-			return
-		}
-		// We are in the middle of verifying leader and changing from leader to follower
-		// and we received an update that indicates the current instance is now the leader,
-		// therefore we cancel the change from leader to follower and instead set the
-		// election state to leader.
-		if mgr.cancelInProgressChange() {
-			// NB(xichen): if an in-progress change was cancelled, we need to explicitly set
-			// election state to leader in case the role changing goroutine managed to change
-			// the state to follower just before it was cancelled.
-			mgr.Lock()
-			mgr.electionState = LeaderState
-			mgr.Unlock()
-			mgr.notifyStateChange()
-		}
+	newState, err := toElectionState(campaignStatus.State)
+	if err != nil {
+		mgr.metrics.campaignUnknownState.Inc(1)
+		mgr.logError("unknown campaign state", err)
 		return
 	}
 
-	// Changing role from follower to leader.
-	if currState == FollowerState && newState == LeaderState {
-		mgr.Lock()
-		mgr.electionState = newState
-		mgr.Unlock()
-		mgr.notifyStateChange()
-		mgr.metrics.followerToLeader.Inc(1)
-		mgr.logger.Info("election state changed from follower to leader")
-		return
-	}
-
-	// NB(xichen): in case of a leader to follower transition, we need to be extra
-	// careful and should confirm the leader role has been actually claimed before
-	// setting the election state to follower. Otherwise, we might get into a situation
-	// where we resigned from the leader role but the other side (i.e., the old follower)
-	// is not claiming the leader role due to e.g., hardware/network issues and as such,
-	// neither instances will be flushing data downstream.
-	mgr.Lock()
-	defer mgr.Unlock()
-	if mgr.changeInProgress {
-		return
-	}
-	mgr.changeInProgress = true
-	ctx, cancelFn := context.WithCancel(context.Background())
-	mgr.changeCancelFn = cancelFn
-	mgr.changeWg.Add(1)
-	go mgr.leaderToFollower(ctx)
+	mgr.goalStateLock.Lock()
+	mgr.setGoalStateWithLock(newState)
+	mgr.goalStateLock.Unlock()
 }
 
-// cancelInProgressChange cancels in progress election state changes if any,
-// returning true if a change is cancelled and false otherwise.
-func (mgr *electionManager) cancelInProgressChange() bool {
-	mgr.Lock()
-	if !mgr.changeInProgress {
-		mgr.Unlock()
-		return false
-	}
-	cancelFn := mgr.changeCancelFn
-	mgr.changeCancelFn = nil
-	mgr.changeInProgress = false
-	mgr.Unlock()
-	cancelFn()
-	mgr.changeWg.Wait()
-	return true
-}
-
-func (mgr *electionManager) leaderToFollower(ctx context.Context) {
-	defer mgr.changeWg.Done()
-
-	continueFn := func(int) bool {
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-			return true
-		}
-	}
-
-	// NB(xichen): majority of the verification logic below will be moved into the
-	// leadership API implementation to ensure the API user will receive a follower
-	// status only after this verification is performed.
-	mgr.changeRetrier.AttemptWhile(continueFn, func() error {
-		leader, err := mgr.leaderService.Leader(mgr.electionKey)
-		if err != nil {
-			mgr.metrics.leaderErrors.Inc(1)
-			mgr.logError("error determining the leader", err)
-			return err
-		}
-		if leader == mgr.leaderValue {
-			mgr.metrics.leaderNotChanged.Inc(1)
-			mgr.logError("leader has not changed", errLeaderNotChanged)
-			return errLeaderNotChanged
-		}
-		mgr.Lock()
-		mgr.electionState = FollowerState
-		mgr.changeCancelFn = nil
-		mgr.changeInProgress = false
-		mgr.Unlock()
-		mgr.notifyStateChange()
-		mgr.metrics.leaderToFollower.Inc(1)
-		mgr.logger.Info("election state changed from leader to follower")
-		return nil
-	})
-}
-
-func (mgr *electionManager) notifyStateChange() {
-	select {
-	case mgr.notifyCh <- struct{}{}:
-	default:
-	}
+func (mgr *electionManager) setGoalStateWithLock(newState ElectionState) {
+	newGoalStateID := mgr.goalStateID
+	mgr.goalStateID++
+	newGoalState := goalState{id: newGoalStateID, state: newState}
+	mgr.goalStateWatchable.Update(newGoalState)
 }
 
 func (mgr *electionManager) reportMetrics() {

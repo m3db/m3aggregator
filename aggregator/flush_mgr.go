@@ -246,7 +246,7 @@ func (mgr *flushManager) flush() {
 		}
 
 		// If the election state has changed, we need to switch the flush manager.
-		newElectionState := mgr.electionMgr.ElectionState()
+		newElectionState := mgr.checkElectionState()
 		if electionState != newElectionState {
 			mgr.Lock()
 			mgr.electionState = newElectionState
@@ -263,6 +263,15 @@ func (mgr *flushManager) flush() {
 		if waitFor > 0 {
 			mgr.sleepFn(waitFor)
 		}
+	}
+}
+
+func (mgr *flushManager) checkElectionState() ElectionState {
+	switch mgr.electionMgr.ElectionState() {
+	case FollowerState:
+		return FollowerState
+	default:
+		return LeaderState
 	}
 }
 

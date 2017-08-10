@@ -451,13 +451,13 @@ func (agg *aggregator) placement() (services.Placement, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer onStagedPlacementDoneFn()
+
 	placement, onPlacementDoneFn, err := stagedPlacement.ActivePlacement()
 	if err != nil {
-		onStagedPlacementDoneFn()
 		return nil, err
 	}
 	onPlacementDoneFn()
-	onStagedPlacementDoneFn()
 	return placement, nil
 }
 
