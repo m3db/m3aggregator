@@ -58,18 +58,18 @@ type Helper interface {
 
 // TODO(xichen): disable deployment while another is ongoing.
 type helper struct {
-	logger             xlog.Logger
-	planner            planner
-	client             aggregatorClient
-	mgr                Manager
-	store              kv.Store
-	retrier            xretry.Retrier
-	foreverRetrier     xretry.Retrier
-	workers            xsync.WorkerPool
-	toPlacementIDFn    ToPlacementInstanceIDFn
-	toAPIEndpointFn    ToAPIEndpointFn
-	placementWatcher   services.StagedPlacementWatcher
-	settleBetweenSteps time.Duration
+	logger                  xlog.Logger
+	planner                 planner
+	client                  aggregatorClient
+	mgr                     Manager
+	store                   kv.Store
+	retrier                 xretry.Retrier
+	foreverRetrier          xretry.Retrier
+	workers                 xsync.WorkerPool
+	toPlacementInstanceIDFn ToPlacementInstanceIDFn
+	toAPIEndpointFn         ToAPIEndpointFn
+	placementWatcher        services.StagedPlacementWatcher
+	settleBetweenSteps      time.Duration
 }
 
 // NewHelper creates a new deployment helper.
@@ -85,18 +85,18 @@ func NewHelper(opts HelperOptions) (Helper, error) {
 	retrier := xretry.NewRetrier(retryOpts)
 	foreverRetrier := xretry.NewRetrier(retryOpts.SetForever(true))
 	return helper{
-		logger:             opts.InstrumentOptions().Logger(),
-		planner:            planner,
-		client:             client,
-		mgr:                opts.Manager(),
-		store:              opts.KVStore(),
-		retrier:            retrier,
-		foreverRetrier:     foreverRetrier,
-		workers:            opts.WorkerPool(),
-		toPlacementIDFn:    opts.ToPlacementInstanceIDFn(),
-		toAPIEndpointFn:    opts.ToAPIEndpointFn(),
-		placementWatcher:   placementWatcher,
-		settleBetweenSteps: opts.SettleDurationBetweenSteps(),
+		logger:                  opts.InstrumentOptions().Logger(),
+		planner:                 planner,
+		client:                  client,
+		mgr:                     opts.Manager(),
+		store:                   opts.KVStore(),
+		retrier:                 retrier,
+		foreverRetrier:          foreverRetrier,
+		workers:                 opts.WorkerPool(),
+		toPlacementInstanceIDFn: opts.ToPlacementInstanceIDFn(),
+		toAPIEndpointFn:         opts.ToAPIEndpointFn(),
+		placementWatcher:        placementWatcher,
+		settleBetweenSteps:      opts.SettleDurationBetweenSteps(),
 	}, nil
 }
 
@@ -108,16 +108,17 @@ func (h helper) Deploy(revision string, mode Mode) error {
 	if err != nil {
 		return fmt.Errorf("unable to get all instance metadatas: %v", err)
 	}
-	filtered := filterByRevision(all, revision)
+	filtered := all.Filter(revision)
 
 	plan, err := h.planner.GeneratePlan(filtered, all)
 	if err != nil {
 		return fmt.Errorf("unable to generate deployment plan: %v", err)
 	}
 
+	h.logger.Infof("generated deployment plan: %+v", plan)
+
 	// If in dry run mode, log the generated deployment plan and return.
 	if mode == DryRunMode {
-		h.logger.Infof("Generated deployment plan: %+v", plan)
 		return nil
 	}
 
@@ -177,7 +178,7 @@ func (h helper) executeStep(
 	}
 
 	h.logger.Infof("beginning to deploy instances for step %v", step)
-	targetIDs := step.Targets.DeploymentIDs()
+	targetIDs := step.Targets.DeploymentInstanceIDs()
 	if err := h.deploy(targetIDs, revision); err != nil {
 		return err
 	}
@@ -196,9 +197,9 @@ func (h helper) executeStep(
 }
 
 func (h helper) waitUntilSafe(instances instanceMetadatas) error {
-	deploymentIDs := instances.DeploymentIDs()
+	deploymentInstanceIDs := instances.DeploymentInstanceIDs()
 	return h.foreverRetrier.Attempt(func() error {
-		deploymentInstances, err := h.mgr.Query(deploymentIDs)
+		deploymentInstances, err := h.mgr.Query(deploymentInstanceIDs)
 		if err != nil {
 			return fmt.Errorf("error querying instances: %v", err)
 		}
@@ -239,7 +240,7 @@ func (h helper) validate(targets deploymentTargets) error {
 				return nil
 			}
 			if err := validator(); err != nil {
-				err = fmt.Errorf("validation error for instance %s: %v", target.Instance.PlacementID, err)
+				err = fmt.Errorf("validation error for instance %s: %v", target.Instance.PlacementInstanceID, err)
 				return err
 			}
 			return nil
@@ -252,7 +253,7 @@ func (h helper) resign(targets deploymentTargets) error {
 		return h.retrier.Attempt(func() error {
 			instance := target.Instance
 			if err := h.client.Resign(instance.APIEndpoint); err != nil {
-				err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementID, err)
+				err = fmt.Errorf("resign error for instance %s: %v", instance.PlacementInstanceID, err)
 				return err
 			}
 			return nil
@@ -352,7 +353,7 @@ func (h helper) computeInstanceMetadatas(
 			return nil, fmt.Errorf("unable to convert placement endpoint %s to api endpoint: %v", endpoint, err)
 		}
 		unique[id] = i
-		metadatas[i].PlacementID = id
+		metadatas[i].PlacementInstanceID = id
 		metadatas[i].ShardSetID = pi.ShardSetID()
 		metadatas[i].APIEndpoint = apiEndpoint
 	}
@@ -360,18 +361,18 @@ func (h helper) computeInstanceMetadatas(
 	// Populate instance metadata from deployment information.
 	for _, di := range deploymentInstances {
 		id := di.ID()
-		placementID, err := h.toPlacementIDFn(id)
+		placementInstanceID, err := h.toPlacementInstanceIDFn(id)
 		if err != nil {
 			return nil, fmt.Errorf("unable to convert deployment instance id %s to placement instance id", id)
 		}
-		idx, exists := unique[placementID]
+		idx, exists := unique[placementInstanceID]
 		if !exists {
 			return nil, fmt.Errorf("instance %s is in deployment but not in placement", id)
 		}
-		if metadatas[idx].DeploymentID != "" {
+		if metadatas[idx].DeploymentInstanceID != "" {
 			return nil, fmt.Errorf("instance %s not unique in the deployment", id)
 		}
-		metadatas[idx].DeploymentID = id
+		metadatas[idx].DeploymentInstanceID = id
 		metadatas[idx].Revision = di.Revision()
 	}
 
@@ -407,21 +408,41 @@ func filterByRevision(metadatas instanceMetadatas, revision string) instanceMeta
 
 // instanceMetadata contains instance metadata.
 type instanceMetadata struct {
-	PlacementID  string
-	ShardSetID   string
-	APIEndpoint  string
-	DeploymentID string
-	Revision     string
+	// PlacementInstanceID is the instance id in the placement.
+	PlacementInstanceID string
+
+	// DeploymentInstanceID is the instance id in the deployment system.
+	DeploymentInstanceID string
+
+	// ShardSetID is the shard set id associated with the instance.
+	ShardSetID string
+
+	// APIEndpoint is the api endpoint for the instance.
+	APIEndpoint string
+
+	// Revision is the revision deployed to the instance.
+	Revision string
 }
 
 type instanceMetadatas []instanceMetadata
 
-func (m instanceMetadatas) DeploymentIDs() []string {
+func (m instanceMetadatas) DeploymentInstanceIDs() []string {
 	res := make([]string, 0, len(m))
 	for _, metadata := range m {
-		res = append(res, metadata.DeploymentID)
+		res = append(res, metadata.DeploymentInstanceID)
 	}
 	return res
 }
 
 type targetWorkFn func(target deploymentTarget) error
+
+func (m instanceMetadatas) Filter(revision string) instanceMetadatas {
+	filtered := make(instanceMetadatas, 0, len(m))
+	for _, metadata := range m {
+		if metadata.Revision == revision {
+			continue
+		}
+		filtered = append(filtered, metadata)
+	}
+	return filtered
+}

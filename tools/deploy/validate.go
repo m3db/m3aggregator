@@ -100,7 +100,7 @@ func (f factory) validatorForLeader(
 		)
 		for _, instance := range group.All {
 			// Skip check if the instance is the leader.
-			if instance.PlacementID == group.LeaderID {
+			if instance.PlacementInstanceID == group.LeaderID {
 				found = true
 				continue
 			}
@@ -131,7 +131,7 @@ func (f factory) validatorForLeader(
 		})
 
 		if !found {
-			return fmt.Errorf("instance %s is not in the instance group", leader.PlacementID)
+			return fmt.Errorf("instance %s is not in the instance group", leader.PlacementInstanceID)
 		}
 		if canLead := <-canLeadCh; !canLead {
 			return errors.New("no follower instance is ready to lead")

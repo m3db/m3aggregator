@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/m3db/m3cluster/services"
+	"github.com/m3db/m3x/errors"
 	"github.com/m3db/m3x/sync"
 )
 
@@ -135,7 +136,7 @@ func (p deploymentPlanner) generateStepFromTargetType(
 			continue
 		}
 		for i, instance := range group.ToDeploy {
-			if !matchTargetType(instance.PlacementID, group.LeaderID, targetType) {
+			if !matchTargetType(instance.PlacementInstanceID, group.LeaderID, targetType) {
 				continue
 			}
 			target := deploymentTarget{
@@ -185,7 +186,7 @@ func (p deploymentPlanner) groupInstancesByShardSetID(
 	// Determine the leader of each group.
 	var (
 		wg    sync.WaitGroup
-		errCh = make(chan error, 1)
+		errCh = make(chan error, len(grouped))
 	)
 	for shardSetID, group := range grouped {
 		shardSetID, group := shardSetID, group
@@ -196,30 +197,28 @@ func (p deploymentPlanner) groupInstancesByShardSetID(
 			electionKey := fmt.Sprintf(p.electionKeyFmt, shardSetID)
 			leader, err := p.leaderService.Leader(electionKey)
 			if err != nil {
-				err = fmt.Errorf("unable to determine leader for shard set id %s", shardSetID)
-				select {
-				case errCh <- err:
-				default:
-				}
+				err = fmt.Errorf("unable to determine leader for shard set id %s: %v", shardSetID, err)
+				errCh <- err
 				return
 			}
 			for _, instance := range group.All {
-				if instance.PlacementID == leader {
-					group.LeaderID = instance.PlacementID
+				if instance.PlacementInstanceID == leader {
+					group.LeaderID = instance.PlacementInstanceID
 					return
 				}
 			}
 			err = fmt.Errorf("unknown leader %s for shard set id %s", leader, shardSetID)
-			select {
-			case errCh <- err:
-			default:
-			}
+			errCh <- err
 		})
 	}
 
 	wg.Wait()
 	close(errCh)
-	if err := <-errCh; err != nil {
+	multiErr := xerrors.NewMultiError()
+	for err := range errCh {
+		multiErr = multiErr.Add(err)
+	}
+	if err := multiErr.FinalError(); err != nil {
 		return nil, err
 	}
 	return grouped, nil
@@ -231,17 +230,17 @@ type deploymentTarget struct {
 	Validator validator
 }
 
-func (t deploymentTarget) String() string { return t.Instance.PlacementID }
+func (t deploymentTarget) String() string { return t.Instance.PlacementInstanceID }
 
 // deploymentTargets is a list of deployment targets.
 type deploymentTargets []deploymentTarget
 
-func (targets deploymentTargets) DeploymentIDs() []string {
-	deploymentIDs := make([]string, 0, len(targets))
+func (targets deploymentTargets) DeploymentInstanceIDs() []string {
+	deploymentInstanceIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
-		deploymentIDs = append(deploymentIDs, target.Instance.DeploymentID)
+		deploymentInstanceIDs = append(deploymentInstanceIDs, target.Instance.DeploymentInstanceID)
 	}
-	return deploymentIDs
+	return deploymentInstanceIDs
 }
 
 // deploymentStep is a deployment step.

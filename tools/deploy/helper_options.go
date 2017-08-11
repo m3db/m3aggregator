@@ -21,6 +21,7 @@
 package deploy
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -34,6 +35,16 @@ import (
 const (
 	defaultSettleDurationBetweenSteps = time.Minute
 	defaultHelperWorkerPoolSize       = 16
+)
+
+var (
+	errNoPlannerOptions                = errors.New("no planner options")
+	errNoManager                       = errors.New("no manager")
+	errNoHTTPClient                    = errors.New("no http client")
+	errNoKVStore                       = errors.New("no kv store")
+	errNoToPlacementInstanceIDFn       = errors.New("no to placement instance id function")
+	errNoToAPIEndpointFn               = errors.New("no to api endpoint function")
+	errNoStagedPlacementWatcherOptions = errors.New("no staged placement watcher options")
 )
 
 // ToPlacementInstanceIDFn converts a deployment instance id to the corresponding
@@ -115,20 +126,23 @@ type HelperOptions interface {
 
 	// SettleDurationBetweenSteps returns the settlement duration between consecutive steps.
 	SettleDurationBetweenSteps() time.Duration
+
+	// Validate validates the options.
+	Validate() error
 }
 
 type helperOptions struct {
-	instrumentOpts  instrument.Options
-	plannerOpts     PlannerOptions
-	manager         Manager
-	httpClient      *http.Client
-	store           kv.Store
-	retryOpts       xretry.Options
-	workerPool      xsync.WorkerPool
-	toPlacementIDFn ToPlacementInstanceIDFn
-	toAPIEndpointFn ToAPIEndpointFn
-	watcherOpts     services.StagedPlacementWatcherOptions
-	settleDuration  time.Duration
+	instrumentOpts          instrument.Options
+	plannerOpts             PlannerOptions
+	manager                 Manager
+	httpClient              *http.Client
+	store                   kv.Store
+	retryOpts               xretry.Options
+	workerPool              xsync.WorkerPool
+	toPlacementInstanceIDFn ToPlacementInstanceIDFn
+	toAPIEndpointFn         ToAPIEndpointFn
+	watcherOpts             services.StagedPlacementWatcherOptions
+	settleDuration          time.Duration
 }
 
 // NewHelperOptions create a set of deployment helper options.
@@ -215,12 +229,12 @@ func (o *helperOptions) WorkerPool() xsync.WorkerPool {
 
 func (o *helperOptions) SetToPlacementInstanceIDFn(value ToPlacementInstanceIDFn) HelperOptions {
 	opts := *o
-	opts.toPlacementIDFn = value
+	opts.toPlacementInstanceIDFn = value
 	return &opts
 }
 
 func (o *helperOptions) ToPlacementInstanceIDFn() ToPlacementInstanceIDFn {
-	return o.toPlacementIDFn
+	return o.toPlacementInstanceIDFn
 }
 
 func (o *helperOptions) SetToAPIEndpointFn(value ToAPIEndpointFn) HelperOptions {
@@ -251,4 +265,29 @@ func (o *helperOptions) SetSettleDurationBetweenSteps(value time.Duration) Helpe
 
 func (o *helperOptions) SettleDurationBetweenSteps() time.Duration {
 	return o.settleDuration
+}
+
+func (o *helperOptions) Validate() error {
+	if o.plannerOpts == nil {
+		return errNoPlannerOptions
+	}
+	if o.manager == nil {
+		return errNoManager
+	}
+	if o.httpClient == nil {
+		return errNoHTTPClient
+	}
+	if o.store == nil {
+		return errNoKVStore
+	}
+	if o.toPlacementInstanceIDFn == nil {
+		return errNoToPlacementInstanceIDFn
+	}
+	if o.toAPIEndpointFn == nil {
+		return errNoToAPIEndpointFn
+	}
+	if o.watcherOpts == nil {
+		return errNoStagedPlacementWatcherOptions
+	}
+	return nil
 }

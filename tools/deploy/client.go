@@ -45,13 +45,20 @@ type aggregatorClient interface {
 	Resign(instance string) error
 }
 
+type doRequestFn func(*http.Request) (*http.Response, error)
+
 type client struct {
 	httpClient *http.Client
+
+	doRequestFn doRequestFn
 }
 
 // newAggregatorClient creates a new aggregator client.
 func newAggregatorClient(httpClient *http.Client) aggregatorClient {
-	return &client{httpClient: httpClient}
+	return &client{
+		httpClient: httpClient,
+		doRequestFn: httpClient.Do,
+	}
 }
 
 func (c *client) IsHealthy(instance string) error {
@@ -90,7 +97,7 @@ func (c *client) doRequest(
 	// NB(xichen): need to read and discard all the data in the response body
 	// before closing the body or otherwise the underlying connections are not
 	// eligible for reuse.
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRequestFn(req)
 	if err != nil {
 		return err
 	}
