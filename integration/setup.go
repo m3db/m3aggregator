@@ -145,10 +145,13 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 	electionManager := aggregator.NewElectionManager(electionManagerOpts)
 	aggregatorOpts = aggregatorOpts.SetElectionManager(electionManager)
 
+	// Set up flush manager.
 	flushManagerOpts := aggregator.NewFlushManagerOptions().
 		SetElectionManager(electionManager).
 		SetFlushTimesKeyFmt(opts.FlushTimesKeyFmt()).
-		SetFlushTimesStore(opts.KVStore())
+		SetFlushTimesStore(opts.KVStore()).
+		SetJitterEnabled(opts.JitterEnabled()).
+		SetMaxJitterFn(opts.MaxJitterFn())
 	flushManager := aggregator.NewFlushManager(flushManagerOpts)
 	aggregatorOpts = aggregatorOpts.SetFlushManager(flushManager)
 

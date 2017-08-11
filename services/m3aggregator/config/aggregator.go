@@ -57,6 +57,7 @@ var (
 	errUnknownFlushHandlerType       = errors.New("unknown flush handler type")
 	errNoKVClientConfiguration       = errors.New("no kv client configuration")
 	errNoForwardHandlerConfiguration = errors.New("no forward flush configuration")
+	errEmptyJitterBucketList         = errors.New("empty jitter bucket list")
 )
 
 // AggregatorConfiguration contains aggregator configuration.
@@ -648,6 +649,9 @@ type flushManagerConfiguration struct {
 	// Whether jittering is enabled.
 	JitterEnabled *bool `yaml:"jitterEnabled"`
 
+	// Buckets for determining max jitter amounts.
+	MaxJitters []jitterBucket `yaml:"maxJitters"`
+
 	// Number of workers per CPU.
 	NumWorkersPerCPU float64 `yaml:"numWorkersPerCPU" validate:"min=0.0,max=1.0"`
 
@@ -656,6 +660,9 @@ type flushManagerConfiguration struct {
 
 	// How frequently the flush times are persisted.
 	FlushTimesPersistEvery time.Duration `yaml:"flushTimesPersistEvery"`
+
+	// Retrier for persisting flush times.
+	FlushTimesPersistRetrier xretry.Configuration `yaml:"flushTimesPersistRetrier"`
 
 	// Maximum duration with no flushes.
 	MaxNoFlushDuration time.Duration `yaml:"maxNoFlushDuration"`
@@ -669,16 +676,26 @@ func (c flushManagerConfiguration) NewFlushManager(
 	electionManager aggregator.ElectionManager,
 	instrumentOpts instrument.Options,
 ) (aggregator.FlushManager, error) {
+	scope := instrumentOpts.MetricsScope()
+	retrier := c.FlushTimesPersistRetrier.NewRetrier(scope.SubScope("flush-times-persist"))
 	opts := aggregator.NewFlushManagerOptions().
 		SetInstrumentOptions(instrumentOpts).
 		SetElectionManager(electionManager).
 		SetFlushTimesKeyFmt(c.FlushTimesKeyFmt).
-		SetFlushTimesStore(store)
+		SetFlushTimesStore(store).
+		SetFlushTimesPersistRetrier(retrier)
 	if c.CheckEvery != 0 {
 		opts = opts.SetCheckEvery(c.CheckEvery)
 	}
 	if c.JitterEnabled != nil {
 		opts = opts.SetJitterEnabled(*c.JitterEnabled)
+	}
+	if c.MaxJitters != nil {
+		maxJitterFn, err := jitterBuckets(c.MaxJitters).NewMaxJitterFn()
+		if err != nil {
+			return nil, err
+		}
+		opts = opts.SetMaxJitterFn(maxJitterFn)
 	}
 	if c.NumWorkersPerCPU != 0 {
 		workerPoolSize := int(float64(runtime.NumCPU()) * c.NumWorkersPerCPU)
@@ -696,6 +713,44 @@ func (c flushManagerConfiguration) NewFlushManager(
 		opts = opts.SetForcedFlushWindowSize(c.ForcedFlushWindowSize)
 	}
 	return aggregator.NewFlushManager(opts), nil
+}
+
+// jitterBucket determins the max jitter percent for lists whose flush
+// intervals are no more than the bucket flush interval.
+type jitterBucket struct {
+	FlushInterval    time.Duration `yaml:"flushInterval" validate:"nonzero"`
+	MaxJitterPercent float64       `yaml:"maxJitterPercent" validate:"min=0.0,max=1.0"`
+}
+
+type jitterBuckets []jitterBucket
+
+func (buckets jitterBuckets) NewMaxJitterFn() (aggregator.FlushJitterFn, error) {
+	numBuckets := len(buckets)
+	if numBuckets == 0 {
+		return nil, errEmptyJitterBucketList
+	}
+	res := make([]jitterBucket, numBuckets)
+	copy(res, buckets)
+	sort.Sort(jitterBucketsByIntervalAscending(res))
+
+	return func(interval time.Duration) time.Duration {
+		idx := sort.Search(numBuckets, func(i int) bool {
+			return res[i].FlushInterval >= interval
+		})
+		if idx == numBuckets {
+			idx--
+		}
+		return time.Duration(res[idx].MaxJitterPercent * float64(res[idx].FlushInterval))
+	}, nil
+}
+
+type jitterBucketsByIntervalAscending []jitterBucket
+
+func (b jitterBucketsByIntervalAscending) Len() int      { return len(b) }
+func (b jitterBucketsByIntervalAscending) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
+
+func (b jitterBucketsByIntervalAscending) Less(i, j int) bool {
+	return b[i].FlushInterval < b[j].FlushInterval
 }
 
 // timerQuantileSuffixFnType is the timer quantile suffix function type.

@@ -127,7 +127,7 @@ func TestLeaderFlushManagerPrepareNoFlushNoPersist(t *testing.T) {
 	opts := NewFlushManagerOptions().SetJitterEnabled(false)
 	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
 	mgr.nowFn = nowFn
-	mgr.lastPersistAt = now
+	mgr.lastPersistAtNanos = now.UnixNano()
 
 	mgr.Init(testFlushBuckets)
 	now = now.Add(100 * time.Millisecond)
@@ -144,7 +144,7 @@ func TestLeaderFlushManagerPrepareNoFlushWithPersist(t *testing.T) {
 		SetFlushTimesPersistEvery(time.Second)
 	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
 	mgr.nowFn = nowFn
-	mgr.lastPersistAt = now.Add(-2 * time.Second)
+	mgr.lastPersistAtNanos = now.Add(-2 * time.Second).UnixNano()
 	mgr.flushedSincePersist = true
 
 	mgr.Init(testFlushBuckets)
@@ -156,7 +156,7 @@ func TestLeaderFlushManagerPrepareNoFlushWithPersist(t *testing.T) {
 	require.Nil(t, task.flushers)
 	require.True(t, task.shouldPersist)
 	require.Equal(t, testFlushTimes, task.flushTimes)
-	require.Equal(t, now, mgr.lastPersistAt)
+	require.Equal(t, now.UnixNano(), mgr.lastPersistAtNanos)
 	require.False(t, mgr.flushedSincePersist)
 }
 
@@ -168,7 +168,7 @@ func TestLeaderFlushManagerPrepareWithFlushAndPersist(t *testing.T) {
 		SetFlushTimesPersistEvery(time.Second)
 	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
 	mgr.nowFn = nowFn
-	mgr.lastPersistAt = now
+	mgr.lastPersistAtNanos = now.UnixNano()
 	mgr.flushedSincePersist = true
 	mgr.Init(testFlushBuckets)
 
@@ -251,5 +251,51 @@ func TestLeaderFlushTaskRun(t *testing.T) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestComputeNextFlushNanosJitterDisabled(t *testing.T) {
+	now := time.Unix(1234, 0)
+	nowFn := func() time.Time { return now }
+	opts := NewFlushManagerOptions().
+		SetJitterEnabled(false)
+	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
+	mgr.nowFn = nowFn
+
+	for _, input := range []struct {
+		interval      time.Duration
+		expectedNanos int64
+	}{
+		{interval: time.Second, expectedNanos: time.Unix(1235, 0).UnixNano()},
+		{interval: 10 * time.Second, expectedNanos: time.Unix(1244, 0).UnixNano()},
+		{interval: time.Minute, expectedNanos: time.Unix(1294, 0).UnixNano()},
+	} {
+		require.Equal(t, input.expectedNanos, mgr.computeNextFlushNanos(input.interval))
+	}
+}
+
+func TestComputeNextFlushNanosJitterEnabled(t *testing.T) {
+	now := time.Unix(1234, 0)
+	nowFn := func() time.Time { return now }
+	maxJitterFn := func(interval time.Duration) time.Duration {
+		return time.Duration(0.5 * float64(interval))
+	}
+	randFn := func(n int64) int64 { return int64(0.5 * float64(n)) }
+	opts := NewFlushManagerOptions().
+		SetJitterEnabled(true).
+		SetMaxJitterFn(maxJitterFn)
+	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
+	mgr.nowFn = nowFn
+	mgr.randFn = randFn
+
+	for _, input := range []struct {
+		interval      time.Duration
+		expectedNanos int64
+	}{
+		{interval: time.Second, expectedNanos: time.Unix(1234, 250000000).UnixNano()},
+		{interval: 10 * time.Second, expectedNanos: time.Unix(1242, 500000000).UnixNano()},
+		{interval: time.Minute, expectedNanos: time.Unix(1275, 0).UnixNano()},
+	} {
+		require.Equal(t, input.expectedNanos, mgr.computeNextFlushNanos(input.interval))
 	}
 }

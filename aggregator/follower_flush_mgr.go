@@ -136,24 +136,22 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 	// * Sufficient time (a.k.a. maxNoFlushDuration) has elapsed since last flush.
 	now := mgr.nowFn()
 	mgr.Lock()
+	defer mgr.Unlock()
+
 	if mgr.flushTimesState == flushTimesUpdated {
 		mgr.lastFlushed = now
 		mgr.flushTimesState = flushTimesProcessed
 		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
-		mgr.Unlock()
 		shouldFlush = true
 		mgr.metrics.kvUpdateFlush.Inc(1)
 	} else {
 		durationSinceLastFlush := now.Sub(mgr.lastFlushed)
 		if durationSinceLastFlush > mgr.maxNoFlushDuration {
 			mgr.lastFlushed = now
-			mgr.Unlock()
 			shouldFlush = true
 			mgr.metrics.forcedFlush.Inc(1)
 			flushBeforeNanos := now.Add(-mgr.maxNoFlushDuration).Add(mgr.forcedFlushWindowSize).UnixNano()
 			flushersByInterval = mgr.flushersFromForcedFlush(buckets, flushBeforeNanos)
-		} else {
-			mgr.Unlock()
 		}
 	}
 
@@ -182,7 +180,6 @@ func (mgr *followerFlushManager) CanLead() bool {
 		return false
 	}
 
-	allWindowsEnded := true
 	for _, shardFlushTimes := range mgr.proto.ByShard {
 		for windowNanos, lastFlushedNanos := range shardFlushTimes.ByResolution {
 			windowSize := time.Duration(windowNanos)
@@ -192,15 +189,11 @@ func (mgr *followerFlushManager) CanLead() bool {
 			}
 			if lastFlushedNanos < windowEndAt.UnixNano() {
 				mgr.metrics.flushWindowsNotEnded.Inc(1)
-				allWindowsEnded = false
-				break
+				return false
 			}
 		}
-		if !allWindowsEnded {
-			break
-		}
 	}
-	return allWindowsEnded
+	return true
 }
 
 func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBucket) []flushersGroup {

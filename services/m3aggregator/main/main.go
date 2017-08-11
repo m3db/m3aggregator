@@ -121,7 +121,6 @@ func main() {
 
 	select {
 	case <-closedCh:
-		aggregator.Close()
 		logger.Info("server closed clean")
 	case <-time.After(gracefulShutdownTimeout):
 		logger.Infof("server closed due to %s timeout", gracefulShutdownTimeout.String())
