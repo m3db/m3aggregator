@@ -108,7 +108,7 @@ func (h helper) Deploy(revision string, mode Mode) error {
 	if err != nil {
 		return fmt.Errorf("unable to get all instance metadatas: %v", err)
 	}
-	filtered := all.Filter(revision)
+	filtered := all.WithoutRevision(revision)
 
 	plan, err := h.planner.GeneratePlan(filtered, all)
 	if err != nil {
@@ -131,9 +131,6 @@ func (h helper) Deploy(revision string, mode Mode) error {
 
 // Close closes the deployment helper.
 func (h helper) Close() error {
-	if h.placementWatcher == nil {
-		return nil
-	}
 	return h.placementWatcher.Unwatch()
 }
 
@@ -395,16 +392,7 @@ func (h helper) placementInstances() ([]services.PlacementInstance, error) {
 	return placement.Instances(), nil
 }
 
-func filterByRevision(metadatas instanceMetadatas, revision string) instanceMetadatas {
-	filtered := make(instanceMetadatas, 0, len(metadatas))
-	for _, metadata := range metadatas {
-		if metadata.Revision == revision {
-			continue
-		}
-		filtered = append(filtered, metadata)
-	}
-	return filtered
-}
+type targetWorkFn func(target deploymentTarget) error
 
 // instanceMetadata contains instance metadata.
 type instanceMetadata struct {
@@ -434,9 +422,7 @@ func (m instanceMetadatas) DeploymentInstanceIDs() []string {
 	return res
 }
 
-type targetWorkFn func(target deploymentTarget) error
-
-func (m instanceMetadatas) Filter(revision string) instanceMetadatas {
+func (m instanceMetadatas) WithoutRevision(revision string) instanceMetadatas {
 	filtered := make(instanceMetadatas, 0, len(m))
 	for _, metadata := range m {
 		if metadata.Revision == revision {
