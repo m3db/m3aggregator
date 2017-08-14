@@ -145,34 +145,36 @@ func (state *ElectionState) UnmarshalJSON(data []byte) error {
 }
 
 type electionManagerMetrics struct {
-	campaignCreateErrors     tally.Counter
-	campaignErrors           tally.Counter
-	campaignUnknownState     tally.Counter
-	verifyLeaderErrors       tally.Counter
-	verifyLeaderNotChanged   tally.Counter
-	verifyPendingChangeStale tally.Counter
-	verifyNoKnownLeader      tally.Counter
-	followerResign           tally.Counter
-	resignTimeout            tally.Counter
-	resignErrors             tally.Counter
-	stateChanges             tally.Counter
-	electionState            tally.Gauge
+	campaignCreateErrors      tally.Counter
+	campaignErrors            tally.Counter
+	campaignUnknownState      tally.Counter
+	verifyLeaderErrors        tally.Counter
+	verifyLeaderNotChanged    tally.Counter
+	verifyPendingChangeStale  tally.Counter
+	verifyNoKnownLeader       tally.Counter
+	followerResign            tally.Counter
+	resignTimeout             tally.Counter
+	resignErrors              tally.Counter
+	followerToPendingFollower tally.Counter
+	stateChanges              tally.Counter
+	electionState             tally.Gauge
 }
 
 func newElectionManagerMetrics(scope tally.Scope) electionManagerMetrics {
 	return electionManagerMetrics{
-		campaignCreateErrors:     scope.Counter("campaign-create-errors"),
-		campaignErrors:           scope.Counter("campaign-errors"),
-		campaignUnknownState:     scope.Counter("campaign-unknown-state"),
-		verifyLeaderErrors:       scope.Counter("verify-leader-errors"),
-		verifyLeaderNotChanged:   scope.Counter("verify-leader-not-changed"),
-		verifyPendingChangeStale: scope.Counter("verify-pending-change-stale"),
-		verifyNoKnownLeader:      scope.Counter("verify-no-known-leader"),
-		followerResign:           scope.Counter("follower-resign"),
-		resignTimeout:            scope.Counter("resign-timeout"),
-		resignErrors:             scope.Counter("resign-errors"),
-		stateChanges:             scope.Counter("state-changes"),
-		electionState:            scope.Gauge("election-state"),
+		campaignCreateErrors:      scope.Counter("campaign-create-errors"),
+		campaignErrors:            scope.Counter("campaign-errors"),
+		campaignUnknownState:      scope.Counter("campaign-unknown-state"),
+		verifyLeaderErrors:        scope.Counter("verify-leader-errors"),
+		verifyLeaderNotChanged:    scope.Counter("verify-leader-not-changed"),
+		verifyPendingChangeStale:  scope.Counter("verify-pending-change-stale"),
+		verifyNoKnownLeader:       scope.Counter("verify-no-known-leader"),
+		followerResign:            scope.Counter("follower-resign"),
+		resignTimeout:             scope.Counter("resign-timeout"),
+		resignErrors:              scope.Counter("resign-errors"),
+		followerToPendingFollower: scope.Counter("follower-to-pending-follower"),
+		stateChanges:              scope.Counter("state-changes"),
+		electionState:             scope.Gauge("election-state"),
 	}
 }
 
@@ -205,7 +207,7 @@ type electionManager struct {
 	electionKey            string
 	electionStateWatchable xwatch.Watchable
 	goalStateLock          sync.Mutex
-	goalStateID            int64
+	nextGoalStateID        int64
 	goalStateWatchable     xwatch.Watchable
 	resignCh               chan resignAction
 	sleepFn                sleepFn
@@ -256,14 +258,14 @@ func (mgr *electionManager) Open(shardSetID string) error {
 	if err != nil {
 		return err
 	}
-	go mgr.watchGoalStateChanges(stateChangeWatch)
 
 	_, verifyWatch, err := mgr.goalStateWatchable.Watch()
 	if err != nil {
 		return err
 	}
-	go mgr.verifyPendingFollower(verifyWatch)
 
+	go mgr.watchGoalStateChanges(stateChangeWatch)
+	go mgr.verifyPendingFollower(verifyWatch)
 	go mgr.campaignLoop()
 	go mgr.reportMetrics()
 	return nil
@@ -344,6 +346,7 @@ func (mgr *electionManager) processGoalState(goalState goalState) {
 	// is no longer needed once the leader election logic is adapted to only notify clients
 	// of states that have been verified.
 	if currState == FollowerState && newState == PendingFollowerState {
+		mgr.metrics.followerToPendingFollower.Inc(1)
 		return
 	}
 	mgr.electionStateWatchable.Update(newState)
@@ -515,9 +518,9 @@ func (mgr *electionManager) processCampaignUpdate(campaignStatus campaign.Status
 }
 
 func (mgr *electionManager) setGoalStateWithLock(newState ElectionState) {
-	newGoalStateID := mgr.goalStateID
-	mgr.goalStateID++
-	newGoalState := goalState{id: newGoalStateID, state: newState}
+	goalStateID := mgr.nextGoalStateID
+	mgr.nextGoalStateID++
+	newGoalState := goalState{id: goalStateID, state: newState}
 	mgr.goalStateWatchable.Update(newGoalState)
 }
 
