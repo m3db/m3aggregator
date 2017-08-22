@@ -47,11 +47,12 @@ type metricListMetrics struct {
 	flushCollected      tally.Counter
 	flushSuccess        tally.Counter
 	flushErrors         tally.Counter
-	flushDuration       tally.Timer
 	flushStale          tally.Counter
-	flushBeforeDuration tally.Timer
 	flushDiscarded      tally.Counter
+	flush               tally.Counter
 	discardBefore       tally.Counter
+	flushDuration       tally.Timer
+	flushBeforeDuration tally.Timer
 }
 
 func newMetricListMetrics(scope tally.Scope) metricListMetrics {
@@ -61,22 +62,17 @@ func newMetricListMetrics(scope tally.Scope) metricListMetrics {
 		flushCollected:      flushScope.Counter("collected"),
 		flushSuccess:        flushScope.Counter("success"),
 		flushErrors:         flushScope.Counter("errors"),
-		flushDuration:       flushScope.Timer("duration"),
 		flushStale:          flushScope.Counter("stale"),
-		flushBeforeDuration: scope.Timer("flush-before.duration"),
 		flushDiscarded:      flushScope.Counter("discarded"),
+		flush:               scope.Counter("flush"),
 		discardBefore:       scope.Counter("discard-before"),
+		flushDuration:       scope.Timer("flush.duration"),
+		flushBeforeDuration: scope.Timer("flush-before.duration"),
 	}
 }
 
-type flushType int
-
-const (
-	consumeType flushType = iota
-	discardType
-)
-
 type encodeFn func(mp aggregated.ChunkedMetricWithStoragePolicy) error
+type flushBeforeFn func(beforeNanos int64, flushType flushType)
 
 // metricList stores aggregated metrics at a given resolution
 // and flushes aggregations periodically.
@@ -93,6 +89,7 @@ type metricList struct {
 	encoderPool   msgpack.BufferedEncoderPool
 	resolution    time.Duration
 	flushInterval time.Duration
+	flushMgr      FlushManager
 
 	aggregations       *list.List
 	lastFlushedNanos   int64
@@ -100,6 +97,7 @@ type metricList struct {
 	toCollect          []*list.Element
 	closed             bool
 	encodeFn           encodeFn
+	flushBeforeFn      flushBeforeFn
 	consumeAggMetricFn aggMetricFn
 	discardAggMetricFn aggMetricFn
 	metrics            metricListMetrics
@@ -131,16 +129,16 @@ func newMetricList(shard uint32, resolution time.Duration, opts Options) *metric
 		encoderPool:   encoderPool,
 		resolution:    resolution,
 		flushInterval: flushInterval,
+		flushMgr:      opts.FlushManager(),
 		aggregations:  list.New(),
 		encoder:       msgpack.NewAggregatedEncoder(encoder),
 		metrics:       newMetricListMetrics(scope),
 	}
 	l.encodeFn = l.encoder.EncodeChunkedMetricWithStoragePolicy
+	l.flushBeforeFn = l.flushBefore
 	l.consumeAggMetricFn = l.consumeAggregatedMetric
 	l.discardAggMetricFn = l.discardAggregatedMetric
-
-	flushMgr := opts.FlushManager()
-	flushMgr.Register(l)
+	l.flushMgr.Register(l)
 
 	return l
 }
@@ -182,34 +180,37 @@ func (l *metricList) PushBack(value interface{}) (*list.Element, error) {
 // Close closes the list.
 func (l *metricList) Close() {
 	l.Lock()
-	defer l.Unlock()
-
 	if l.closed {
+		l.Unlock()
 		return
 	}
 	l.closed = true
+	l.Unlock()
+
+	// Unregisters the list outside the list lock to avoid holding the list lock
+	// while attempting to acquire the flush manager lock potentially causing a
+	// deadlock.
+	if err := l.flushMgr.Unregister(l); err != nil {
+		l.log.Errorf("error unregistering list: %v", err)
+	}
 }
 
-func (l *metricList) Flush() {
-	flushStart := l.nowFn()
-
-	// NB(xichen): it is important to determine ticking start time within the time lock
-	// because this ensures all the actions before `start` have completed if those actions
-	// are protected by the same read lock.
-	l.timeLock.Lock()
-	consumeStart := l.nowFn()
-	resolution := l.resolution
-	l.timeLock.Unlock()
-	alignedStartNanos := consumeStart.Truncate(resolution).UnixNano()
-	l.flushBefore(alignedStartNanos, consumeType)
-
-	flushDuration := l.nowFn().Sub(flushStart)
-	l.metrics.flushDuration.Record(flushDuration)
+func (l *metricList) Flush(cutoverNanos, cutoffNanos int64) {
+	start := l.nowFn()
+	alignedNowNanos := l.alignedNowNanos()
+	if alignedNowNanos > cutoverNanos && alignedNowNanos <= cutoffNanos {
+		l.flushBeforeFn(alignedNowNanos, consumeType)
+	} else {
+		l.flushBeforeFn(alignedNowNanos, discardType)
+	}
+	took := l.nowFn().Sub(start)
+	l.metrics.flushDuration.Record(took)
+	l.metrics.flush.Inc(1)
 }
 
 func (l *metricList) DiscardBefore(beforeNanos int64) {
+	l.flushBeforeFn(beforeNanos, discardType)
 	l.metrics.discardBefore.Inc(1)
-	l.flushBefore(beforeNanos, discardType)
 }
 
 func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
@@ -267,6 +268,18 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 	l.metrics.flushCollected.Inc(int64(numCollected))
 	flushBeforeDuration := l.nowFn().Sub(flushBeforeStart)
 	l.metrics.flushBeforeDuration.Record(flushBeforeDuration)
+}
+
+func (l *metricList) alignedNowNanos() int64 {
+	// NB(xichen): it is important to determine ticking start time within the time lock
+	// because this ensures all the actions before `now` have completed if those actions
+	// are protected by the same read lock.
+	l.timeLock.Lock()
+	now := l.nowFn()
+	resolution := l.resolution
+	l.timeLock.Unlock()
+	alignedNowNanos := now.Truncate(resolution).UnixNano()
+	return alignedNowNanos
 }
 
 func (l *metricList) consumeAggregatedMetric(

@@ -21,12 +21,11 @@
 package aggregator
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 
 	schema "github.com/m3db/m3aggregator/generated/proto/flush"
-	"github.com/m3db/m3cluster/kv/mem"
+	"github.com/m3db/m3cluster/shard"
 
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
@@ -204,57 +203,7 @@ func TestLeaderFlushManagerOnBucketAdded(t *testing.T) {
 	require.Equal(t, flushMetadataHeap(expectedFlushTimes), mgr.flushTimes)
 }
 
-func TestLeaderFlushTaskRun(t *testing.T) {
-	var flushed int32
-	flushers := []PeriodicFlusher{
-		&mockFlusher{
-			flushFn: func() { atomic.AddInt32(&flushed, 1) },
-		},
-		&mockFlusher{
-			flushFn: func() { atomic.AddInt32(&flushed, 1) },
-		},
-	}
-	flushTimes := &schema.ShardSetFlushTimes{
-		ByShard: map[uint32]*schema.ShardFlushTimes{
-			0: &schema.ShardFlushTimes{
-				ByResolution: map[int64]int64{
-					1000000000:  1000,
-					60000000000: 1200,
-				},
-			},
-		},
-	}
-	store := mem.NewStore()
-	opts := NewFlushManagerOptions().
-		SetJitterEnabled(false).
-		SetFlushTimesStore(store).
-		SetFlushTimesPersistEvery(time.Second)
-	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
-	mgr.flushTimesKey = "flushTimes"
-
-	flushTask := &leaderFlushTask{
-		mgr:           mgr,
-		shouldFlush:   true,
-		duration:      tally.NoopScope.Timer("foo"),
-		flushers:      flushers,
-		shouldPersist: true,
-		flushTimes:    flushTimes,
-	}
-	flushTask.Run()
-	require.Equal(t, int32(2), flushed)
-	for {
-		v, err := store.Get(mgr.flushTimesKey)
-		if err == nil {
-			var actual schema.ShardSetFlushTimes
-			require.NoError(t, v.Unmarshal(&actual))
-			require.Equal(t, *flushTimes, actual)
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-func TestComputeNextFlushNanosJitterDisabled(t *testing.T) {
+func TestLeaderFlushManagerComputeNextFlushNanosJitterDisabled(t *testing.T) {
 	now := time.Unix(1234, 0)
 	nowFn := func() time.Time { return now }
 	opts := NewFlushManagerOptions().
@@ -274,7 +223,7 @@ func TestComputeNextFlushNanosJitterDisabled(t *testing.T) {
 	}
 }
 
-func TestComputeNextFlushNanosJitterEnabled(t *testing.T) {
+func TestLeaderFlushManagerComputeNextFlushNanosJitterEnabled(t *testing.T) {
 	now := time.Unix(1234, 0)
 	nowFn := func() time.Time { return now }
 	maxJitterFn := func(interval time.Duration) time.Duration {
@@ -297,5 +246,152 @@ func TestComputeNextFlushNanosJitterEnabled(t *testing.T) {
 		{interval: time.Minute, expectedNanos: time.Unix(1275, 0).UnixNano()},
 	} {
 		require.Equal(t, input.expectedNanos, mgr.computeNextFlushNanos(input.interval))
+	}
+}
+
+func TestLeaderFlushManagerOwnedShardsInstanceNotFound(t *testing.T) {
+	nonExistentID := "nonexistent"
+	watcher, _ := testPlacementWatcherWithNumShards(t, testInstanceID, 4, testPlacementKey)
+	opts := NewFlushManagerOptions().
+		SetInstanceID(nonExistentID).
+		SetJitterEnabled(false).
+		SetStagedPlacementWatcher(watcher)
+	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
+	_, err := mgr.ownedShards()
+	require.Equal(t, errInstanceNotFoundInPlacement, err)
+}
+
+func TestLeaderFlushTaskRunInstanceNotFoundInPlacement(t *testing.T) {
+	var (
+		cutoverNanosRes *int64
+		cutoffNanosRes  *int64
+	)
+	flushers := []PeriodicFlusher{
+		&mockFlusher{
+			shard: 0,
+			flushFn: func(cutoverNanos, cutoffNanos int64) {
+				cutoverNanosRes = &cutoverNanos
+				cutoffNanosRes = &cutoffNanos
+			},
+		},
+	}
+
+	watcher, _ := testPlacementWatcherWithNumShards(t, testInstanceID, 2, testPlacementKey)
+	opts := NewFlushManagerOptions().SetStagedPlacementWatcher(watcher)
+	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
+	mgr.instanceID = "nonexistent"
+	flushTask := &leaderFlushTask{
+		mgr:           mgr,
+		shouldFlush:   true,
+		duration:      tally.NoopScope.Timer("foo"),
+		flushers:      flushers,
+		shouldPersist: false,
+	}
+
+	flushTask.Run()
+	require.Nil(t, cutoverNanosRes)
+	require.Nil(t, cutoffNanosRes)
+}
+
+func TestLeaderFlushTaskRunShardNotFound(t *testing.T) {
+	var (
+		cutoverNanosRes *int64
+		cutoffNanosRes  *int64
+	)
+	flushers := []PeriodicFlusher{
+		&mockFlusher{
+			shard: 2,
+			flushFn: func(cutoverNanos, cutoffNanos int64) {
+				cutoverNanosRes = &cutoverNanos
+				cutoffNanosRes = &cutoffNanos
+			},
+		},
+	}
+
+	watcher, _ := testPlacementWatcherWithNumShards(t, testInstanceID, 2, testPlacementKey)
+	opts := NewFlushManagerOptions().
+		SetInstanceID(testInstanceID).
+		SetStagedPlacementWatcher(watcher)
+	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
+	flushTask := &leaderFlushTask{
+		mgr:           mgr,
+		shouldFlush:   true,
+		duration:      tally.NoopScope.Timer("foo"),
+		flushers:      flushers,
+		shouldPersist: false,
+	}
+
+	flushTask.Run()
+	require.Equal(t, int64(0), *cutoverNanosRes)
+	require.Equal(t, int64(0), *cutoffNanosRes)
+}
+
+func TestLeaderFlushTaskRunWithPersist(t *testing.T) {
+	var (
+		cutoverNanosRes = make([]int64, 2)
+		cutoffNanosRes  = make([]int64, 2)
+	)
+	flushers := []PeriodicFlusher{
+		&mockFlusher{
+			shard: 0,
+			flushFn: func(cutoverNanos, cutoffNanos int64) {
+				cutoverNanosRes[0] = cutoverNanos
+				cutoffNanosRes[0] = cutoffNanos
+			},
+		},
+		&mockFlusher{
+			shard: 1,
+			flushFn: func(cutoverNanos, cutoffNanos int64) {
+				cutoverNanosRes[1] = cutoverNanos
+				cutoffNanosRes[1] = cutoffNanos
+			},
+		},
+	}
+	flushTimes := &schema.ShardSetFlushTimes{
+		ByShard: map[uint32]*schema.ShardFlushTimes{
+			0: &schema.ShardFlushTimes{
+				ByResolution: map[int64]int64{
+					1000000000:  1000,
+					60000000000: 1200,
+				},
+			},
+		},
+	}
+
+	shardAssignment := []shard.Shard{
+		shard.NewShard(0).SetState(shard.Initializing).SetCutoverNanos(5000).SetCutoffNanos(20000),
+		shard.NewShard(1).SetState(shard.Initializing).SetCutoverNanos(5500).SetCutoffNanos(25000),
+	}
+	stagedPlacementProto := testStagedPlacementProtoWithCustomShards(t, testInstanceID, shardAssignment, 5678)
+	watcher, store := testPlacementWatcherWithPlacementProto(t, testPlacementKey, stagedPlacementProto)
+	opts := NewFlushManagerOptions().
+		SetJitterEnabled(false).
+		SetInstanceID(testInstanceID).
+		SetStagedPlacementWatcher(watcher).
+		SetFlushTimesStore(store).
+		SetFlushTimesPersistEvery(time.Second)
+	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
+	mgr.flushTimesKey = "flushTimes"
+	flushTask := &leaderFlushTask{
+		mgr:           mgr,
+		shouldFlush:   true,
+		duration:      tally.NoopScope.Timer("foo"),
+		flushers:      flushers,
+		shouldPersist: true,
+		flushTimes:    flushTimes,
+	}
+
+	flushTask.Run()
+	require.Equal(t, []int64{5000, 5500}, cutoverNanosRes)
+	require.Equal(t, []int64{20000, 25000}, cutoffNanosRes)
+	for {
+		v, err := store.Get(mgr.flushTimesKey)
+		if err == nil {
+			var actual schema.ShardSetFlushTimes
+			require.NoError(t, v.Unmarshal(&actual))
+			require.Equal(t, *flushTimes, actual)
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
