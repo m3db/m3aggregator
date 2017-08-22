@@ -98,11 +98,11 @@ var (
 )
 
 func TestLeaderFlushManagerOpen(t *testing.T) {
-	flushTimesKeyFmt := "/shardset/%s/flush"
+	flushTimesKeyFmt := "/shardset/%d/flush"
 	opts := NewFlushManagerOptions().SetFlushTimesKeyFmt(flushTimesKeyFmt)
 	mgr := newLeaderFlushManager(opts).(*leaderFlushManager)
 	mgr.Open(testShardSetID)
-	require.Equal(t, "/shardset/testShardSet/flush", mgr.flushTimesKey)
+	require.Equal(t, "/shardset/0/flush", mgr.flushTimesKey)
 }
 
 func TestLeaderFlushManagerInit(t *testing.T) {

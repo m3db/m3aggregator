@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	defaultElectionKeyFormat   = "/shardset/%s/lock"
+	defaultElectionKeyFormat   = "/shardset/%d/lock"
 	defaultChangeVerifyTimeout = 10 * time.Second
 )
 

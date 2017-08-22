@@ -102,7 +102,7 @@ func newLeaderFlushManager(opts FlushManagerOptions) roleBasedFlushManager {
 	return mgr
 }
 
-func (mgr *leaderFlushManager) Open(shardSetID string) {
+func (mgr *leaderFlushManager) Open(shardSetID uint32) {
 	mgr.Lock()
 	mgr.flushTimesKey = fmt.Sprintf(mgr.flushTimesKeyFmt, shardSetID)
 	mgr.Unlock()

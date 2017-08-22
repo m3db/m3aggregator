@@ -114,7 +114,7 @@ func newFollowerFlushManager(
 	return mgr
 }
 
-func (mgr *followerFlushManager) Open(shardSetID string) {
+func (mgr *followerFlushManager) Open(shardSetID uint32) {
 	mgr.Lock()
 	defer mgr.Unlock()
 

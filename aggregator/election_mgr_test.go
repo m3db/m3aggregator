@@ -456,7 +456,7 @@ func (s *mockLeaderService) Leader(electionID string) (string, error) {
 
 func (s *mockLeaderService) Close() error { return nil }
 
-type electionOpenFn func(shardSetID string) error
+type electionOpenFn func(shardSetID uint32) error
 type electionResignFn func(ctx context.Context) error
 
 type mockElectionManager struct {
@@ -467,7 +467,7 @@ type mockElectionManager struct {
 	resignFn      electionResignFn
 }
 
-func (m *mockElectionManager) Open(shardSetID string) error { return m.openFn(shardSetID) }
+func (m *mockElectionManager) Open(shardSetID uint32) error { return m.openFn(shardSetID) }
 func (m *mockElectionManager) ElectionState() ElectionState {
 	m.RLock()
 	state := m.electionState

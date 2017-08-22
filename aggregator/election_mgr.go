@@ -41,7 +41,7 @@ import (
 // ElectionManager manages leadership elections.
 type ElectionManager interface {
 	// Open opens the election manager for a given shard set.
-	Open(shardSetID string) error
+	Open(shardSetID uint32) error
 
 	// ElectionState returns the election state.
 	ElectionState() ElectionState
@@ -244,7 +244,7 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 	}
 }
 
-func (mgr *electionManager) Open(shardSetID string) error {
+func (mgr *electionManager) Open(shardSetID uint32) error {
 	mgr.Lock()
 	defer mgr.Unlock()
 
