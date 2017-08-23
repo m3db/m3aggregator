@@ -622,6 +622,7 @@ func (c electionConfiguration) NewElectionOptions() (services.ElectionOptions, e
 	return opts, nil
 }
 
+// TODO: move this to m3cluster.
 type serviceIDConfiguration struct {
 	Name        string `yaml:"name"`
 	Environment string `yaml:"environment"`

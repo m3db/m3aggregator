@@ -84,7 +84,7 @@ type flushTask interface {
 
 // roleBasedFlushManager manages flushing data based on their elected roles.
 type roleBasedFlushManager interface {
-	Open(shardSetID uint32)
+	Open(shardSetID uint32) error
 
 	Init(buckets []*flushBucket)
 
@@ -136,7 +136,7 @@ func NewFlushManager(opts FlushManagerOptions) FlushManager {
 
 	leaderMgrScope := scope.SubScope("leader")
 	leaderMgrInstrumentOpts := instrumentOpts.SetMetricsScope(leaderMgrScope)
-	leaderMgr := newLeaderFlushManager(opts.SetInstrumentOptions(leaderMgrInstrumentOpts))
+	leaderMgr := newLeaderFlushManager(doneCh, opts.SetInstrumentOptions(leaderMgrInstrumentOpts))
 
 	followerMgrScope := scope.SubScope("follower")
 	followerMgrInstrumentOpts := instrumentOpts.SetMetricsScope(followerMgrScope)
@@ -161,10 +161,13 @@ func (mgr *flushManager) Open(shardSetID uint32) error {
 	if mgr.state != flushManagerNotOpen {
 		return errFlushManagerAlreadyOpenOrClosed
 	}
+	if err := mgr.leaderMgr.Open(shardSetID); err != nil {
+		return err
+	}
+	if err := mgr.followerMgr.Open(shardSetID); err != nil {
+		return err
+	}
 	mgr.state = flushManagerOpen
-	mgr.leaderMgr.Open(shardSetID)
-	mgr.followerMgr.Open(shardSetID)
-
 	if mgr.checkEvery > 0 {
 		mgr.wgFlush.Add(1)
 		go mgr.flush()

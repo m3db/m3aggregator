@@ -63,8 +63,8 @@ const (
 var (
 	errElectionManagerAlreadyOpenOrClosed = errors.New("election manager is already open or closed")
 	errElectionManagerNotOpenOrClosed     = errors.New("election manager is not open or closed")
+	errElectionManagerAlreadyResigning    = errors.New("election manager is already resigning")
 	errLeaderNotChanged                   = errors.New("leader has not changed")
-	errResignActionAlreadyEnqueued        = errors.New("resign action already enqueued")
 )
 
 type electionManagerState int
@@ -183,10 +183,6 @@ type goalState struct {
 	state ElectionState
 }
 
-type resignAction struct {
-	errCh chan error
-}
-
 type electionManager struct {
 	sync.RWMutex
 
@@ -209,7 +205,7 @@ type electionManager struct {
 	goalStateLock          sync.Mutex
 	nextGoalStateID        int64
 	goalStateWatchable     xwatch.Watchable
-	resignCh               chan resignAction
+	resigning              bool
 	sleepFn                sleepFn
 	metrics                electionManagerMetrics
 }
@@ -238,7 +234,6 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		doneCh:                 make(chan struct{}),
 		electionStateWatchable: electionStateWatchable,
 		goalStateWatchable:     xwatch.NewWatchable(),
-		resignCh:               make(chan resignAction, 1),
 		sleepFn:                time.Sleep,
 		metrics:                newElectionManagerMetrics(instrumentOpts.MetricsScope()),
 	}
@@ -276,17 +271,39 @@ func (mgr *electionManager) ElectionState() ElectionState {
 }
 
 func (mgr *electionManager) Resign(ctx context.Context) error {
+	mgr.Lock()
+	if mgr.state != electionManagerOpen {
+		mgr.Unlock()
+		return errElectionManagerNotOpenOrClosed
+	}
+	if mgr.resigning {
+		mgr.Unlock()
+		return errElectionManagerAlreadyResigning
+	}
+	if mgr.ElectionState() == FollowerState {
+		mgr.Unlock()
+		mgr.metrics.followerResign.Inc(1)
+		return nil
+	}
+	mgr.resigning = true
+	mgr.Unlock()
+
+	defer func() {
+		mgr.Lock()
+		mgr.resigning = false
+		mgr.Unlock()
+	}()
+
 	_, watch, err := mgr.electionStateWatchable.Watch()
 	if err != nil {
 		return fmt.Errorf("error creating watch when resigning: %v", err)
 	}
 	defer watch.Close()
 
-	resignAction := resignAction{errCh: make(chan error, 1)}
-	select {
-	case mgr.resignCh <- resignAction:
-	default:
-		return errResignActionAlreadyEnqueued
+	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
+		mgr.metrics.resignErrors.Inc(1)
+		mgr.logError("resign error", err)
+		return err
 	}
 
 	for {
@@ -299,10 +316,6 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 			mgr.metrics.resignTimeout.Inc(1)
 			mgr.logError("resign error", ctx.Err())
 			return ctx.Err()
-		case err := <-resignAction.errCh:
-			mgr.metrics.resignErrors.Inc(1)
-			mgr.logError("resign error", err)
-			return err
 		}
 	}
 }
@@ -328,8 +341,6 @@ func (mgr *electionManager) watchGoalStateChanges(watch xwatch.Watch) {
 			return
 		case <-watch.C():
 			mgr.processGoalState(watch.Get().(goalState))
-		case action := <-mgr.resignCh:
-			mgr.resign(action)
 		}
 	}
 }
@@ -425,26 +436,6 @@ func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
 			mgr.setGoalStateWithLock(FollowerState)
 		}
 		mgr.goalStateLock.Unlock()
-	}
-}
-
-func (mgr *electionManager) resign(action resignAction) {
-	mgr.RLock()
-	if mgr.state != electionManagerOpen {
-		action.errCh <- errElectionManagerNotOpenOrClosed
-		mgr.RUnlock()
-		return
-	}
-	mgr.RUnlock()
-
-	if mgr.ElectionState() == FollowerState {
-		mgr.metrics.followerResign.Inc(1)
-		action.errCh <- nil
-		return
-	}
-
-	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
-		action.errCh <- err
 	}
 }
 

@@ -111,6 +111,12 @@ func TestElectionManagerElectionState(t *testing.T) {
 	require.Equal(t, LeaderState, mgr.ElectionState())
 }
 
+func TestElectionManagerResignAlreadyClosed(t *testing.T) {
+	opts := testElectionManagerOptions(t)
+	mgr := NewElectionManager(opts).(*electionManager)
+	require.Equal(t, errElectionManagerNotOpenOrClosed, mgr.Resign(context.Background()))
+}
+
 func TestElectionManagerResignAlreadyResigning(t *testing.T) {
 	leaderService := &mockLeaderService{
 		campaignFn: func(
@@ -122,8 +128,9 @@ func TestElectionManagerResignAlreadyResigning(t *testing.T) {
 	}
 	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
 	mgr := NewElectionManager(opts).(*electionManager)
-	mgr.resignCh <- resignAction{}
-	require.Equal(t, errResignActionAlreadyEnqueued, mgr.Resign(context.Background()))
+	require.NoError(t, mgr.Open(testShardSetID))
+	mgr.resigning = true
+	require.Equal(t, errElectionManagerAlreadyResigning, mgr.Resign(context.Background()))
 }
 
 func TestElectionManagerResignLeaderServiceResignError(t *testing.T) {
@@ -146,6 +153,7 @@ func TestElectionManagerResignLeaderServiceResignError(t *testing.T) {
 	require.NoError(t, mgr.Open(testShardSetID))
 	require.Error(t, mgr.Resign(context.Background()))
 	require.Equal(t, electionManagerOpen, mgr.state)
+	require.False(t, mgr.resigning)
 	require.NoError(t, mgr.Close())
 }
 
