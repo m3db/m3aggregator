@@ -114,13 +114,14 @@ func newFollowerFlushManager(
 	return mgr
 }
 
-func (mgr *followerFlushManager) Open(shardSetID string) {
+func (mgr *followerFlushManager) Open(shardSetID uint32) error {
 	mgr.Lock()
 	defer mgr.Unlock()
 
 	mgr.flushTimesKey = fmt.Sprintf(mgr.flushTimesKeyFmt, shardSetID)
 	mgr.openedAt = mgr.nowFn()
 	go mgr.watchFlushTimes()
+	return nil
 }
 
 // NB(xichen): no actions needed for initializing the follower flush manager.

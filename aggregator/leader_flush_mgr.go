@@ -33,6 +33,7 @@ import (
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/sync"
+	"github.com/m3db/m3x/watch"
 
 	"github.com/uber-go/tally"
 )
@@ -66,17 +67,22 @@ type leaderFlushManager struct {
 	logger                   xlog.Logger
 	scope                    tally.Scope
 
+	doneCh              <-chan struct{}
 	rand                *rand.Rand
 	randFn              randFn
 	flushTimes          flushMetadataHeap
 	flushTimesKey       string
 	lastPersistAtNanos  int64
 	flushedSincePersist bool
+	persistWatchable    xwatch.Watchable
 	flushTask           *leaderFlushTask
 	metrics             leaderFlushManagerMetrics
 }
 
-func newLeaderFlushManager(opts FlushManagerOptions) roleBasedFlushManager {
+func newLeaderFlushManager(
+	doneCh <-chan struct{},
+	opts FlushManagerOptions,
+) roleBasedFlushManager {
 	nowFn := opts.ClockOptions().NowFn()
 	rand := rand.New(rand.NewSource(nowFn().UnixNano()))
 	instrumentOpts := opts.InstrumentOptions()
@@ -93,19 +99,29 @@ func newLeaderFlushManager(opts FlushManagerOptions) roleBasedFlushManager {
 		flushTimesPersistRetrier: opts.FlushTimesPersistRetrier(),
 		logger:             instrumentOpts.Logger(),
 		scope:              scope,
+		doneCh:             doneCh,
 		rand:               rand,
 		randFn:             rand.Int63n,
 		lastPersistAtNanos: nowFn().UnixNano(),
+		persistWatchable:   xwatch.NewWatchable(),
 		metrics:            newLeaderFlushManagerMetrics(scope),
 	}
 	mgr.flushTask = &leaderFlushTask{mgr: mgr}
 	return mgr
 }
 
-func (mgr *leaderFlushManager) Open(shardSetID string) {
+func (mgr *leaderFlushManager) Open(shardSetID uint32) error {
 	mgr.Lock()
 	mgr.flushTimesKey = fmt.Sprintf(mgr.flushTimesKeyFmt, shardSetID)
 	mgr.Unlock()
+
+	_, flushTimesWatch, err := mgr.persistWatchable.Watch()
+	if err != nil {
+		return err
+	}
+	go mgr.persistFlushTimes(flushTimesWatch)
+
+	return nil
 }
 
 // Init initializes the leader flush manager by enqueuing all
@@ -159,26 +175,21 @@ func (mgr *leaderFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.
 	}
 
 	var (
-		shouldPersist = false
-		flushTimes    schema.ShardSetFlushTimes
+		flushTimes               schema.ShardSetFlushTimes
+		durationSinceLastPersist = time.Duration(nowNanos - mgr.lastPersistAtNanos)
 	)
-	durationSinceLastPersist := time.Duration(nowNanos - mgr.lastPersistAtNanos)
 	if mgr.flushedSincePersist && durationSinceLastPersist >= mgr.flushTimesPersistEvery {
-		shouldPersist = true
-		waitFor = 0
 		mgr.lastPersistAtNanos = nowNanos
 		mgr.flushedSincePersist = false
 		flushTimes = mgr.prepareFlushTimesWithLock(buckets)
+		mgr.persistWatchable.Update(&flushTimes)
 	}
 
-	if !shouldFlush && !shouldPersist {
+	if !shouldFlush {
 		return nil, waitFor
 	}
-	mgr.flushTask.shouldFlush = shouldFlush
 	mgr.flushTask.duration = duration
 	mgr.flushTask.flushers = flushers
-	mgr.flushTask.shouldPersist = shouldPersist
-	mgr.flushTask.flushTimes = &flushTimes
 	return mgr.flushTask, waitFor
 }
 
@@ -248,54 +259,46 @@ func (mgr *leaderFlushManager) prepareFlushTimesWithLock(
 	return proto
 }
 
-func (mgr *leaderFlushManager) persistFlushTimes(flushTimes *schema.ShardSetFlushTimes) {
-	persistStart := mgr.nowFn()
-	persistErr := mgr.flushTimesPersistRetrier.Attempt(func() error {
-		_, err := mgr.flushTimesStore.Set(mgr.flushTimesKey, flushTimes)
-		return err
-	})
-	mgr.metrics.flushTimesPersist.ReportSuccessOrError(persistErr, mgr.nowFn().Sub(persistStart))
+func (mgr *leaderFlushManager) persistFlushTimes(flushTimesWatch xwatch.Watch) {
+	for {
+		select {
+		case <-mgr.doneCh:
+			return
+		case <-flushTimesWatch.C():
+			flushTimes := flushTimesWatch.Get().(*schema.ShardSetFlushTimes)
+			persistStart := mgr.nowFn()
+			persistErr := mgr.flushTimesPersistRetrier.Attempt(func() error {
+				_, err := mgr.flushTimesStore.Set(mgr.flushTimesKey, flushTimes)
+				return err
+			})
+			mgr.metrics.flushTimesPersist.ReportSuccessOrError(persistErr, mgr.nowFn().Sub(persistStart))
+		}
+	}
 }
 
 func (mgr *leaderFlushManager) nowNanos() int64 { return mgr.nowFn().UnixNano() }
 
 type leaderFlushTask struct {
-	mgr           *leaderFlushManager
-	shouldFlush   bool
-	duration      tally.Timer
-	flushers      []PeriodicFlusher
-	shouldPersist bool
-	flushTimes    *schema.ShardSetFlushTimes
+	mgr      *leaderFlushManager
+	duration tally.Timer
+	flushers []PeriodicFlusher
 }
 
 func (t *leaderFlushTask) Run() {
 	mgr := t.mgr
 
-	// NB(xichen): we intentionally do not use the worker pool as persistence could be
-	// done asynchronously to avoid blocking the workers reserved for flushing. In theory
-	// if the persistence takes a long to finish, there is a chance two goroutines may
-	// persist flush times at the same time. However in practice this is okay because kv
-	// persistence is fast so this rarely if at all happens. And even if it happens, the
-	// impact is that the follower may flush less data than it optimally could but that
-	// does not affect the correctness of the system.
-	if t.shouldPersist {
-		go mgr.persistFlushTimes(t.flushTimes)
+	var wgWorkers sync.WaitGroup
+	start := mgr.nowFn()
+	for _, flusher := range t.flushers {
+		flusher := flusher
+		wgWorkers.Add(1)
+		mgr.workers.Go(func() {
+			flusher.Flush()
+			wgWorkers.Done()
+		})
 	}
-
-	if t.shouldFlush {
-		var wgWorkers sync.WaitGroup
-		start := mgr.nowFn()
-		for _, flusher := range t.flushers {
-			flusher := flusher
-			wgWorkers.Add(1)
-			mgr.workers.Go(func() {
-				flusher.Flush()
-				wgWorkers.Done()
-			})
-		}
-		wgWorkers.Wait()
-		t.duration.Record(mgr.nowFn().Sub(start))
-	}
+	wgWorkers.Wait()
+	t.duration.Record(mgr.nowFn().Sub(start))
 }
 
 // flushMetadata contains metadata information for a flush.

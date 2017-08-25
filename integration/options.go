@@ -36,9 +36,9 @@ const (
 	defaultInstanceID                 = "localhost:6000"
 	defaultNumShards                  = 1024
 	defaultPlacementKVKey             = "/placement"
-	defaultElectionKeyFmt             = "/shardset/%s/lock"
-	defaultFlushTimesKeyFmt           = "/shardset/%s/flush"
-	defaultShardSetID                 = "0"
+	defaultElectionKeyFmt             = "/shardset/%d/lock"
+	defaultFlushTimesKeyFmt           = "/shardset/%d/flush"
+	defaultShardSetID                 = 0
 	defaultElectionStateChangeTimeout = time.Second
 	defaultJitterEnabled              = true
 )
@@ -81,10 +81,10 @@ type testOptions interface {
 	ElectionKeyFmt() string
 
 	// SetShardSetID sets the shard set id.
-	SetShardSetID(value string) testOptions
+	SetShardSetID(value uint32) testOptions
 
 	// ShardSetID returns the shard set id.
-	ShardSetID() string
+	ShardSetID() uint32
 
 	// SetFlushTimesKeyFmt sets the flush times key format.
 	SetFlushTimesKeyFmt(value string) testOptions
@@ -148,7 +148,7 @@ type options struct {
 	numShards                  int
 	placementKVKey             string
 	electionKeyFmt             string
-	shardSetID                 string
+	shardSetID                 uint32
 	flushTimesKeyFmt           string
 	kvStore                    kv.Store
 	serverStateChangeTimeout   time.Duration
@@ -239,13 +239,13 @@ func (o *options) ElectionKeyFmt() string {
 	return o.electionKeyFmt
 }
 
-func (o *options) SetShardSetID(value string) testOptions {
+func (o *options) SetShardSetID(value uint32) testOptions {
 	opts := *o
 	opts.shardSetID = value
 	return &opts
 }
 
-func (o *options) ShardSetID() string {
+func (o *options) ShardSetID() uint32 {
 	return o.shardSetID
 }
 

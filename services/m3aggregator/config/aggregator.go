@@ -548,13 +548,12 @@ func (t shardFnType) ShardFn() (aggregator.ShardFn, error) {
 }
 
 type electionManagerConfiguration struct {
-	Election            electionConfiguration  `yaml:"election"`
-	ServiceID           serviceIDConfiguration `yaml:"serviceID"`
-	LeaderValue         string                 `yaml:"leaderValue"`
-	ElectionKeyFmt      string                 `yaml:"electionKeyFmt" validate:"nonzero"`
-	CampaignRetrier     xretry.Configuration   `yaml:"campaignRetrier"`
-	ChangeRetrier       xretry.Configuration   `yaml:"changeRetrier"`
-	ChangeVerifyTimeout time.Duration          `yaml:"changeVerifyTimeout"`
+	Election        electionConfiguration  `yaml:"election"`
+	ServiceID       serviceIDConfiguration `yaml:"serviceID"`
+	LeaderValue     string                 `yaml:"leaderValue"`
+	ElectionKeyFmt  string                 `yaml:"electionKeyFmt" validate:"nonzero"`
+	CampaignRetrier xretry.Configuration   `yaml:"campaignRetrier"`
+	ChangeRetrier   xretry.Configuration   `yaml:"changeRetrier"`
 }
 
 func (c electionManagerConfiguration) NewElectionManager(
@@ -595,9 +594,6 @@ func (c electionManagerConfiguration) NewElectionManager(
 		SetChangeRetryOptions(changeRetryOpts).
 		SetElectionKeyFmt(c.ElectionKeyFmt).
 		SetLeaderService(leaderService)
-	if c.ChangeVerifyTimeout != 0 {
-		opts = opts.SetChangeVerifyTimeout(c.ChangeVerifyTimeout)
-	}
 	electionManager := aggregator.NewElectionManager(opts)
 	return electionManager, nil
 }
@@ -622,6 +618,7 @@ func (c electionConfiguration) NewElectionOptions() (services.ElectionOptions, e
 	return opts, nil
 }
 
+// TODO: move this to m3cluster.
 type serviceIDConfiguration struct {
 	Name        string `yaml:"name"`
 	Environment string `yaml:"environment"`
@@ -740,7 +737,7 @@ func (buckets jitterBuckets) NewMaxJitterFn() (aggregator.FlushJitterFn, error) 
 		if idx == numBuckets {
 			idx--
 		}
-		return time.Duration(res[idx].MaxJitterPercent * float64(res[idx].FlushInterval))
+		return time.Duration(res[idx].MaxJitterPercent * float64(interval))
 	}, nil
 }
 

@@ -39,7 +39,7 @@ const (
 
 var (
 	defaultWorkerPoolSize         = int(math.Max(float64(runtime.NumCPU()/8), 1.0))
-	defaultFlushTimesKeyFormat    = "/shardset/%s/flush"
+	defaultFlushTimesKeyFormat    = "/shardset/%d/flush"
 	defaultFlushTimesPersistEvery = 10 * time.Second
 	defaultMaxNoFlushDuration     = 15 * time.Minute
 	defaultForcedFlushWindowSize  = 10 * time.Second

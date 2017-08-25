@@ -59,7 +59,7 @@ type PeriodicFlusher interface {
 // for flushes to minimize spikes in CPU load and reduce p99 flush latencies.
 type FlushManager interface {
 	// Open opens the flush manager for a given shard set.
-	Open(shardSetID string) error
+	Open(shardSetID uint32) error
 
 	// Status returns the flush status.
 	Status() FlushStatus
@@ -84,7 +84,7 @@ type flushTask interface {
 
 // roleBasedFlushManager manages flushing data based on their elected roles.
 type roleBasedFlushManager interface {
-	Open(shardSetID string)
+	Open(shardSetID uint32) error
 
 	Init(buckets []*flushBucket)
 
@@ -136,7 +136,7 @@ func NewFlushManager(opts FlushManagerOptions) FlushManager {
 
 	leaderMgrScope := scope.SubScope("leader")
 	leaderMgrInstrumentOpts := instrumentOpts.SetMetricsScope(leaderMgrScope)
-	leaderMgr := newLeaderFlushManager(opts.SetInstrumentOptions(leaderMgrInstrumentOpts))
+	leaderMgr := newLeaderFlushManager(doneCh, opts.SetInstrumentOptions(leaderMgrInstrumentOpts))
 
 	followerMgrScope := scope.SubScope("follower")
 	followerMgrInstrumentOpts := instrumentOpts.SetMetricsScope(followerMgrScope)
@@ -154,17 +154,20 @@ func NewFlushManager(opts FlushManagerOptions) FlushManager {
 	}
 }
 
-func (mgr *flushManager) Open(shardSetID string) error {
+func (mgr *flushManager) Open(shardSetID uint32) error {
 	mgr.Lock()
 	defer mgr.Unlock()
 
 	if mgr.state != flushManagerNotOpen {
 		return errFlushManagerAlreadyOpenOrClosed
 	}
+	if err := mgr.leaderMgr.Open(shardSetID); err != nil {
+		return err
+	}
+	if err := mgr.followerMgr.Open(shardSetID); err != nil {
+		return err
+	}
 	mgr.state = flushManagerOpen
-	mgr.leaderMgr.Open(shardSetID)
-	mgr.followerMgr.Open(shardSetID)
-
 	if mgr.checkEvery > 0 {
 		mgr.wgFlush.Add(1)
 		go mgr.flush()

@@ -31,7 +31,7 @@ import (
 )
 
 func TestFollowerFlushManagerOpen(t *testing.T) {
-	flushTimesKeyFmt := "/shardset/%s/flush"
+	flushTimesKeyFmt := "/shardset/%d/flush"
 	store := mem.NewStore()
 	doneCh := make(chan struct{})
 	opts := NewFlushManagerOptions().
@@ -39,7 +39,7 @@ func TestFollowerFlushManagerOpen(t *testing.T) {
 		SetFlushTimesStore(store)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
 	mgr.Open(testShardSetID)
-	require.Equal(t, "/shardset/testShardSet/flush", mgr.flushTimesKey)
+	require.Equal(t, "/shardset/0/flush", mgr.flushTimesKey)
 
 	_, err := store.Set(mgr.flushTimesKey, testFlushTimes)
 	require.NoError(t, err)
