@@ -45,22 +45,22 @@ var (
 					"placement_instance1": &schema.Instance{
 						Id:         "placement_instance1",
 						Endpoint:   "placement_instance1_endpoint",
-						ShardSetId: "0",
+						ShardSetId: 0,
 					},
 					"placement_instance2": &schema.Instance{
 						Id:         "placement_instance2",
 						Endpoint:   "placement_instance2_endpoint",
-						ShardSetId: "0",
+						ShardSetId: 0,
 					},
 					"placement_instance3": &schema.Instance{
 						Id:         "placement_instance3",
 						Endpoint:   "placement_instance3_endpoint",
-						ShardSetId: "1",
+						ShardSetId: 1,
 					},
 					"placement_instance4": &schema.Instance{
 						Id:         "placement_instance4",
 						Endpoint:   "placement_instance4_endpoint",
-						ShardSetId: "1",
+						ShardSetId: 1,
 					},
 				},
 			},
@@ -70,19 +70,19 @@ var (
 		placement.NewInstance().
 			SetID("placement_instance1").
 			SetEndpoint("placement_instance1_endpoint").
-			SetShardSetID("0"),
+			SetShardSetID(0),
 		placement.NewInstance().
 			SetID("placement_instance2").
 			SetEndpoint("placement_instance2_endpoint").
-			SetShardSetID("0"),
+			SetShardSetID(0),
 		placement.NewInstance().
 			SetID("placement_instance3").
 			SetEndpoint("placement_instance3_endpoint").
-			SetShardSetID("1"),
+			SetShardSetID(1),
 		placement.NewInstance().
 			SetID("placement_instance4").
 			SetEndpoint("placement_instance4_endpoint").
-			SetShardSetID("1"),
+			SetShardSetID(1),
 	}
 	testMockInstances = []Instance{
 		&mockInstance{id: "deployment_instance1", revision: "revision1"},
@@ -94,28 +94,28 @@ var (
 		{
 			PlacementInstanceID:  "placement_instance1",
 			DeploymentInstanceID: "deployment_instance1",
-			ShardSetID:           "0",
+			ShardSetID:           0,
 			APIEndpoint:          "placement_instance1_endpoint",
 			Revision:             "revision1",
 		},
 		{
 			PlacementInstanceID:  "placement_instance2",
 			DeploymentInstanceID: "deployment_instance2",
-			ShardSetID:           "0",
+			ShardSetID:           0,
 			APIEndpoint:          "placement_instance2_endpoint",
 			Revision:             "revision2",
 		},
 		{
 			PlacementInstanceID:  "placement_instance3",
 			DeploymentInstanceID: "deployment_instance3",
-			ShardSetID:           "1",
+			ShardSetID:           1,
 			APIEndpoint:          "placement_instance3_endpoint",
 			Revision:             "revision3",
 		},
 		{
 			PlacementInstanceID:  "placement_instance4",
 			DeploymentInstanceID: "deployment_instance4",
-			ShardSetID:           "1",
+			ShardSetID:           1,
 			APIEndpoint:          "placement_instance4_endpoint",
 			Revision:             "revision4",
 		},

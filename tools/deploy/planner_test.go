@@ -37,41 +37,41 @@ var (
 	testInstancesToDeploy = instanceMetadatas{
 		instanceMetadata{
 			PlacementInstanceID: "instance1",
-			ShardSetID:          "0",
+			ShardSetID:          0,
 		},
 		instanceMetadata{
 			PlacementInstanceID: "instance2",
-			ShardSetID:          "0",
+			ShardSetID:          0,
 		},
 		instanceMetadata{
 			PlacementInstanceID: "instance3",
-			ShardSetID:          "1",
+			ShardSetID:          1,
 		},
 	}
 	testAllInstances = instanceMetadatas{
 		instanceMetadata{
 			PlacementInstanceID: "instance1",
-			ShardSetID:          "0",
+			ShardSetID:          0,
 		},
 		instanceMetadata{
 			PlacementInstanceID: "instance2",
-			ShardSetID:          "0",
+			ShardSetID:          0,
 		},
 		instanceMetadata{
 			PlacementInstanceID: "instance3",
-			ShardSetID:          "1",
+			ShardSetID:          1,
 		},
 		instanceMetadata{
 			PlacementInstanceID: "instance4",
-			ShardSetID:          "1",
+			ShardSetID:          1,
 		},
 	}
 )
 
 func TestGeneratePlan(t *testing.T) {
 	var validators []capturingValidator
-	electionIDForShardset0 := fmt.Sprintf(testElectionKeyFmt, "0")
-	electionIDForShardset1 := fmt.Sprintf(testElectionKeyFmt, "1")
+	electionIDForShardset0 := fmt.Sprintf(testElectionKeyFmt, 0)
+	electionIDForShardset1 := fmt.Sprintf(testElectionKeyFmt, 1)
 	leaderService := &mockLeaderService{
 		leaderFn: func(electionID string) (string, error) {
 			if electionID == electionIDForShardset0 {
@@ -121,7 +121,7 @@ func TestGeneratePlan(t *testing.T) {
 					{
 						Instance: instanceMetadata{
 							PlacementInstanceID: "instance2",
-							ShardSetID:          "0",
+							ShardSetID:          0,
 						},
 					},
 				},
@@ -131,13 +131,13 @@ func TestGeneratePlan(t *testing.T) {
 					{
 						Instance: instanceMetadata{
 							PlacementInstanceID: "instance1",
-							ShardSetID:          "0",
+							ShardSetID:          0,
 						},
 					},
 					{
 						Instance: instanceMetadata{
 							PlacementInstanceID: "instance3",
-							ShardSetID:          "1",
+							ShardSetID:          1,
 						},
 					},
 				},
@@ -149,8 +149,8 @@ func TestGeneratePlan(t *testing.T) {
 
 func TestGeneratePlanWithStepSizeLimit(t *testing.T) {
 	var validators []capturingValidator
-	electionIDForShardset0 := fmt.Sprintf(testElectionKeyFmt, "0")
-	electionIDForShardset1 := fmt.Sprintf(testElectionKeyFmt, "1")
+	electionIDForShardset0 := fmt.Sprintf(testElectionKeyFmt, 0)
+	electionIDForShardset1 := fmt.Sprintf(testElectionKeyFmt, 1)
 	leaderService := &mockLeaderService{
 		leaderFn: func(electionID string) (string, error) {
 			if electionID == electionIDForShardset0 {
@@ -200,7 +200,7 @@ func TestGeneratePlanWithStepSizeLimit(t *testing.T) {
 			{
 				Instance: instanceMetadata{
 					PlacementInstanceID: "instance2",
-					ShardSetID:          "0",
+					ShardSetID:          0,
 				},
 			},
 		},
@@ -210,7 +210,7 @@ func TestGeneratePlanWithStepSizeLimit(t *testing.T) {
 			{
 				Instance: instanceMetadata{
 					PlacementInstanceID: "instance1",
-					ShardSetID:          "0",
+					ShardSetID:          0,
 				},
 			},
 		},
@@ -220,7 +220,7 @@ func TestGeneratePlanWithStepSizeLimit(t *testing.T) {
 			{
 				Instance: instanceMetadata{
 					PlacementInstanceID: "instance3",
-					ShardSetID:          "1",
+					ShardSetID:          1,
 				},
 			},
 		},
@@ -236,8 +236,8 @@ func TestGeneratePlanWithStepSizeLimit(t *testing.T) {
 }
 
 func TestGroupInstancesByShardSetID(t *testing.T) {
-	electionIDForShardset0 := fmt.Sprintf(testElectionKeyFmt, "0")
-	electionIDForShardset1 := fmt.Sprintf(testElectionKeyFmt, "1")
+	electionIDForShardset0 := fmt.Sprintf(testElectionKeyFmt, 0)
+	electionIDForShardset1 := fmt.Sprintf(testElectionKeyFmt, 1)
 	leaderService := &mockLeaderService{
 		leaderFn: func(electionID string) (string, error) {
 			if electionID == electionIDForShardset0 {
@@ -256,46 +256,46 @@ func TestGroupInstancesByShardSetID(t *testing.T) {
 	group, err := planner.groupInstancesByShardSetID(testInstancesToDeploy, testAllInstances)
 	require.NoError(t, err)
 
-	expectedGroup := map[string]*instanceGroup{
-		"0": &instanceGroup{
+	expectedGroup := map[uint32]*instanceGroup{
+		0: &instanceGroup{
 			LeaderID: "instance1",
 			ToDeploy: instanceMetadatas{
 				instanceMetadata{
 					PlacementInstanceID: "instance1",
-					ShardSetID:          "0",
+					ShardSetID:          0,
 				},
 				instanceMetadata{
 					PlacementInstanceID: "instance2",
-					ShardSetID:          "0",
+					ShardSetID:          0,
 				},
 			},
 			All: instanceMetadatas{
 				instanceMetadata{
 					PlacementInstanceID: "instance1",
-					ShardSetID:          "0",
+					ShardSetID:          0,
 				},
 				instanceMetadata{
 					PlacementInstanceID: "instance2",
-					ShardSetID:          "0",
+					ShardSetID:          0,
 				},
 			},
 		},
-		"1": &instanceGroup{
+		1: &instanceGroup{
 			LeaderID: "instance3",
 			ToDeploy: instanceMetadatas{
 				instanceMetadata{
 					PlacementInstanceID: "instance3",
-					ShardSetID:          "1",
+					ShardSetID:          1,
 				},
 			},
 			All: instanceMetadatas{
 				instanceMetadata{
 					PlacementInstanceID: "instance3",
-					ShardSetID:          "1",
+					ShardSetID:          1,
 				},
 				instanceMetadata{
 					PlacementInstanceID: "instance4",
-					ShardSetID:          "1",
+					ShardSetID:          1,
 				},
 			},
 		},

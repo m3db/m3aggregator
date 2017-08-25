@@ -403,7 +403,7 @@ type instanceMetadata struct {
 	DeploymentInstanceID string
 
 	// ShardSetID is the shard set id associated with the instance.
-	ShardSetID string
+	ShardSetID uint32
 
 	// APIEndpoint is the api endpoint for the instance.
 	APIEndpoint string

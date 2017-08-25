@@ -85,7 +85,7 @@ func (p deploymentPlanner) GenerateOneStep(
 }
 
 func (p deploymentPlanner) generatePlan(
-	instances map[string]*instanceGroup,
+	instances map[uint32]*instanceGroup,
 	numInstances int,
 	maxStepSize int,
 ) deploymentPlan {
@@ -103,7 +103,7 @@ func (p deploymentPlanner) generatePlan(
 }
 
 func (p deploymentPlanner) generateStep(
-	instances map[string]*instanceGroup,
+	instances map[uint32]*instanceGroup,
 	maxStepSize int,
 ) deploymentStep {
 	// NB(xichen): we always choose instances that are currently in the follower state first,
@@ -125,7 +125,7 @@ func (p deploymentPlanner) generateStep(
 }
 
 func (p deploymentPlanner) generateStepFromTargetType(
-	instances map[string]*instanceGroup,
+	instances map[uint32]*instanceGroup,
 	maxStepSize int,
 	targetType targetType,
 ) deploymentStep {
@@ -156,8 +156,8 @@ func (p deploymentPlanner) generateStepFromTargetType(
 
 func (p deploymentPlanner) groupInstancesByShardSetID(
 	toDeploy, all instanceMetadatas,
-) (map[string]*instanceGroup, error) {
-	grouped := make(map[string]*instanceGroup, len(toDeploy))
+) (map[uint32]*instanceGroup, error) {
+	grouped := make(map[uint32]*instanceGroup, len(toDeploy))
 
 	// Group the instances to be deployed by shard set id.
 	for _, instance := range toDeploy {
@@ -197,7 +197,7 @@ func (p deploymentPlanner) groupInstancesByShardSetID(
 			electionKey := fmt.Sprintf(p.electionKeyFmt, shardSetID)
 			leader, err := p.leaderService.Leader(electionKey)
 			if err != nil {
-				err = fmt.Errorf("unable to determine leader for shard set id %s: %v", shardSetID, err)
+				err = fmt.Errorf("unable to determine leader for shard set id %d: %v", shardSetID, err)
 				errCh <- err
 				return
 			}
@@ -207,7 +207,7 @@ func (p deploymentPlanner) groupInstancesByShardSetID(
 					return
 				}
 			}
-			err = fmt.Errorf("unknown leader %s for shard set id %s", leader, shardSetID)
+			err = fmt.Errorf("unknown leader %s for shard set id %d", leader, shardSetID)
 			errCh <- err
 		})
 	}
