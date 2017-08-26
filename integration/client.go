@@ -30,6 +30,7 @@ import (
 	"github.com/m3db/m3metrics/protocol/msgpack"
 )
 
+// nolint: megacheck
 type client struct {
 	address        string
 	batchSize      int
@@ -38,7 +39,8 @@ type client struct {
 	conn           net.Conn
 }
 
-func newClient(address string, batchSize int, connectTimeout time.Duration) *client {
+// nolint: megacheck
+func newClient(address string, batchSize int) *client {
 	return &client{
 		address:   address,
 		batchSize: batchSize,
