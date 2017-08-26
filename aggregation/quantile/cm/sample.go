@@ -33,7 +33,6 @@ func (s *Sample) reset() {
 }
 
 // setData sets sample data
-//
 // nolint: unparam
 func (s *Sample) setData(value float64, numRanks int64, delta int64) {
 	s.value = value

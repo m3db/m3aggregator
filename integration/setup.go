@@ -55,7 +55,6 @@ var (
 )
 
 // nowSetterFn is the function that sets the current time.
-//
 // nolint: megacheck
 type nowSetterFn func(t time.Time)
 
