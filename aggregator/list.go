@@ -331,12 +331,12 @@ func (l *metricList) consumeAggregatedMetric(
 
 // discardAggregatedMetric discards aggregated metrics.
 func (l *metricList) discardAggregatedMetric(
-	_ []byte,
-	_ metricID.RawID,
-	_ []byte,
-	_ int64,
-	_ float64,
-	_ policy.StoragePolicy,
+	[]byte,
+	metricID.RawID,
+	[]byte,
+	int64,
+	float64,
+	policy.StoragePolicy,
 ) {
 	l.metrics.flushDiscarded.Inc(1)
 }

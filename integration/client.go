@@ -40,11 +40,12 @@ type client struct {
 }
 
 // nolint: megacheck
-func newClient(address string, batchSize int) *client {
+func newClient(address string, batchSize int, connectTimeout time.Duration) *client {
 	return &client{
-		address:   address,
-		batchSize: batchSize,
-		encoder:   msgpack.NewUnaggregatedEncoder(msgpack.NewPooledBufferedEncoder(nil)),
+		address:        address,
+		batchSize:      batchSize,
+		connectTimeout: connectTimeout,
+		encoder:        msgpack.NewUnaggregatedEncoder(msgpack.NewPooledBufferedEncoder(nil)),
 	}
 }
 

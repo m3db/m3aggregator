@@ -55,7 +55,9 @@ var (
 )
 
 // nowSetterFn is the function that sets the current time.
-type nowSetterFn func(t time.Time) // nolint: megacheck
+//
+// nolint: megacheck
+type nowSetterFn func(t time.Time)
 
 // nolint: megacheck
 type testSetup struct {
@@ -226,7 +228,7 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 }
 
 func (ts *testSetup) newClient() *client {
-	return newClient(ts.msgpackAddr, ts.opts.ClientBatchSize())
+	return newClient(ts.msgpackAddr, ts.opts.ClientBatchSize(), ts.opts.ClientConnectTimeout())
 }
 
 func (ts *testSetup) waitUntilServerIsUp() error {
