@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Uber Technologies, Inc.
+// Copyright (c) 2017 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,23 +18,43 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package integration
+package config
 
 import (
+	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	yaml "gopkg.in/yaml.v2"
 )
 
-// nolint: megacheck
-type conditionFn func() bool
+func TestJitterBuckets(t *testing.T) {
+	config := `
+    - flushInterval: 1m
+      maxJitterPercent: 1.0
+    - flushInterval: 10m
+      maxJitterPercent: 0.5
+    - flushInterval: 1h
+      maxJitterPercent: 0.25`
 
-// nolint: megacheck
-func waitUntil(fn conditionFn, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return true
-		}
-		time.Sleep(time.Second)
+	var buckets jitterBuckets
+	require.NoError(t, yaml.Unmarshal([]byte(config), &buckets))
+
+	maxJitterFn, err := buckets.NewMaxJitterFn()
+	require.NoError(t, err)
+
+	inputs := []struct {
+		interval          time.Duration
+		expectedMaxJitter time.Duration
+	}{
+		{interval: time.Second, expectedMaxJitter: time.Second},
+		{interval: 10 * time.Second, expectedMaxJitter: 10 * time.Second},
+		{interval: time.Minute, expectedMaxJitter: time.Minute},
+		{interval: 10 * time.Minute, expectedMaxJitter: 5 * time.Minute},
+		{interval: time.Hour, expectedMaxJitter: 15 * time.Minute},
+		{interval: 6 * time.Hour, expectedMaxJitter: 90 * time.Minute},
 	}
-	return false
+	for _, input := range inputs {
+		require.Equal(t, input.expectedMaxJitter, maxJitterFn(input.interval))
+	}
 }

@@ -41,7 +41,7 @@ import (
 // ElectionManager manages leadership elections.
 type ElectionManager interface {
 	// Open opens the election manager for a given shard set.
-	Open(shardSetID string) error
+	Open(shardSetID uint32) error
 
 	// ElectionState returns the election state.
 	ElectionState() ElectionState
@@ -63,8 +63,8 @@ const (
 var (
 	errElectionManagerAlreadyOpenOrClosed = errors.New("election manager is already open or closed")
 	errElectionManagerNotOpenOrClosed     = errors.New("election manager is not open or closed")
+	errElectionManagerAlreadyResigning    = errors.New("election manager is already resigning")
 	errLeaderNotChanged                   = errors.New("leader has not changed")
-	errResignActionAlreadyEnqueued        = errors.New("resign action already enqueued")
 )
 
 type electionManagerState int
@@ -83,11 +83,11 @@ const (
 	// Unknown election state.
 	UnknownState ElectionState = iota
 
-	// Leader state.
-	LeaderState
-
 	// Follower state.
 	FollowerState
+
+	// Leader state.
+	LeaderState
 
 	// Pending follower state.
 	PendingFollowerState
@@ -183,33 +183,28 @@ type goalState struct {
 	state ElectionState
 }
 
-type resignAction struct {
-	errCh chan error
-}
-
 type electionManager struct {
 	sync.RWMutex
 
-	nowFn               clock.NowFn
-	logger              xlog.Logger
-	reportInterval      time.Duration
-	campaignOpts        services.CampaignOptions
-	electionOpts        services.ElectionOptions
-	campaignRetrier     xretry.Retrier
-	changeRetrier       xretry.Retrier
-	changeVerifyTimeout time.Duration
-	electionKeyFmt      string
-	leaderService       services.LeaderService
-	leaderValue         string
+	nowFn           clock.NowFn
+	logger          xlog.Logger
+	reportInterval  time.Duration
+	campaignOpts    services.CampaignOptions
+	electionOpts    services.ElectionOptions
+	campaignRetrier xretry.Retrier
+	changeRetrier   xretry.Retrier
+	electionKeyFmt  string
+	leaderService   services.LeaderService
+	leaderValue     string
 
 	state                  electionManagerState
 	doneCh                 chan struct{}
 	electionKey            string
 	electionStateWatchable xwatch.Watchable
-	goalStateLock          sync.Mutex
 	nextGoalStateID        int64
+	goalStateLock          sync.RWMutex
 	goalStateWatchable     xwatch.Watchable
-	resignCh               chan resignAction
+	resigning              bool
 	sleepFn                sleepFn
 	metrics                electionManagerMetrics
 }
@@ -230,7 +225,6 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		electionOpts:           opts.ElectionOptions(),
 		campaignRetrier:        campaignRetrier,
 		changeRetrier:          changeRetrier,
-		changeVerifyTimeout:    opts.ChangeVerifyTimeout(),
 		electionKeyFmt:         opts.ElectionKeyFmt(),
 		leaderService:          opts.LeaderService(),
 		leaderValue:            campaignOpts.LeaderValue(),
@@ -238,13 +232,12 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		doneCh:                 make(chan struct{}),
 		electionStateWatchable: electionStateWatchable,
 		goalStateWatchable:     xwatch.NewWatchable(),
-		resignCh:               make(chan resignAction, 1),
 		sleepFn:                time.Sleep,
 		metrics:                newElectionManagerMetrics(instrumentOpts.MetricsScope()),
 	}
 }
 
-func (mgr *electionManager) Open(shardSetID string) error {
+func (mgr *electionManager) Open(shardSetID uint32) error {
 	mgr.Lock()
 	defer mgr.Unlock()
 
@@ -276,17 +269,39 @@ func (mgr *electionManager) ElectionState() ElectionState {
 }
 
 func (mgr *electionManager) Resign(ctx context.Context) error {
+	mgr.Lock()
+	if mgr.state != electionManagerOpen {
+		mgr.Unlock()
+		return errElectionManagerNotOpenOrClosed
+	}
+	if mgr.resigning {
+		mgr.Unlock()
+		return errElectionManagerAlreadyResigning
+	}
+	if mgr.ElectionState() == FollowerState {
+		mgr.Unlock()
+		mgr.metrics.followerResign.Inc(1)
+		return nil
+	}
+	mgr.resigning = true
+	mgr.Unlock()
+
+	defer func() {
+		mgr.Lock()
+		mgr.resigning = false
+		mgr.Unlock()
+	}()
+
 	_, watch, err := mgr.electionStateWatchable.Watch()
 	if err != nil {
 		return fmt.Errorf("error creating watch when resigning: %v", err)
 	}
 	defer watch.Close()
 
-	resignAction := resignAction{errCh: make(chan error, 1)}
-	select {
-	case mgr.resignCh <- resignAction:
-	default:
-		return errResignActionAlreadyEnqueued
+	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
+		mgr.metrics.resignErrors.Inc(1)
+		mgr.logError("resign error", err)
+		return err
 	}
 
 	for {
@@ -299,10 +314,6 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 			mgr.metrics.resignTimeout.Inc(1)
 			mgr.logError("resign error", ctx.Err())
 			return ctx.Err()
-		case err := <-resignAction.errCh:
-			mgr.metrics.resignErrors.Inc(1)
-			mgr.logError("resign error", err)
-			return err
 		}
 	}
 }
@@ -328,8 +339,6 @@ func (mgr *electionManager) watchGoalStateChanges(watch xwatch.Watch) {
 			return
 		case <-watch.C():
 			mgr.processGoalState(watch.Get().(goalState))
-		case action := <-mgr.resignCh:
-			mgr.resign(action)
 		}
 	}
 }
@@ -364,87 +373,50 @@ func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
 		case <-watch.C():
 		}
 
-		currState := mgr.goalStateWatchable.Get().(goalState)
+		currState := watch.Get().(goalState)
 		if currState.state != PendingFollowerState {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), mgr.changeVerifyTimeout)
+		// Only continue verifying if the state has not changed.
 		continueFn := func(int) bool {
-			select {
-			case <-ctx.Done():
-				return false
-			default:
-				return true
-			}
+			mgr.goalStateLock.RLock()
+			latest := mgr.goalStateWatchable.Get().(goalState)
+			mgr.goalStateLock.RUnlock()
+			return currState.id == latest.id && currState.state == latest.state
 		}
 
-		var (
-			knownLeader bool
-			isLeader    bool
-		)
-		mgr.changeRetrier.AttemptWhile(continueFn, func() error {
+		// Do not change state if the follower state cannot be verified.
+		if verifyErr := mgr.changeRetrier.AttemptWhile(continueFn, func() error {
 			leader, err := mgr.leaderService.Leader(mgr.electionKey)
 			if err != nil {
-				knownLeader = false
 				mgr.metrics.verifyLeaderErrors.Inc(1)
 				mgr.logError("error determining the leader", err)
 				return err
 			}
-
-			knownLeader = true
 			if leader == mgr.leaderValue {
-				isLeader = true
 				mgr.metrics.verifyLeaderNotChanged.Inc(1)
 				mgr.logError("leader has not changed", errLeaderNotChanged)
 				return errLeaderNotChanged
 			}
-			isLeader = false
 			return nil
-		})
-		cancel()
+		}); verifyErr != nil {
+			mgr.logError("verify error", verifyErr)
+			continue
+		}
 
 		mgr.goalStateLock.Lock()
+		// If the latest goal state is different from the goal state before verification,
+		// this means the goal state has been updated since verification started and the
+		// pending follower to follower transition is no longer valid.
 		state := mgr.goalStateWatchable.Get().(goalState)
-		// If the latest goal state is different from the goal state before verification, this
-		// means the goal state has been updated since verification started and the pending follower
-		// to follower transition is no longer valid.
 		if !(state.id == currState.id && state.state == currState.state) {
 			mgr.metrics.verifyPendingChangeStale.Inc(1)
 			mgr.goalStateLock.Unlock()
 			continue
 		}
-		if !knownLeader {
-			mgr.metrics.verifyNoKnownLeader.Inc(1)
-			mgr.goalStateLock.Unlock()
-			continue
-		}
-		if isLeader {
-			mgr.setGoalStateWithLock(LeaderState)
-		} else {
-			mgr.setGoalStateWithLock(FollowerState)
-		}
+		mgr.setGoalStateWithLock(FollowerState)
 		mgr.goalStateLock.Unlock()
-	}
-}
-
-func (mgr *electionManager) resign(action resignAction) {
-	mgr.RLock()
-	if mgr.state != electionManagerOpen {
-		action.errCh <- errElectionManagerNotOpenOrClosed
-		mgr.RUnlock()
-		return
-	}
-	mgr.RUnlock()
-
-	if mgr.ElectionState() == FollowerState {
-		mgr.metrics.followerResign.Inc(1)
-		action.errCh <- nil
-		return
-	}
-
-	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
-		action.errCh <- err
 	}
 }
 

@@ -50,7 +50,7 @@ const (
 )
 
 var (
-	testShardSetID  = "testShardSet"
+	testShardSetID  = uint32(0)
 	testValidMetric = unaggregated.MetricUnion{
 		Type:       unaggregated.CounterType,
 		ID:         []byte("foo"),
@@ -321,6 +321,7 @@ func testPlacementWatcherWithPlacementProto(
 	return placementWatcher, store
 }
 
+// nolint: unparam
 func testStagedPlacementProtoWithNumShards(
 	t *testing.T,
 	instanceID string,
@@ -359,7 +360,7 @@ func testStagedPlacementProtoWithCustomShards(
 
 func testOptions() Options {
 	electionManager := &mockElectionManager{
-		openFn: func(shardSetID string) error { return nil },
+		openFn: func(shardSetID uint32) error { return nil },
 	}
 	return NewOptions().
 		SetElectionManager(electionManager).
@@ -385,7 +386,7 @@ type mockFlushManager struct {
 	statusFn     statusFn
 }
 
-func (mgr *mockFlushManager) Open(shardSetID string) error { return nil }
+func (mgr *mockFlushManager) Open(shardSetID uint32) error { return nil }
 
 func (mgr *mockFlushManager) Register(flusher PeriodicFlusher) error {
 	return mgr.registerFn(flusher)

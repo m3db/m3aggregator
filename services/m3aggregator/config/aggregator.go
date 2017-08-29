@@ -53,11 +53,9 @@ const (
 )
 
 var (
-	errUnknownQuantileSuffixFnType   = errors.New("unknown quantile suffix function type")
-	errUnknownFlushHandlerType       = errors.New("unknown flush handler type")
-	errNoKVClientConfiguration       = errors.New("no kv client configuration")
-	errNoForwardHandlerConfiguration = errors.New("no forward flush configuration")
-	errEmptyJitterBucketList         = errors.New("empty jitter bucket list")
+	errUnknownQuantileSuffixFnType = errors.New("unknown quantile suffix function type")
+	errNoKVClientConfiguration     = errors.New("no kv client configuration")
+	errEmptyJitterBucketList       = errors.New("empty jitter bucket list")
 )
 
 // AggregatorConfiguration contains aggregator configuration.
@@ -298,7 +296,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 
 	// Set election manager.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("election-manager"))
-	electionManager, err := c.ElectionManager.NewElectionManager(client, instanceID, iOpts)
+	electionManager, err := c.ElectionManager.NewElectionManager(client, instanceID, c.KVNamespace, iOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +519,6 @@ type shardFnType string
 
 // List of supported sharding function types.
 const (
-	unknownShardFn  shardFnType = "unknown"
 	murmur32ShardFn shardFnType = "murmur32"
 
 	defaultShardFn = murmur32ShardFn
@@ -566,18 +563,18 @@ func (t shardFnType) ShardFn() (aggregator.ShardFn, error) {
 }
 
 type electionManagerConfiguration struct {
-	Election            electionConfiguration  `yaml:"election"`
-	ServiceID           serviceIDConfiguration `yaml:"serviceID"`
-	LeaderValue         string                 `yaml:"leaderValue"`
-	ElectionKeyFmt      string                 `yaml:"electionKeyFmt" validate:"nonzero"`
-	CampaignRetrier     xretry.Configuration   `yaml:"campaignRetrier"`
-	ChangeRetrier       xretry.Configuration   `yaml:"changeRetrier"`
-	ChangeVerifyTimeout time.Duration          `yaml:"changeVerifyTimeout"`
+	Election        electionConfiguration  `yaml:"election"`
+	ServiceID       serviceIDConfiguration `yaml:"serviceID"`
+	LeaderValue     string                 `yaml:"leaderValue"`
+	ElectionKeyFmt  string                 `yaml:"electionKeyFmt" validate:"nonzero"`
+	CampaignRetrier xretry.Configuration   `yaml:"campaignRetrier"`
+	ChangeRetrier   xretry.Configuration   `yaml:"changeRetrier"`
 }
 
 func (c electionManagerConfiguration) NewElectionManager(
 	client client.Client,
 	instanceID string,
+	kvNamespace string,
 	instrumentOpts instrument.Options,
 ) (aggregator.ElectionManager, error) {
 	electionOpts, err := c.Election.NewElectionOptions()
@@ -585,7 +582,9 @@ func (c electionManagerConfiguration) NewElectionManager(
 		return nil, err
 	}
 	serviceID := c.ServiceID.NewServiceID()
-	svcs, err := client.Services()
+	namespaceOpts := services.NewNamespaceOptions().SetPlacementNamespace(kvNamespace)
+	serviceOpts := services.NewOptions().SetNamespaceOptions(namespaceOpts)
+	svcs, err := client.Services(serviceOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -613,9 +612,6 @@ func (c electionManagerConfiguration) NewElectionManager(
 		SetChangeRetryOptions(changeRetryOpts).
 		SetElectionKeyFmt(c.ElectionKeyFmt).
 		SetLeaderService(leaderService)
-	if c.ChangeVerifyTimeout != 0 {
-		opts = opts.SetChangeVerifyTimeout(c.ChangeVerifyTimeout)
-	}
 	electionManager := aggregator.NewElectionManager(opts)
 	return electionManager, nil
 }
@@ -640,6 +636,7 @@ func (c electionConfiguration) NewElectionOptions() (services.ElectionOptions, e
 	return opts, nil
 }
 
+// TODO: move this to m3cluster.
 type serviceIDConfiguration struct {
 	Name        string `yaml:"name"`
 	Environment string `yaml:"environment"`
@@ -737,7 +734,7 @@ func (c flushManagerConfiguration) NewFlushManager(
 	return aggregator.NewFlushManager(opts), nil
 }
 
-// jitterBucket determins the max jitter percent for lists whose flush
+// jitterBucket determines the max jitter percent for lists whose flush
 // intervals are no more than the bucket flush interval.
 type jitterBucket struct {
 	FlushInterval    time.Duration `yaml:"flushInterval" validate:"nonzero"`
@@ -762,7 +759,7 @@ func (buckets jitterBuckets) NewMaxJitterFn() (aggregator.FlushJitterFn, error) 
 		if idx == numBuckets {
 			idx--
 		}
-		return time.Duration(res[idx].MaxJitterPercent * float64(res[idx].FlushInterval))
+		return time.Duration(res[idx].MaxJitterPercent * float64(interval))
 	}, nil
 }
 

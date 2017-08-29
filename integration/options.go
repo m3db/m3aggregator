@@ -28,6 +28,7 @@ import (
 	"github.com/m3db/m3cluster/kv/mem"
 )
 
+// nolint: megacheck
 const (
 	defaultServerStateChangeTimeout   = 5 * time.Second
 	defaultClientBatchSize            = 1440
@@ -36,13 +37,14 @@ const (
 	defaultInstanceID                 = "localhost:6000"
 	defaultNumShards                  = 1024
 	defaultPlacementKVKey             = "/placement"
-	defaultElectionKeyFmt             = "/shardset/%s/lock"
-	defaultFlushTimesKeyFmt           = "/shardset/%s/flush"
-	defaultShardSetID                 = "0"
+	defaultElectionKeyFmt             = "/shardset/%d/lock"
+	defaultFlushTimesKeyFmt           = "/shardset/%d/flush"
+	defaultShardSetID                 = 0
 	defaultElectionStateChangeTimeout = time.Second
 	defaultJitterEnabled              = true
 )
 
+// nolint: megacheck
 type testOptions interface {
 	// SetMsgpackAddr sets the msgpack server address.
 	SetMsgpackAddr(value string) testOptions
@@ -81,10 +83,10 @@ type testOptions interface {
 	ElectionKeyFmt() string
 
 	// SetShardSetID sets the shard set id.
-	SetShardSetID(value string) testOptions
+	SetShardSetID(value uint32) testOptions
 
 	// ShardSetID returns the shard set id.
-	ShardSetID() string
+	ShardSetID() uint32
 
 	// SetFlushTimesKeyFmt sets the flush times key format.
 	SetFlushTimesKeyFmt(value string) testOptions
@@ -141,6 +143,7 @@ type testOptions interface {
 	MaxJitterFn() aggregator.FlushJitterFn
 }
 
+// nolint: megacheck
 type options struct {
 	msgpackAddr                string
 	httpAddr                   string
@@ -148,7 +151,7 @@ type options struct {
 	numShards                  int
 	placementKVKey             string
 	electionKeyFmt             string
-	shardSetID                 string
+	shardSetID                 uint32
 	flushTimesKeyFmt           string
 	kvStore                    kv.Store
 	serverStateChangeTimeout   time.Duration
@@ -160,6 +163,7 @@ type options struct {
 	maxJitterFn                aggregator.FlushJitterFn
 }
 
+// nolint: megacheck
 func newTestOptions() testOptions {
 	return &options{
 		instanceID:                 defaultInstanceID,
@@ -239,13 +243,13 @@ func (o *options) ElectionKeyFmt() string {
 	return o.electionKeyFmt
 }
 
-func (o *options) SetShardSetID(value string) testOptions {
+func (o *options) SetShardSetID(value uint32) testOptions {
 	opts := *o
 	opts.shardSetID = value
 	return &opts
 }
 
-func (o *options) ShardSetID() string {
+func (o *options) ShardSetID() uint32 {
 	return o.shardSetID
 }
 
@@ -339,6 +343,7 @@ func (o *options) MaxJitterFn() aggregator.FlushJitterFn {
 	return o.maxJitterFn
 }
 
+// nolint: megacheck
 func defaultMaxJitterFn(interval time.Duration) time.Duration {
 	return time.Duration(0.75 * float64(interval))
 }

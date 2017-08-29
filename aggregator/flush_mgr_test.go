@@ -39,10 +39,10 @@ func TestFlushManagerOpenAlreadyOpen(t *testing.T) {
 func TestFlushManagerOpenSuccess(t *testing.T) {
 	mgr, _ := testFlushManager()
 	mgr.leaderMgr = &mockRoleBasedFlushManager{
-		openFn: func(string) {},
+		openFn: func(uint32) error { return nil },
 	}
 	mgr.followerMgr = &mockRoleBasedFlushManager{
-		openFn: func(string) {},
+		openFn: func(uint32) error { return nil },
 	}
 	require.NoError(t, mgr.Open(testShardSetID))
 }
@@ -62,10 +62,10 @@ func TestFlushManagerRegisterSuccess(t *testing.T) {
 		buckets       []*flushBucket
 	)
 	mgr.leaderMgr = &mockRoleBasedFlushManager{
-		openFn: func(string) {},
+		openFn: func(uint32) error { return nil },
 	}
 	mgr.followerMgr = &mockRoleBasedFlushManager{
-		openFn: func(string) {},
+		openFn: func(uint32) error { return nil },
 		onBucketAddedFn: func(bucketIdx int, bucket *flushBucket) {
 			bucketIndices = append(bucketIndices, bucketIdx)
 			buckets = append(buckets, bucket)
@@ -251,7 +251,7 @@ func TestFlushManagerFlush(t *testing.T) {
 	mgr.sleepFn = sleepFn
 	mgr.electionMgr = electionManager
 	mgr.leaderMgr = &mockRoleBasedFlushManager{
-		openFn: func(string) {},
+		openFn: func(uint32) error { return nil },
 		initFn: func(buckets []*flushBucket) { leaderInits++ },
 		prepareFn: func(buckets []*flushBucket) (flushTask, time.Duration) {
 			captured = buckets
@@ -259,7 +259,7 @@ func TestFlushManagerFlush(t *testing.T) {
 		},
 	}
 	mgr.followerMgr = &mockRoleBasedFlushManager{
-		openFn: func(string) {},
+		openFn: func(uint32) error { return nil },
 		initFn: func(buckets []*flushBucket) { followerInits++ },
 		prepareFn: func(buckets []*flushBucket) (flushTask, time.Duration) {
 			captured = buckets
@@ -365,7 +365,7 @@ func (f *mockFlusher) LastFlushedNanos() int64               { return f.lastFlus
 func (f *mockFlusher) Flush(cutoverNanos, cutoffNanos int64) { f.flushFn(cutoverNanos, cutoffNanos) }
 func (f *mockFlusher) DiscardBefore(beforeNanos int64)       { f.discardBeforeFn(beforeNanos) }
 
-type flushOpenFn func(shardSetID string)
+type flushOpenFn func(shardSetID uint32) error
 type bucketInitFn func(buckets []*flushBucket)
 type bucketPrepareFn func(buckets []*flushBucket) (flushTask, time.Duration)
 type onBucketAddedFn func(bucketIdx int, bucket *flushBucket)
@@ -378,7 +378,7 @@ type mockRoleBasedFlushManager struct {
 	canLead         bool
 }
 
-func (m *mockRoleBasedFlushManager) Open(shardSetID string) { m.openFn(shardSetID) }
+func (m *mockRoleBasedFlushManager) Open(shardSetID uint32) error { return m.openFn(shardSetID) }
 
 func (m *mockRoleBasedFlushManager) Init(buckets []*flushBucket) {
 	m.initFn(buckets)

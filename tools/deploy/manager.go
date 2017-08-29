@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Uber Technologies, Inc.
+// Copyright (c) 2017 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,24 +18,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cm
+package deploy
 
-var emptySample Sample
+// Instance represents an instance in the deployment.
+type Instance interface {
+	// ID returns the instance id.
+	ID() string
 
-// newSample creates a new sample
-func newSample() *Sample {
-	return &Sample{}
+	// Revision returns the revision deployed to the instance.
+	Revision() string
+
+	// IsHealthy determines whether the instance is healthy.
+	IsHealthy() bool
+
+	// IsDeploying determines whether the instance is being deployed.
+	IsDeploying() bool
 }
 
-// reset resets a sample
-func (s *Sample) reset() {
-	*s = emptySample
-}
+// Manager manages the state of deployments and interacts with
+// instances to perform the actual deployment.
+type Manager interface {
+	// QueryAll returns the full list of instances in the deployment.
+	QueryAll() ([]Instance, error)
 
-// setData sets sample data
-// nolint: unparam
-func (s *Sample) setData(value float64, numRanks int64, delta int64) {
-	s.value = value
-	s.numRanks = numRanks
-	s.delta = delta
+	// Query returns the deployment instances for given set of ids.
+	Query(instanceIDs []string) ([]Instance, error)
+
+	// Deploy deploys the given revision to the given set of instances.
+	Deploy(instanceIDs []string, revision string) error
 }
