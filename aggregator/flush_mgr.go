@@ -209,8 +209,11 @@ func (mgr *flushManager) Close() error {
 
 func (mgr *flushManager) findOrCreateBucketWithLock(l PeriodicFlusher) (*flushBucket, error) {
 	bucket, err := mgr.findBucketWithLock(l)
-	if err == nil || err != errBucketNotFound {
-		return bucket, err
+	if err == nil {
+		return bucket, nil
+	}
+	if err != errBucketNotFound {
+		return nil, err
 	}
 	flushInterval := l.FlushInterval()
 	bucketScope := mgr.scope.SubScope("bucket").Tagged(map[string]string{
@@ -294,6 +297,8 @@ func (mgr *flushManager) flushManagerWithLock() roleBasedFlushManager {
 }
 
 // flushBucket contains all the registered lists for a given flush interval.
+// NB(xichen): flushBucket is not thread-safe. It is protected by the lock
+// in the flush manager.
 type flushBucket struct {
 	interval time.Duration
 	flushers []PeriodicFlusher

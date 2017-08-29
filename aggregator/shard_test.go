@@ -42,33 +42,30 @@ func TestAggregatorShardSetWritableRange(t *testing.T) {
 		SetBufferDurationBeforeShardCutover(time.Duration(500)).
 		SetBufferDurationAfterShardCutoff(time.Duration(1000))
 	shard := newAggregatorShard(testShard, opts)
+
 	inputs := []struct {
-		cutoverNanos          int64
-		cutoffNanos           int64
+		timeRange             timeRange
 		expectedEarliestNanos int64
 		expectedLatestNanos   int64
 	}{
 		{
-			cutoverNanos:          0,
-			cutoffNanos:           int64(math.MaxInt64),
+			timeRange:             timeRange{cutoverNanos: 0, cutoffNanos: int64(math.MaxInt64)},
 			expectedEarliestNanos: 0,
 			expectedLatestNanos:   int64(math.MaxInt64),
 		},
 		{
-			cutoverNanos:          testNanos,
-			cutoffNanos:           int64(math.MaxInt64),
+			timeRange:             timeRange{cutoverNanos: testNanos, cutoffNanos: int64(math.MaxInt64)},
 			expectedEarliestNanos: testNanos - 500,
 			expectedLatestNanos:   int64(math.MaxInt64),
 		},
 		{
-			cutoverNanos:          0,
-			cutoffNanos:           testNanos,
+			timeRange:             timeRange{cutoverNanos: 0, cutoffNanos: testNanos},
 			expectedEarliestNanos: 0,
 			expectedLatestNanos:   testNanos + 1000,
 		},
 	}
 	for _, input := range inputs {
-		shard.SetWriteableRange(input.cutoverNanos, input.cutoffNanos)
+		shard.SetWriteableRange(input.timeRange)
 		require.Equal(t, input.expectedEarliestNanos, shard.earliestWritableNanos)
 		require.Equal(t, input.expectedLatestNanos, shard.latestWriteableNanos)
 	}
@@ -79,14 +76,15 @@ func TestAggregatorShardIsCutoff(t *testing.T) {
 	shard := newAggregatorShard(testShard, testOptions())
 	shard.nowFn = func() time.Time { return now }
 
-	for _, input := range []struct {
+	inputs := []struct {
 		latestNanos      int64
 		expectedIsCutoff bool
 	}{
 		{latestNanos: 0, expectedIsCutoff: true},
 		{latestNanos: 12345, expectedIsCutoff: false},
 		{latestNanos: math.MaxInt64, expectedIsCutoff: false},
-	} {
+	}
+	for _, input := range inputs {
 		shard.latestWriteableNanos = input.latestNanos
 		require.Equal(t, input.expectedIsCutoff, shard.IsCutoff())
 	}
@@ -104,7 +102,7 @@ func TestAggregatorShardAddMetricWithPoliciesListShardNotWriteable(t *testing.T)
 	shard := newAggregatorShard(testShard, testOptions())
 	shard.nowFn = func() time.Time { return now }
 
-	for _, input := range []struct {
+	inputs := []struct {
 		earliestNanos int64
 		latestNanos   int64
 	}{
@@ -112,7 +110,8 @@ func TestAggregatorShardAddMetricWithPoliciesListShardNotWriteable(t *testing.T)
 		{earliestNanos: 1234, latestNanos: 3456},
 		{earliestNanos: 0, latestNanos: 0},
 		{earliestNanos: math.MaxInt64, latestNanos: math.MaxInt64},
-	} {
+	}
+	for _, input := range inputs {
 		shard.earliestWritableNanos = input.earliestNanos
 		shard.latestWriteableNanos = input.latestNanos
 		err := shard.AddMetricWithPoliciesList(testValidMetric, testPoliciesList)
@@ -137,7 +136,7 @@ func TestAggregatorShardAddMetricWithPoliciesListSuccess(t *testing.T) {
 		return nil
 	}
 
-	shard.SetWriteableRange(0, math.MaxInt64)
+	shard.SetWriteableRange(timeRange{cutoverNanos: 0, cutoffNanos: math.MaxInt64})
 	require.NoError(t, shard.AddMetricWithPoliciesList(testValidMetric, testPoliciesList))
 	require.Equal(t, testValidMetric, resultMu)
 	require.Equal(t, testPoliciesList, resultPoliciesList)

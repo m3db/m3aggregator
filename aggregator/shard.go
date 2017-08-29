@@ -89,17 +89,19 @@ func newAggregatorShard(shard uint32, opts Options) *aggregatorShard {
 
 func (s *aggregatorShard) ID() uint32 { return s.shard }
 
-func (s *aggregatorShard) SetWriteableRange(cutoverNanos, cutoffNanos int64) {
-	earliestNanos := int64(0)
+func (s *aggregatorShard) SetWriteableRange(rng timeRange) {
+	var (
+		cutoverNanos  = rng.cutoverNanos
+		cutoffNanos   = rng.cutoffNanos
+		earliestNanos = int64(0)
+		latestNanos   = int64(math.MaxInt64)
+	)
 	if cutoverNanos >= int64(s.bufferDurationBeforeShardCutover) {
 		earliestNanos = cutoverNanos - int64(s.bufferDurationBeforeShardCutover)
 	}
-
-	latestNanos := int64(math.MaxInt64)
 	if cutoffNanos <= math.MaxInt64-int64(s.bufferDurationAfterShardCutoff) {
 		latestNanos = cutoffNanos + int64(s.bufferDurationAfterShardCutoff)
 	}
-
 	s.Lock()
 	s.earliestWritableNanos = earliestNanos
 	s.latestWriteableNanos = latestNanos
@@ -123,7 +125,7 @@ func (s *aggregatorShard) AddMetricWithPoliciesList(
 		s.RUnlock()
 		return errAggregatorShardClosed
 	}
-	if err := s.checkWritable(); err != nil {
+	if err := s.checkWritableWithLock(); err != nil {
 		s.RUnlock()
 		s.metrics.notWriteableErrors.Inc(1)
 		return err
@@ -148,10 +150,15 @@ func (s *aggregatorShard) Close() {
 	s.metricMap.Close()
 }
 
-func (s *aggregatorShard) checkWritable() error {
+func (s *aggregatorShard) checkWritableWithLock() error {
 	nowNanos := s.nowFn().UnixNano()
 	if nowNanos < s.earliestWritableNanos || nowNanos > s.latestWriteableNanos {
 		return errAggregatorShardNotWriteable
 	}
 	return nil
+}
+
+type timeRange struct {
+	cutoverNanos int64
+	cutoffNanos  int64
 }

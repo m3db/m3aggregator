@@ -327,10 +327,11 @@ type leaderFlushTask struct {
 func (t *leaderFlushTask) Run() {
 	mgr := t.mgr
 
-	// If the instance is not found in the placement, this means the instance is no longer
-	// considered as part of the aggregation cluster and as such we should stop flushing.
+	// If there is an error determining owned shards (e.g., instance is not found in the
+	// placement), we return without flushing.
 	shards, err := mgr.ownedShards()
-	if err == errInstanceNotFoundInPlacement {
+	if err != nil {
+		mgr.logger.Errorf("unable to determine shards owned by this instance: %v", err)
 		return
 	}
 
@@ -343,12 +344,10 @@ func (t *leaderFlushTask) Run() {
 		// shards owned by the instance, in which case the cutover time and the cutoff time
 		// are set to the corresponding cutover and cutoff times of the shard.
 		var cutoverNanos, cutoffNanos int64
-		if shards != nil {
-			shardID := flusher.Shard()
-			if shard, found := shards.Shard(shardID); found {
-				cutoverNanos = shard.CutoverNanos()
-				cutoffNanos = shard.CutoffNanos()
-			}
+		shardID := flusher.Shard()
+		if shard, found := shards.Shard(shardID); found {
+			cutoverNanos = shard.CutoverNanos()
+			cutoffNanos = shard.CutoffNanos()
 		}
 
 		flusher := flusher

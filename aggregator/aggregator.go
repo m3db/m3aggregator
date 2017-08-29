@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/m3db/m3cluster/services"
@@ -103,16 +104,18 @@ func (m aggregatorTickMetrics) Report(tickResult tickResult, duration time.Durat
 }
 
 type aggregatorShardsMetrics struct {
-	add   tally.Counter
-	close tally.Counter
-	owned tally.Gauge
+	add          tally.Counter
+	close        tally.Counter
+	owned        tally.Gauge
+	pendingClose tally.Gauge
 }
 
 func newAggregatorShardsMetrics(scope tally.Scope) aggregatorShardsMetrics {
 	return aggregatorShardsMetrics{
-		add:   scope.Counter("add"),
-		close: scope.Counter("close"),
-		owned: scope.Gauge("owned"),
+		add:          scope.Counter("add"),
+		close:        scope.Counter("close"),
+		owned:        scope.Gauge("owned"),
+		pendingClose: scope.Gauge("pending-close"),
 	}
 }
 
@@ -187,6 +190,7 @@ type aggregator struct {
 	doneCh                chan struct{}
 	wg                    sync.WaitGroup
 	sleepFn               sleepFn
+	shardsPendingClose    int32
 	metrics               aggregatorMetrics
 }
 
@@ -357,7 +361,7 @@ func (agg *aggregator) updateShardsWithLock(newPlacement services.Placement) err
 	var (
 		newShardSet = instance.Shards()
 		incoming    []*aggregatorShard
-		closing     []*aggregatorShard
+		closing     = make([]*aggregatorShard, 0, len(agg.shardIDs))
 	)
 	for _, shard := range agg.shards {
 		if shard == nil {
@@ -375,8 +379,8 @@ func (agg *aggregator) updateShardsWithLock(newPlacement services.Placement) err
 	)
 	if numShards := len(newShards); numShards > 0 {
 		newShardIDs = make([]uint32, 0, numShards)
-		newShardLen := newShards[numShards-1].ID() + 1
-		incoming = make([]*aggregatorShard, newShardLen)
+		maxShardID := newShards[numShards-1].ID()
+		incoming = make([]*aggregatorShard, maxShardID+1)
 	}
 	for _, shard := range newShards {
 		shardID := shard.ID()
@@ -387,7 +391,11 @@ func (agg *aggregator) updateShardsWithLock(newPlacement services.Placement) err
 			incoming[shardID] = newAggregatorShard(shardID, agg.opts)
 			agg.metrics.shards.add.Inc(1)
 		}
-		incoming[shardID].SetWriteableRange(shard.CutoverNanos(), shard.CutoffNanos())
+		shardTimeRange := timeRange{
+			cutoverNanos: shard.CutoverNanos(),
+			cutoffNanos:  shard.CutoffNanos(),
+		}
+		incoming[shardID].SetWriteableRange(shardTimeRange)
 	}
 	agg.shardIDs = newShardIDs
 	agg.shards = incoming
@@ -446,10 +454,15 @@ func (agg *aggregator) ownedShards() (owned, toClose []*aggregatorShard) {
 // Because each shard write happens while holding the shard read lock, the shard
 // may only close itself after all its pending writes are finished.
 func (agg *aggregator) closeShardsAsync(shards []*aggregatorShard) {
+	atomic.AddInt32(&agg.shardsPendingClose, int32(len(shards)))
+	agg.metrics.shards.pendingClose.Update(float64(atomic.LoadInt32(&agg.shardsPendingClose)))
+
 	for _, shard := range shards {
 		shard := shard
 		go func() {
 			shard.Close()
+			atomic.AddInt32(&agg.shardsPendingClose, -1)
+			agg.metrics.shards.pendingClose.Update(float64(atomic.LoadInt32(&agg.shardsPendingClose)))
 			agg.metrics.shards.close.Inc(1)
 		}()
 	}
@@ -497,6 +510,7 @@ func (agg *aggregator) tickInternal() {
 
 	numShards := len(ownedShards)
 	agg.metrics.shards.owned.Update(float64(numShards))
+	agg.metrics.shards.pendingClose.Update(float64(atomic.LoadInt32(&agg.shardsPendingClose)))
 	if numShards == 0 {
 		return
 	}

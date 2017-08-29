@@ -98,7 +98,7 @@ func TestMetricListFlushWithCutoverCutoffNanos(t *testing.T) {
 		flushTypeRes = flushType
 	}
 
-	for _, input := range []struct {
+	inputs := []struct {
 		cutoverNanos        int64
 		cutoffNanos         int64
 		expectedBeforeNanos int64
@@ -128,7 +128,8 @@ func TestMetricListFlushWithCutoverCutoffNanos(t *testing.T) {
 			expectedBeforeNanos: 1234 * int64(time.Second),
 			expectedFlushType:   discardType,
 		},
-	} {
+	}
+	for _, input := range inputs {
 		l.Flush(input.cutoverNanos, input.cutoffNanos)
 		require.Equal(t, input.expectedBeforeNanos, beforeNanosRes)
 		require.Equal(t, input.expectedFlushType, flushTypeRes)
