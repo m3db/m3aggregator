@@ -343,6 +343,7 @@ func (l *metricList) consumeAggregatedMetric(
 }
 
 // discardAggregatedMetric discards aggregated metrics.
+// nolint: unparam
 func (l *metricList) discardAggregatedMetric(
 	idPrefix []byte,
 	id metricID.RawID,

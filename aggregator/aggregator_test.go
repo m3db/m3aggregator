@@ -295,6 +295,7 @@ func testAggregator(t *testing.T) (*aggregator, kv.Store) {
 	return NewAggregator(opts).(*aggregator), store
 }
 
+// nolint: unparam
 func testPlacementWatcherWithNumShards(
 	t *testing.T,
 	instanceID string,
