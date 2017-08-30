@@ -454,15 +454,15 @@ func (agg *aggregator) ownedShards() (owned, toClose []*aggregatorShard) {
 // Because each shard write happens while holding the shard read lock, the shard
 // may only close itself after all its pending writes are finished.
 func (agg *aggregator) closeShardsAsync(shards []*aggregatorShard) {
-	atomic.AddInt32(&agg.shardsPendingClose, int32(len(shards)))
-	agg.metrics.shards.pendingClose.Update(float64(atomic.LoadInt32(&agg.shardsPendingClose)))
+	pendingClose := atomic.AddInt32(&agg.shardsPendingClose, int32(len(shards)))
+	agg.metrics.shards.pendingClose.Update(float64(pendingClose))
 
 	for _, shard := range shards {
 		shard := shard
 		go func() {
 			shard.Close()
-			atomic.AddInt32(&agg.shardsPendingClose, -1)
-			agg.metrics.shards.pendingClose.Update(float64(atomic.LoadInt32(&agg.shardsPendingClose)))
+			pendingClose := atomic.AddInt32(&agg.shardsPendingClose, -1)
+			agg.metrics.shards.pendingClose.Update(float64(pendingClose))
 			agg.metrics.shards.close.Inc(1)
 		}()
 	}

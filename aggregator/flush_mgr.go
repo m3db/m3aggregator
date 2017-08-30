@@ -320,7 +320,7 @@ func (b *flushBucket) Remove(flusher PeriodicFlusher) error {
 	numFlushers := len(b.flushers)
 	for i := 0; i < numFlushers; i++ {
 		if b.flushers[i] == flusher {
-			b.flushers[i], b.flushers[numFlushers-1] = b.flushers[numFlushers-1], b.flushers[i]
+			b.flushers[i] = b.flushers[numFlushers-1]
 			b.flushers = b.flushers[:numFlushers-1]
 			return nil
 		}
