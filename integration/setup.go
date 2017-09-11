@@ -35,9 +35,8 @@ import (
 	httpserver "github.com/m3db/m3aggregator/server/http"
 	msgpackserver "github.com/m3db/m3aggregator/server/msgpack"
 	"github.com/m3db/m3aggregator/services/m3aggregator/serve"
-	"github.com/m3db/m3cluster/proto/util"
+	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3cluster/services"
-	"github.com/m3db/m3cluster/services/placement"
 	"github.com/m3db/m3cluster/shard"
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/policy"
@@ -47,20 +46,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// nolint: megacheck, varcheck, deadcode
 var (
-	msgpackAddrArg                = flag.String("msgpackAddr", "0.0.0.0:6000", "msgpack server address")
-	httpAddrArg                   = flag.String("httpAddr", "0.0.0.0:6001", "http server address")
-	errServerStartTimedOut        = errors.New("server took too long to start")
-	errServerStopTimedOut         = errors.New("server took too long to stop")
-	errElectionStateChangeTimeout = errors.New("server took too long to change election state")
+	msgpackAddrArg         = flag.String("msgpackAddr", "0.0.0.0:6000", "msgpack server address")
+	httpAddrArg            = flag.String("httpAddr", "0.0.0.0:6001", "http server address")
+	errServerStartTimedOut = errors.New("server took too long to start")
 )
 
 // nowSetterFn is the function that sets the current time.
-// nolint: megacheck
 type nowSetterFn func(t time.Time)
 
-// nolint: megacheck
 type testSetup struct {
 	opts              testOptions
 	msgpackAddr       string
@@ -85,7 +79,6 @@ type testSetup struct {
 	closedCh chan struct{}
 }
 
-// nolint: megacheck, deadcode
 func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 	if opts == nil {
 		opts = newTestOptions()
@@ -136,22 +129,7 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 	})
 	aggregatorOpts = aggregatorOpts.SetEntryPool(entryPool)
 
-	// Set up election manager.
-	leaderValue := opts.InstanceID()
-	campaignOpts, err := services.NewCampaignOptions()
-	require.NoError(t, err)
-	campaignOpts = campaignOpts.SetLeaderValue(leaderValue)
-	electionKey := fmt.Sprintf(opts.ElectionKeyFmt(), opts.ShardSetID())
-	electionCluster := newTestCluster(t)
-	leaderService := electionCluster.LeaderService()
-	electionManagerOpts := aggregator.NewElectionManagerOptions().
-		SetCampaignOptions(campaignOpts).
-		SetElectionKeyFmt(opts.ElectionKeyFmt()).
-		SetLeaderService(leaderService)
-	electionManager := aggregator.NewElectionManager(electionManagerOpts)
-	aggregatorOpts = aggregatorOpts.SetElectionManager(electionManager)
-
-	// Set up placement watcher.
+	// Set up placement manager.
 	shardSet := make([]shard.Shard, opts.NumShards())
 	for i := 0; i < opts.NumShards(); i++ {
 		shardSet[i] = shard.NewShard(uint32(i)).
@@ -165,11 +143,11 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 		SetShards(shards).
 		SetShardSetID(opts.ShardSetID())
 	testPlacement := placement.NewPlacement().
-		SetInstances([]services.PlacementInstance{instance}).
+		SetInstances([]placement.Instance{instance}).
 		SetShards(shards.AllIDs())
 	stagedPlacement := placement.NewStagedPlacement().
-		SetPlacements([]services.Placement{testPlacement})
-	stagedPlacementProto, err := util.StagedPlacementToProto(stagedPlacement)
+		SetPlacements([]placement.Placement{testPlacement})
+	stagedPlacementProto, err := stagedPlacement.Proto()
 	require.NoError(t, err)
 	placementKey := opts.PlacementKVKey()
 	placementStore := opts.KVStore()
@@ -179,20 +157,43 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 		SetStagedPlacementKey(placementKey).
 		SetStagedPlacementStore(placementStore)
 	placementWatcher := placement.NewStagedPlacementWatcher(placementWatcherOpts)
-	require.NoError(t, placementWatcher.Watch())
-	aggregatorOpts = aggregatorOpts.
+	placementManagerOpts := aggregator.NewPlacementManagerOptions().
 		SetInstanceID(opts.InstanceID()).
 		SetStagedPlacementWatcher(placementWatcher)
+	placementManager := aggregator.NewPlacementManager(placementManagerOpts)
+	aggregatorOpts = aggregatorOpts.SetPlacementManager(placementManager)
+
+	// Set up flush times manager.
+	flushTimesManagerOpts := aggregator.NewFlushTimesManagerOptions().
+		SetFlushTimesKeyFmt(opts.FlushTimesKeyFmt()).
+		SetFlushTimesStore(opts.KVStore())
+	flushTimesManager := aggregator.NewFlushTimesManager(flushTimesManagerOpts)
+	aggregatorOpts = aggregatorOpts.SetFlushTimesManager(flushTimesManager)
+
+	// Set up election manager.
+	leaderValue := opts.InstanceID()
+	campaignOpts, err := services.NewCampaignOptions()
+	require.NoError(t, err)
+	campaignOpts = campaignOpts.SetLeaderValue(leaderValue)
+	electionKey := fmt.Sprintf(opts.ElectionKeyFmt(), opts.ShardSetID())
+	electionCluster := newTestCluster(t)
+	leaderService := electionCluster.LeaderService()
+	electionManagerOpts := aggregator.NewElectionManagerOptions().
+		SetCampaignOptions(campaignOpts).
+		SetElectionKeyFmt(opts.ElectionKeyFmt()).
+		SetLeaderService(leaderService).
+		SetPlacementManager(placementManager).
+		SetFlushTimesManager(flushTimesManager)
+	electionManager := aggregator.NewElectionManager(electionManagerOpts)
+	aggregatorOpts = aggregatorOpts.SetElectionManager(electionManager)
 
 	// Set up flush manager.
 	flushManagerOpts := aggregator.NewFlushManagerOptions().
+		SetPlacementManager(placementManager).
+		SetFlushTimesManager(flushTimesManager).
 		SetElectionManager(electionManager).
-		SetFlushTimesKeyFmt(opts.FlushTimesKeyFmt()).
-		SetFlushTimesStore(opts.KVStore()).
 		SetJitterEnabled(opts.JitterEnabled()).
-		SetMaxJitterFn(opts.MaxJitterFn()).
-		SetInstanceID(opts.InstanceID()).
-		SetStagedPlacementWatcher(placementWatcher)
+		SetMaxJitterFn(opts.MaxJitterFn())
 	flushManager := aggregator.NewFlushManager(flushManagerOpts)
 	aggregatorOpts = aggregatorOpts.SetFlushManager(flushManager)
 

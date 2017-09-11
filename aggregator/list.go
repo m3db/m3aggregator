@@ -43,36 +43,40 @@ var (
 )
 
 type metricListMetrics struct {
-	flushMetricConsumeSuccess tally.Counter
-	flushMetricConsumeErrors  tally.Counter
-	flushBufferConsumeSuccess tally.Counter
-	flushBufferConsumeErrors  tally.Counter
-	flushMetricDiscarded      tally.Counter
-	flushElemCollected        tally.Counter
-	flushDuration             tally.Timer
-	flushConsume              tally.Counter
-	flushDiscard              tally.Counter
-	flushBeforeStale          tally.Counter
-	flushBeforeDuration       tally.Timer
-	discardBefore             tally.Counter
+	flushMetricConsumeSuccess   tally.Counter
+	flushMetricConsumeErrors    tally.Counter
+	flushBufferConsumeSuccess   tally.Counter
+	flushBufferConsumeErrors    tally.Counter
+	flushMetricDiscarded        tally.Counter
+	flushElemCollected          tally.Counter
+	flushDuration               tally.Timer
+	flushBeforeCutover          tally.Counter
+	flushBetweenCutoverCutoff   tally.Counter
+	flushBetweenCutoffBufferEnd tally.Counter
+	flushAfterBufferEnd         tally.Counter
+	flushBeforeStale            tally.Counter
+	flushBeforeDuration         tally.Timer
+	discardBefore               tally.Counter
 }
 
 func newMetricListMetrics(scope tally.Scope) metricListMetrics {
 	flushScope := scope.SubScope("flush")
 	flushBeforeScope := scope.SubScope("flush-before")
 	return metricListMetrics{
-		flushMetricConsumeSuccess: flushScope.Counter("metric-consume-success"),
-		flushMetricConsumeErrors:  flushScope.Counter("metric-consume-errors"),
-		flushBufferConsumeSuccess: flushScope.Counter("buffer-consume-success"),
-		flushBufferConsumeErrors:  flushScope.Counter("buffer-consume-errors"),
-		flushMetricDiscarded:      flushScope.Counter("metric-discarded"),
-		flushElemCollected:        flushScope.Counter("elem-collected"),
-		flushDuration:             flushScope.Timer("duration"),
-		flushConsume:              flushScope.Counter("consume"),
-		flushDiscard:              flushScope.Counter("discard"),
-		flushBeforeStale:          flushBeforeScope.Counter("stale"),
-		flushBeforeDuration:       flushBeforeScope.Timer("duration"),
-		discardBefore:             scope.Counter("discard-before"),
+		flushMetricConsumeSuccess:   flushScope.Counter("metric-consume-success"),
+		flushMetricConsumeErrors:    flushScope.Counter("metric-consume-errors"),
+		flushBufferConsumeSuccess:   flushScope.Counter("buffer-consume-success"),
+		flushBufferConsumeErrors:    flushScope.Counter("buffer-consume-errors"),
+		flushMetricDiscarded:        flushScope.Counter("metric-discarded"),
+		flushElemCollected:          flushScope.Counter("elem-collected"),
+		flushDuration:               flushScope.Timer("duration"),
+		flushBeforeCutover:          flushScope.Counter("before-cutover"),
+		flushBetweenCutoverCutoff:   flushScope.Counter("between-cutover-cutoff"),
+		flushBetweenCutoffBufferEnd: flushScope.Counter("between-cutoff-bufferend"),
+		flushAfterBufferEnd:         flushScope.Counter("after-bufferend"),
+		flushBeforeStale:            flushBeforeScope.Counter("stale"),
+		flushBeforeDuration:         flushBeforeScope.Timer("duration"),
+		discardBefore:               scope.Counter("discard-before"),
 	}
 }
 
@@ -200,23 +204,50 @@ func (l *metricList) Close() {
 	}
 }
 
-func (l *metricList) Flush(cutoverNanos, cutoffNanos int64) {
+func (l *metricList) Flush(req FlushRequest) {
 	start := l.nowFn()
-	alignedNowNanos := l.alignedNowNanos()
 
-	// NB(xichen): If alignedNowNanos <= cutoverNanos, the aggregated metrics should
-	// be discarded because they are aggregated before traffic was cut over. On the
-	// other hand, if alignedNowNanos > cutoffNanos, the aggregated metrics should
-	// also be discarded because they are aggregated after traffic was cut off.
-	if alignedNowNanos > cutoverNanos && alignedNowNanos <= cutoffNanos {
-		l.flushBeforeFn(alignedNowNanos, consumeType)
-		l.metrics.flushConsume.Inc(1)
-	} else {
+	defer func() {
+		took := l.nowFn().Sub(start)
+		l.metrics.flushDuration.Record(took)
+	}()
+
+	// NB(xichen): it is important to determine ticking start time within the time lock
+	// because this ensures all the actions before `now` have completed if those actions
+	// are protected by the same read lock.
+	l.timeLock.Lock()
+	now := l.nowFn()
+	resolution := l.resolution
+	l.timeLock.Unlock()
+	alignedNow := now.Truncate(resolution)
+	alignedNowNanos := alignedNow.UnixNano()
+
+	// Metrics before shard cutover are discarded.
+	if alignedNowNanos <= req.CutoverNanos {
 		l.flushBeforeFn(alignedNowNanos, discardType)
-		l.metrics.flushDiscard.Inc(1)
+		l.metrics.flushBeforeCutover.Inc(1)
+		return
 	}
-	took := l.nowFn().Sub(start)
-	l.metrics.flushDuration.Record(took)
+
+	// Metrics between shard cutover and shard cutoff are consumed.
+	l.flushBeforeFn(req.CutoverNanos, discardType)
+	if alignedNowNanos <= req.CutoffNanos {
+		l.flushBeforeFn(alignedNowNanos, consumeType)
+		l.metrics.flushBetweenCutoverCutoff.Inc(1)
+		return
+	}
+
+	// Metrics after now-keepAfterCutoff are retained.
+	l.flushBeforeFn(req.CutoffNanos, consumeType)
+	alignedBufferEndNanos := alignedNow.Add(-req.BufferAfterCutoff).Truncate(resolution).UnixNano()
+	if alignedBufferEndNanos <= req.CutoffNanos {
+		l.metrics.flushBetweenCutoffBufferEnd.Inc(1)
+		return
+	}
+
+	// Metrics between cutoff and now-bufferAfterCutoff are discarded.
+	l.flushBeforeFn(alignedBufferEndNanos, discardType)
+	l.metrics.flushAfterBufferEnd.Inc(1)
 }
 
 func (l *metricList) DiscardBefore(beforeNanos int64) {
@@ -279,18 +310,6 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 	l.metrics.flushElemCollected.Inc(int64(numCollected))
 	flushBeforeDuration := l.nowFn().Sub(flushBeforeStart)
 	l.metrics.flushBeforeDuration.Record(flushBeforeDuration)
-}
-
-func (l *metricList) alignedNowNanos() int64 {
-	// NB(xichen): it is important to determine ticking start time within the time lock
-	// because this ensures all the actions before `now` have completed if those actions
-	// are protected by the same read lock.
-	l.timeLock.Lock()
-	now := l.nowFn()
-	resolution := l.resolution
-	l.timeLock.Unlock()
-	alignedNowNanos := now.Truncate(resolution).UnixNano()
-	return alignedNowNanos
 }
 
 func (l *metricList) consumeAggregatedMetric(

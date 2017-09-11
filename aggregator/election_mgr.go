@@ -26,11 +26,13 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/leader/campaign"
 	"github.com/m3db/m3x/clock"
+	"github.com/m3db/m3x/errors"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/watch"
@@ -40,11 +42,18 @@ import (
 
 // ElectionManager manages leadership elections.
 type ElectionManager interface {
+	// Reset resets the election manager.
+	Reset() error
+
 	// Open opens the election manager for a given shard set.
 	Open(shardSetID uint32) error
 
 	// ElectionState returns the election state.
 	ElectionState() ElectionState
+
+	// IsCampaigning returns true if the election manager is actively campaigning,
+	// and false otherwise.
+	IsCampaigning() bool
 
 	// Resign stops the election and resigns from the ongoing campaign if any, thereby
 	// forcing the current instance to become a follower. If the provided context
@@ -63,8 +72,9 @@ const (
 var (
 	errElectionManagerAlreadyOpenOrClosed = errors.New("election manager is already open or closed")
 	errElectionManagerNotOpenOrClosed     = errors.New("election manager is not open or closed")
-	errElectionManagerAlreadyResigning    = errors.New("election manager is already resigning")
+	errElectionManagerOpen                = errors.New("election manager is open")
 	errLeaderNotChanged                   = errors.New("leader has not changed")
+	errUnexpectedShardCutoverCutoffTimes  = errors.New("unexpected shard cutover and/or cutoff times")
 )
 
 type electionManagerState int
@@ -86,11 +96,11 @@ const (
 	// Follower state.
 	FollowerState
 
-	// Leader state.
-	LeaderState
-
 	// Pending follower state.
 	PendingFollowerState
+
+	// Leader state.
+	LeaderState
 )
 
 func newElectionState(state campaign.State) (ElectionState, error) {
@@ -144,37 +154,73 @@ func (state *ElectionState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type campaignState int
+
+const (
+	campaignUnknown campaignState = iota
+	campaignDisabled
+	campaignPendingDisabled
+	campaignEnabled
+)
+
+func newCampaignState(enabled bool) campaignState {
+	if enabled {
+		return campaignEnabled
+	}
+	return campaignDisabled
+}
+
 type electionManagerMetrics struct {
-	campaignCreateErrors      tally.Counter
-	campaignErrors            tally.Counter
-	campaignUnknownState      tally.Counter
-	verifyLeaderErrors        tally.Counter
-	verifyLeaderNotChanged    tally.Counter
-	verifyPendingChangeStale  tally.Counter
-	verifyNoKnownLeader       tally.Counter
-	followerResign            tally.Counter
-	resignTimeout             tally.Counter
-	resignErrors              tally.Counter
-	followerToPendingFollower tally.Counter
-	stateChanges              tally.Counter
-	electionState             tally.Gauge
+	campaignCreateErrors                   tally.Counter
+	campaignErrors                         tally.Counter
+	campaignUnknownState                   tally.Counter
+	campaignCheckErrors                    tally.Counter
+	campaignCheckHasActiveShards           tally.Counter
+	campaignCheckNoCutoverShards           tally.Counter
+	campaignCheckFlushTimesErrors          tally.Counter
+	campaignCheckReplacementInstanceErrors tally.Counter
+	campaignCheckHasReplacementInstance    tally.Counter
+	campaignCheckUnexpectedShardTimes      tally.Counter
+	verifyLeaderErrors                     tally.Counter
+	verifyLeaderNotChanged                 tally.Counter
+	verifyPendingChangeStale               tally.Counter
+	verifyNoKnownLeader                    tally.Counter
+	followerResign                         tally.Counter
+	resignTimeout                          tally.Counter
+	resignErrors                           tally.Counter
+	followerToPendingFollower              tally.Counter
+	electionState                          tally.Gauge
+	campaignState                          tally.Gauge
+	campaigning                            tally.Gauge
 }
 
 func newElectionManagerMetrics(scope tally.Scope) electionManagerMetrics {
+	campaignScope := scope.SubScope("campaign")
+	campaignCheckScope := scope.SubScope("campaign-check")
+	verifyScope := scope.SubScope("verify")
+	resignScope := scope.SubScope("resign")
 	return electionManagerMetrics{
-		campaignCreateErrors:      scope.Counter("campaign-create-errors"),
-		campaignErrors:            scope.Counter("campaign-errors"),
-		campaignUnknownState:      scope.Counter("campaign-unknown-state"),
-		verifyLeaderErrors:        scope.Counter("verify-leader-errors"),
-		verifyLeaderNotChanged:    scope.Counter("verify-leader-not-changed"),
-		verifyPendingChangeStale:  scope.Counter("verify-pending-change-stale"),
-		verifyNoKnownLeader:       scope.Counter("verify-no-known-leader"),
-		followerResign:            scope.Counter("follower-resign"),
-		resignTimeout:             scope.Counter("resign-timeout"),
-		resignErrors:              scope.Counter("resign-errors"),
-		followerToPendingFollower: scope.Counter("follower-to-pending-follower"),
-		stateChanges:              scope.Counter("state-changes"),
-		electionState:             scope.Gauge("election-state"),
+		campaignCreateErrors:                   campaignScope.Counter("create-errors"),
+		campaignErrors:                         campaignScope.Counter("errors"),
+		campaignUnknownState:                   campaignScope.Counter("unknown-state"),
+		campaignCheckErrors:                    campaignCheckScope.Counter("errors"),
+		campaignCheckHasActiveShards:           campaignCheckScope.Counter("has-active-shards"),
+		campaignCheckNoCutoverShards:           campaignCheckScope.Counter("no-cutover-shards"),
+		campaignCheckFlushTimesErrors:          campaignCheckScope.Counter("flush-times-errors"),
+		campaignCheckReplacementInstanceErrors: campaignCheckScope.Counter("repl-instance-errors"),
+		campaignCheckHasReplacementInstance:    campaignCheckScope.Counter("has-repl-instance"),
+		campaignCheckUnexpectedShardTimes:      campaignCheckScope.Counter("unexpected-shard-times"),
+		verifyLeaderErrors:                     verifyScope.Counter("leader-errors"),
+		verifyLeaderNotChanged:                 verifyScope.Counter("leader-not-changed"),
+		verifyPendingChangeStale:               verifyScope.Counter("pending-change-stale"),
+		verifyNoKnownLeader:                    verifyScope.Counter("no-known-leader"),
+		followerResign:                         resignScope.Counter("follower-resign"),
+		resignTimeout:                          resignScope.Counter("timeout"),
+		resignErrors:                           resignScope.Counter("errors"),
+		followerToPendingFollower:              scope.Counter("follower-to-pending-follower"),
+		electionState:                          scope.Gauge("election-state"),
+		campaignState:                          scope.Gauge("campaign-state"),
+		campaigning:                            scope.Gauge("campaigning"),
 	}
 }
 
@@ -185,26 +231,34 @@ type goalState struct {
 
 type electionManager struct {
 	sync.RWMutex
+	sync.WaitGroup
 
-	nowFn           clock.NowFn
-	logger          xlog.Logger
-	reportInterval  time.Duration
-	campaignOpts    services.CampaignOptions
-	electionOpts    services.ElectionOptions
-	campaignRetrier xretry.Retrier
-	changeRetrier   xretry.Retrier
-	electionKeyFmt  string
-	leaderService   services.LeaderService
-	leaderValue     string
+	nowFn                      clock.NowFn
+	logger                     xlog.Logger
+	reportInterval             time.Duration
+	campaignOpts               services.CampaignOptions
+	electionOpts               services.ElectionOptions
+	campaignRetrier            xretry.Retrier
+	changeRetrier              xretry.Retrier
+	resignRetrier              xretry.Retrier
+	electionKeyFmt             string
+	leaderService              services.LeaderService
+	leaderValue                string
+	placementManager           PlacementManager
+	flushTimesManager          FlushTimesManager
+	flushTimesChecker          flushTimesChecker
+	campaignStateCheckInterval time.Duration
+	shardCutoffCheckOffset     time.Duration
 
 	state                  electionManagerState
 	doneCh                 chan struct{}
+	campaigning            int32
+	campaignStateWatchable xwatch.Watchable
 	electionKey            string
 	electionStateWatchable xwatch.Watchable
 	nextGoalStateID        int64
-	goalStateLock          sync.RWMutex
+	goalStateLock          *sync.RWMutex
 	goalStateWatchable     xwatch.Watchable
-	resigning              bool
 	sleepFn                sleepFn
 	metrics                electionManagerMetrics
 }
@@ -212,28 +266,49 @@ type electionManager struct {
 // NewElectionManager creates a new election manager.
 func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 	instrumentOpts := opts.InstrumentOptions()
+	scope := instrumentOpts.MetricsScope()
 	campaignOpts := opts.CampaignOptions()
 	campaignRetrier := xretry.NewRetrier(opts.CampaignRetryOptions().SetForever(true))
 	changeRetrier := xretry.NewRetrier(opts.ChangeRetryOptions().SetForever(true))
-	electionStateWatchable := xwatch.NewWatchable()
-	electionStateWatchable.Update(FollowerState)
-	return &electionManager{
-		nowFn:                  opts.ClockOptions().NowFn(),
-		logger:                 instrumentOpts.Logger(),
-		reportInterval:         instrumentOpts.ReportInterval(),
-		campaignOpts:           campaignOpts,
-		electionOpts:           opts.ElectionOptions(),
-		campaignRetrier:        campaignRetrier,
-		changeRetrier:          changeRetrier,
-		electionKeyFmt:         opts.ElectionKeyFmt(),
-		leaderService:          opts.LeaderService(),
-		leaderValue:            campaignOpts.LeaderValue(),
-		state:                  electionManagerNotOpen,
-		doneCh:                 make(chan struct{}),
-		electionStateWatchable: electionStateWatchable,
-		goalStateWatchable:     xwatch.NewWatchable(),
-		sleepFn:                time.Sleep,
-		metrics:                newElectionManagerMetrics(instrumentOpts.MetricsScope()),
+	resignRetrier := xretry.NewRetrier(opts.ResignRetryOptions().SetForever(true))
+	mgr := &electionManager{
+		nowFn:                      opts.ClockOptions().NowFn(),
+		logger:                     instrumentOpts.Logger(),
+		reportInterval:             instrumentOpts.ReportInterval(),
+		campaignOpts:               campaignOpts,
+		electionOpts:               opts.ElectionOptions(),
+		campaignRetrier:            campaignRetrier,
+		changeRetrier:              changeRetrier,
+		resignRetrier:              resignRetrier,
+		electionKeyFmt:             opts.ElectionKeyFmt(),
+		leaderService:              opts.LeaderService(),
+		leaderValue:                campaignOpts.LeaderValue(),
+		placementManager:           opts.PlacementManager(),
+		flushTimesManager:          opts.FlushTimesManager(),
+		flushTimesChecker:          newFlushTimesChecker(scope.SubScope("campaign-check")),
+		campaignStateCheckInterval: opts.CampaignStateCheckInterval(),
+		shardCutoffCheckOffset:     opts.ShardCutoffCheckOffset(),
+		sleepFn:                    time.Sleep,
+		metrics:                    newElectionManagerMetrics(scope),
+	}
+	mgr.Lock()
+	mgr.resetWithLock()
+	mgr.Unlock()
+	return mgr
+}
+
+func (mgr *electionManager) Reset() error {
+	mgr.Lock()
+	defer mgr.Unlock()
+
+	switch mgr.state {
+	case electionManagerNotOpen:
+		return nil
+	case electionManagerOpen:
+		return errElectionManagerOpen
+	default:
+		mgr.resetWithLock()
+		return nil
 	}
 }
 
@@ -244,23 +319,28 @@ func (mgr *electionManager) Open(shardSetID uint32) error {
 	if mgr.state != electionManagerNotOpen {
 		return errElectionManagerAlreadyOpenOrClosed
 	}
-	mgr.state = electionManagerOpen
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
-
 	_, stateChangeWatch, err := mgr.goalStateWatchable.Watch()
 	if err != nil {
 		return err
 	}
-
 	_, verifyWatch, err := mgr.goalStateWatchable.Watch()
 	if err != nil {
 		return err
 	}
+	_, campaignStateWatch, err := mgr.campaignStateWatchable.Watch()
+	if err != nil {
+		return err
+	}
+	mgr.state = electionManagerOpen
 
+	mgr.Add(5)
 	go mgr.watchGoalStateChanges(stateChangeWatch)
 	go mgr.verifyPendingFollower(verifyWatch)
-	go mgr.campaignLoop()
+	go mgr.checkCampaignStateLoop()
+	go mgr.campaignLoop(campaignStateWatch)
 	go mgr.reportMetrics()
+
 	return nil
 }
 
@@ -268,40 +348,40 @@ func (mgr *electionManager) ElectionState() ElectionState {
 	return mgr.electionStateWatchable.Get().(ElectionState)
 }
 
+func (mgr *electionManager) IsCampaigning() bool {
+	return mgr.campaignState() == campaignEnabled
+}
+
 func (mgr *electionManager) Resign(ctx context.Context) error {
-	mgr.Lock()
-	if mgr.state != electionManagerOpen {
-		mgr.Unlock()
+	mgr.RLock()
+	state := mgr.state
+	mgr.RUnlock()
+	if state != electionManagerOpen {
 		return errElectionManagerNotOpenOrClosed
 	}
-	if mgr.resigning {
-		mgr.Unlock()
-		return errElectionManagerAlreadyResigning
-	}
-	if mgr.ElectionState() == FollowerState {
-		mgr.Unlock()
-		mgr.metrics.followerResign.Inc(1)
-		return nil
-	}
-	mgr.resigning = true
-	mgr.Unlock()
-
-	defer func() {
-		mgr.Lock()
-		mgr.resigning = false
-		mgr.Unlock()
-	}()
 
 	_, watch, err := mgr.electionStateWatchable.Watch()
 	if err != nil {
 		return fmt.Errorf("error creating watch when resigning: %v", err)
 	}
 	defer watch.Close()
+	if electionState := watch.Get().(ElectionState); electionState == FollowerState {
+		mgr.metrics.followerResign.Inc(1)
+		return nil
+	}
 
-	if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
-		mgr.metrics.resignErrors.Inc(1)
-		mgr.logError("resign error", err)
-		return err
+	ctxNotDone := func(int) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+			return true
+		}
+	}
+	if err := mgr.resignWhile(ctxNotDone); err != nil {
+		mgr.metrics.resignTimeout.Inc(1)
+		mgr.logError("resign error", ctx.Err())
+		return ctx.Err()
 	}
 
 	for {
@@ -320,18 +400,23 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 
 func (mgr *electionManager) Close() error {
 	mgr.Lock()
-	defer mgr.Unlock()
-
 	if mgr.state != electionManagerOpen {
+		mgr.Unlock()
 		return errElectionManagerNotOpenOrClosed
 	}
 	close(mgr.doneCh)
 	mgr.state = electionManagerClosed
+	mgr.Unlock()
+
+	mgr.Wait()
 	return nil
 }
 
 func (mgr *electionManager) watchGoalStateChanges(watch xwatch.Watch) {
-	defer watch.Close()
+	defer func() {
+		watch.Close()
+		mgr.Done()
+	}()
 
 	for {
 		select {
@@ -359,12 +444,14 @@ func (mgr *electionManager) processGoalState(goalState goalState) {
 		return
 	}
 	mgr.electionStateWatchable.Update(newState)
-	mgr.metrics.stateChanges.Inc(1)
 	mgr.logger.Info(fmt.Sprintf("election state changed from %v to %v", currState, newState))
 }
 
 func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
-	defer watch.Close()
+	defer func() {
+		watch.Close()
+		mgr.Done()
+	}()
 
 	for {
 		select {
@@ -420,22 +507,174 @@ func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
 	}
 }
 
-func (mgr *electionManager) campaignLoop() {
+func (mgr *electionManager) campaignState() campaignState {
+	return mgr.campaignStateWatchable.Get().(campaignState)
+}
+
+func (mgr *electionManager) checkCampaignStateLoop() {
+	defer mgr.Done()
+
+	ticker := time.NewTicker(mgr.campaignStateCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			enabled, err := mgr.campaignIsEnabled()
+			if err != nil {
+				mgr.metrics.campaignCheckErrors.Inc(1)
+				continue
+			}
+			newState := newCampaignState(enabled)
+			currState := mgr.campaignStateWatchable.Get().(campaignState)
+			if currState == newState {
+				continue
+			}
+			mgr.processCampaignStateChange(newState)
+		case <-mgr.doneCh:
+			return
+		}
+	}
+}
+
+func (mgr *electionManager) processCampaignStateChange(newState campaignState) {
+	switch newState {
+	case campaignEnabled:
+		mgr.campaignStateWatchable.Update(campaignEnabled)
+	case campaignDisabled:
+		mgr.campaignStateWatchable.Update(campaignPendingDisabled)
+		// NB(xichen): if campaign should be disabled, we need to resign from
+		// any ongoing campaign and retry on errors until either we succeed or
+		// the campaign becomes enabled.
+		var (
+			enabled     bool
+			campaignErr error
+		)
+		shouldResignFn := func(int) bool {
+			enabled, campaignErr = mgr.campaignIsEnabled()
+			if campaignErr != nil {
+				mgr.metrics.campaignCheckErrors.Inc(1)
+				return false
+			}
+			return !enabled
+		}
+		if err := mgr.resignWhile(shouldResignFn); err == nil {
+			mgr.campaignStateWatchable.Update(campaignDisabled)
+		} else if enabled {
+			mgr.campaignStateWatchable.Update(campaignEnabled)
+		}
+	}
+}
+
+func (mgr *electionManager) campaignIsEnabled() (bool, error) {
+	// If the current instance is not found in the placement, campaigning is disabled.
+	shards, err := mgr.placementManager.Shards()
+	if err == errInstanceNotFoundInPlacement {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	// NB(xichen): We apply an offset when checking if a shard has been cutoff in order
+	// to detect if the campaign should be stopped before all the shards are cut off.
+	// This is to avoid the situation where the campaign is stopped after the shards
+	// are cut off, and the instance gets promoted to leader before the campaign is stopped,
+	// causing incomplete data to be flushed.
+	var (
+		nowNanos        = mgr.nowFn().UnixNano()
+		noCutoverShards = true
+		allCutoffShards = true
+		allShards       = shards.All()
+	)
+	for _, shard := range allShards {
+		hasCutover := nowNanos >= shard.CutoverNanos()
+		hasNotCutoff := nowNanos < shard.CutoffNanos()-int64(mgr.shardCutoffCheckOffset)
+		if hasCutover && hasNotCutoff {
+			mgr.metrics.campaignCheckHasActiveShards.Inc(1)
+			return true, nil
+		}
+		noCutoverShards = noCutoverShards && !hasCutover
+		allCutoffShards = allCutoffShards && !hasNotCutoff
+	}
+
+	// If no shards have been cut over, campaign is disabled to avoid writing
+	// incomplele data before shards are cut over.
+	if noCutoverShards {
+		mgr.metrics.campaignCheckNoCutoverShards.Inc(1)
+		return false, nil
+	}
+
+	// If all shards have been cut off, campaigning is disabled when:
+	// * The flush times persisted in kv are no earlier than the shards' cutoff times
+	//   indicating this instance's data have been consumed downstream and are no longer
+	//   needed, or
+	// * There is an instance with the same shard set id replacing the current instance,
+	//   indicating the replacement instance has a copy of this instance's data and as
+	//   such this instance's data are no longer needed.
+	if allCutoffShards {
+		multiErr := xerrors.NewMultiError()
+
+		// Check flush times persisted in kv.
+		flushTimes, err := mgr.flushTimesManager.Get()
+		if err != nil {
+			multiErr = multiErr.Add(err)
+			mgr.metrics.campaignCheckFlushTimesErrors.Inc(1)
+		} else {
+			allFlushed := true
+			for _, shard := range allShards {
+				if hasFlushedTillCutoff := mgr.flushTimesChecker.HasFlushed(
+					shard.ID(),
+					shard.CutoffNanos(),
+					flushTimes,
+				); !hasFlushedTillCutoff {
+					allFlushed = false
+					break
+				}
+			}
+			if allFlushed {
+				return false, nil
+			}
+		}
+
+		// Check if there is a replacement instance.
+		hasReplacementInstance, err := mgr.placementManager.HasReplacementInstance()
+		if err != nil {
+			multiErr = multiErr.Add(err)
+			mgr.metrics.campaignCheckReplacementInstanceErrors.Inc(1)
+		} else if hasReplacementInstance {
+			mgr.metrics.campaignCheckHasReplacementInstance.Inc(1)
+			return false, nil
+		}
+
+		if err := multiErr.FinalError(); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	// TODO(xichen): handle this to enable multiple concurrent topology changes.
+	mgr.metrics.campaignCheckUnexpectedShardTimes.Inc(1)
+	return false, errUnexpectedShardCutoverCutoffTimes
+}
+
+func (mgr *electionManager) campaignLoop(campaignStateWatch xwatch.Watch) {
+	defer mgr.Done()
+
 	var campaignStatusCh <-chan campaign.Status
-	notDone := func(int) bool {
+	shouldCampaignFn := func(int) bool {
 		select {
 		case <-mgr.doneCh:
 			return false
 		default:
-			return true
+			campaignState := campaignStateWatch.Get().(campaignState)
+			return campaignState == campaignEnabled
 		}
 	}
 
 	for {
 		if campaignStatusCh == nil {
-			// NB(xichen): campaign retrier retries forever until either the Campaign call succeeds,
-			// or the election manager has resigned.
-			if err := mgr.campaignRetrier.AttemptWhile(notDone, func() error {
+			if err := mgr.campaignRetrier.AttemptWhile(shouldCampaignFn, func() error {
 				var err error
 				campaignStatusCh, err = mgr.leaderService.Campaign(mgr.electionKey, mgr.campaignOpts)
 				if err == nil {
@@ -444,29 +683,36 @@ func (mgr *electionManager) campaignLoop() {
 				mgr.metrics.campaignCreateErrors.Inc(1)
 				mgr.logError("error creating campaign", err)
 				return err
-			}); err == xretry.ErrWhileConditionFalse {
-				return
+			}); err == nil {
+				atomic.StoreInt32(&mgr.campaigning, 1)
+			} else {
+				// If we get here, either the manager is closed or the campaign is disabled.
+				// If the manager is closed, we return immediately. Otherwise we wait for a
+				// change in the campaign enabled status before continuing campaigning.
+				select {
+				case <-mgr.doneCh:
+					return
+				case <-campaignStateWatch.C():
+					continue
+				}
 			}
 		}
 
-		var (
-			campaignStatus campaign.Status
-			ok             bool
-		)
 		select {
-		case campaignStatus, ok = <-campaignStatusCh:
+		case campaignStatus, ok := <-campaignStatusCh:
 			// If the campaign status channel is closed, this is either because session has expired,
 			// or we have resigned from the campaign, or there are issues with the underlying etcd
 			// cluster, in which case we back off a little and restart the campaign.
 			if !ok {
 				campaignStatusCh = nil
+				atomic.StoreInt32(&mgr.campaigning, 0)
 				mgr.sleepFn(backOffOnResignOrElectionError)
 				continue
 			}
+			mgr.processCampaignUpdate(campaignStatus)
 		case <-mgr.doneCh:
 			return
 		}
-		mgr.processCampaignUpdate(campaignStatus)
 	}
 }
 
@@ -496,13 +742,43 @@ func (mgr *electionManager) setGoalStateWithLock(newState ElectionState) {
 	mgr.goalStateWatchable.Update(newGoalState)
 }
 
+func (mgr *electionManager) resetWithLock() {
+	mgr.state = electionManagerNotOpen
+	mgr.doneCh = make(chan struct{})
+	mgr.campaigning = 0
+	mgr.campaignStateWatchable = xwatch.NewWatchable()
+	mgr.campaignStateWatchable.Update(campaignUnknown)
+	mgr.electionStateWatchable = xwatch.NewWatchable()
+	mgr.electionStateWatchable.Update(FollowerState)
+	mgr.nextGoalStateID = 0
+	mgr.goalStateLock = &sync.RWMutex{}
+	mgr.goalStateWatchable = xwatch.NewWatchable()
+}
+
+func (mgr *electionManager) resignWhile(continueFn xretry.ContinueFn) error {
+	return mgr.resignRetrier.AttemptWhile(continueFn, func() error {
+		if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
+			mgr.metrics.resignErrors.Inc(1)
+			mgr.logError("resign error", err)
+			return err
+		}
+		return nil
+	})
+}
+
 func (mgr *electionManager) reportMetrics() {
+	defer mgr.Done()
+
 	ticker := time.NewTicker(mgr.reportInterval)
 	for {
 		select {
 		case <-ticker.C:
-			currState := mgr.ElectionState()
-			mgr.metrics.electionState.Update(float64(currState))
+			electionState := mgr.ElectionState()
+			campaignState := mgr.campaignState()
+			campaigning := atomic.LoadInt32(&mgr.campaigning)
+			mgr.metrics.electionState.Update(float64(electionState))
+			mgr.metrics.campaignState.Update(float64(campaignState))
+			mgr.metrics.campaigning.Update(float64(campaigning))
 		case <-mgr.doneCh:
 			ticker.Stop()
 			return

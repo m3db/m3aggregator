@@ -130,7 +130,10 @@ func TestMetricListFlushWithCutoverCutoffNanos(t *testing.T) {
 		},
 	}
 	for _, input := range inputs {
-		l.Flush(input.cutoverNanos, input.cutoffNanos)
+		l.Flush(FlushRequest{
+			CutoverNanos: input.cutoverNanos,
+			CutoffNanos:  input.cutoffNanos,
+		})
 		require.Equal(t, input.expectedBeforeNanos, beforeNanosRes)
 		require.Equal(t, input.expectedFlushType, flushTypeRes)
 	}
@@ -198,7 +201,10 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 	}
 
 	// Force a flush.
-	l.Flush(cutoverNanos, cutoffNanos)
+	l.Flush(FlushRequest{
+		CutoverNanos: cutoverNanos,
+		CutoffNanos:  cutoffNanos,
+	})
 
 	// Assert nothing has been collected.
 	bufferLock.Lock()
@@ -211,7 +217,10 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 		atomic.StoreInt64(&now, nowTs.UnixNano())
 
 		// Force a flush.
-		l.Flush(cutoverNanos, cutoffNanos)
+		l.Flush(FlushRequest{
+			CutoverNanos: cutoverNanos,
+			CutoffNanos:  cutoffNanos,
+		})
 
 		var expected []testAggMetric
 		alignedStart := nowTs.Truncate(l.resolution).UnixNano()
@@ -237,7 +246,10 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 	atomic.StoreInt64(&now, nowTs.UnixNano())
 
 	// Force a flush.
-	l.Flush(cutoverNanos, cutoffNanos)
+	l.Flush(FlushRequest{
+		CutoverNanos: cutoverNanos,
+		CutoffNanos:  cutoffNanos,
+	})
 
 	// Assert nothing has been collected.
 	bufferLock.Lock()
@@ -253,7 +265,10 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 	// Move the time forward and force a flush.
 	nowTs = nowTs.Add(l.resolution)
 	atomic.StoreInt64(&now, nowTs.UnixNano())
-	l.Flush(cutoverNanos, cutoffNanos)
+	l.Flush(FlushRequest{
+		CutoverNanos: cutoverNanos,
+		CutoffNanos:  cutoffNanos,
+	})
 
 	// Assert all elements have been collected.
 	require.Equal(t, 0, l.aggregations.Len())

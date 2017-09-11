@@ -18,21 +18,41 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package integration
+package aggregator
 
 import (
-	"time"
+	schema "github.com/m3db/m3aggregator/generated/proto/flush"
+	"github.com/m3db/m3x/watch"
 )
 
-type conditionFn func() bool
+type openShardSetIDFn func(shardSetID uint32) error
+type getFlushTimesFn func() (*schema.ShardSetFlushTimes, error)
+type watchFlushTimesFn func() (xwatch.Watch, error)
+type storeAsyncFn func(value *schema.ShardSetFlushTimes) error
 
-func waitUntil(fn conditionFn, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return true
-		}
-		time.Sleep(time.Second)
-	}
-	return false
+type mockFlushTimesManager struct {
+	openShardSetIDFn  openShardSetIDFn
+	getFlushTimesFn   getFlushTimesFn
+	watchFlushTimesFn watchFlushTimesFn
+	storeAsyncFn      storeAsyncFn
 }
+
+func (m *mockFlushTimesManager) Reset() error { return nil }
+
+func (m *mockFlushTimesManager) Open(shardSetID uint32) error {
+	return m.openShardSetIDFn(shardSetID)
+}
+
+func (m *mockFlushTimesManager) Get() (*schema.ShardSetFlushTimes, error) {
+	return m.getFlushTimesFn()
+}
+
+func (m *mockFlushTimesManager) Watch() (xwatch.Watch, error) {
+	return m.watchFlushTimesFn()
+}
+
+func (m *mockFlushTimesManager) StoreAsync(value *schema.ShardSetFlushTimes) error {
+	return m.storeAsyncFn(value)
+}
+
+func (m *mockFlushTimesManager) Close() error { return nil }
