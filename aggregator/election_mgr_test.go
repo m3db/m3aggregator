@@ -119,25 +119,11 @@ func TestElectionManagerResignAlreadyClosed(t *testing.T) {
 	require.Equal(t, errElectionManagerNotOpenOrClosed, mgr.Resign(context.Background()))
 }
 
-/*
-func TestElectionManagerResignAlreadyResigning(t *testing.T) {
-	leaderService := &mockLeaderService{
-		campaignFn: func(
-			electionID string,
-			opts services.CampaignOptions,
-		) (<-chan campaign.Status, error) {
-			return make(chan campaign.Status), nil
-		},
-	}
-	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
-	mgr := NewElectionManager(opts).(*electionManager)
-	require.NoError(t, mgr.Open(testShardSetID))
-	mgr.resigning = true
-	require.Equal(t, errElectionManagerAlreadyResigning, mgr.Resign(context.Background()))
-}
-
 func TestElectionManagerResignLeaderServiceResignError(t *testing.T) {
+	iter := 0
 	errLeaderServiceResign := errors.New("leader service resign error")
+	opts := testElectionManagerOptions(t)
+	mgr := NewElectionManager(opts).(*electionManager)
 	leaderService := &mockLeaderService{
 		campaignFn: func(
 			electionID string,
@@ -146,20 +132,29 @@ func TestElectionManagerResignLeaderServiceResignError(t *testing.T) {
 			return make(chan campaign.Status), nil
 		},
 		resignFn: func(electionID string) error {
-			return errLeaderServiceResign
+			iter++
+			if iter < 3 {
+				return errLeaderServiceResign
+			}
+			mgr.electionStateWatchable.Update(FollowerState)
+			return nil
 		},
 	}
-	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
-	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.leaderService = leaderService
+	retryOpts := xretry.NewOptions().
+		SetInitialBackoff(10 * time.Millisecond).
+		SetBackoffFactor(2).
+		SetMaxBackoff(50 * time.Millisecond).
+		SetForever(true)
+	mgr.resignRetrier = xretry.NewRetrier(retryOpts)
 	mgr.sleepFn = func(time.Duration) {}
 	mgr.electionStateWatchable.Update(LeaderState)
 	require.NoError(t, mgr.Open(testShardSetID))
-	require.Error(t, mgr.Resign(context.Background()))
+	require.NoError(t, mgr.Resign(context.Background()))
+	require.Equal(t, 3, iter)
 	require.Equal(t, electionManagerOpen, mgr.state)
-	require.False(t, mgr.resigning)
 	require.NoError(t, mgr.Close())
 }
-*/
 
 func TestElectionManagerResignTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)

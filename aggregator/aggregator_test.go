@@ -24,9 +24,11 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sort"
 	"testing"
 	"time"
 
+	schema "github.com/m3db/m3aggregator/generated/proto/flush"
 	"github.com/m3db/m3cluster/generated/proto/placementpb"
 	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/kv/mem"
@@ -113,7 +115,6 @@ func TestAggregatorAddMetricWithPoliciesListSuccessNoPlacementUpdate(t *testing.
 	require.Equal(t, 1, len(agg.shards[1].metricMap.entries))
 }
 
-/*
 func TestAggregatorAddMetricWithPoliciesListSuccessWithPlacementUpdate(t *testing.T) {
 	agg, store := testAggregator(t)
 	now := time.Unix(0, 12345)
@@ -137,7 +138,7 @@ func TestAggregatorAddMetricWithPoliciesListSuccessWithPlacementUpdate(t *testin
 
 	// Wait for the placement to be updated.
 	for {
-		placement, err := agg.placement()
+		placement, err := agg.placementManager.Placement()
 		require.NoError(t, err)
 		if placement.CutoverNanos() == 5678 {
 			break
@@ -182,7 +183,6 @@ func TestAggregatorAddMetricWithPoliciesListSuccessWithPlacementUpdate(t *testin
 		time.Sleep(100 * time.Millisecond)
 	}
 }
-*/
 
 func TestAggregatorResignError(t *testing.T) {
 	errTestResign := errors.New("test resign")
@@ -227,9 +227,12 @@ func TestAggregatorCloseSuccess(t *testing.T) {
 	require.Equal(t, aggregatorClosed, agg.state)
 }
 
-/*
 func TestAggregatorTick(t *testing.T) {
 	agg, _ := testAggregator(t)
+	agg.flushTimesManager = &mockFlushTimesManager{
+		openShardSetIDFn: func(shardSetID uint32) error { return nil },
+		getFlushTimesFn:  func() (*schema.ShardSetFlushTimes, error) { return nil, nil },
+	}
 	require.NoError(t, agg.Open())
 
 	// Forcing a tick.
@@ -245,38 +248,75 @@ func TestAggregatorOwnedShards(t *testing.T) {
 	agg.nowFn = nowFn
 	agg.opts = agg.opts.SetClockOptions(agg.opts.ClockOptions().SetNowFn(nowFn))
 
-	shardCutoffNanos := []int64{math.MaxInt64, 1234, 56789, 8901}
-	agg.shardIDs = make([]uint32, 0, len(shardCutoffNanos))
-	agg.shards = make([]*aggregatorShard, 0, len(shardCutoffNanos))
-	for i, cutoffNanos := range shardCutoffNanos {
+	inputs := []struct {
+		cutoffNanos         int64
+		latestWritableNanos int64
+		flushedNanos        int64
+	}{
+		{
+			cutoffNanos:         math.MaxInt64,
+			latestWritableNanos: math.MaxInt64,
+			flushedNanos:        12340,
+		},
+		{
+			cutoffNanos:         1234,
+			latestWritableNanos: 5678,
+			flushedNanos:        1234,
+		},
+		{
+			cutoffNanos:         56789,
+			latestWritableNanos: 67890,
+			flushedNanos:        12345,
+		},
+		{
+			cutoffNanos:         8901,
+			latestWritableNanos: 34567,
+			flushedNanos:        7200,
+		},
+	}
+	flushTimes := make(map[uint32]*schema.ShardFlushTimes, len(inputs))
+	agg.shardIDs = make([]uint32, 0, len(inputs))
+	agg.shards = make([]*aggregatorShard, 0, len(inputs))
+	for i, input := range inputs {
 		shardID := uint32(i)
 		shard := newAggregatorShard(shardID, agg.opts)
-		shard.latestWriteableNanos = cutoffNanos
+		shard.cutoffNanos = input.cutoffNanos
+		shard.latestWriteableNanos = input.latestWritableNanos
+		flushTimes[shardID] = &schema.ShardFlushTimes{
+			ByResolution: map[int64]int64{
+				int64(time.Second): input.flushedNanos,
+			},
+		}
 		agg.shardIDs = append(agg.shardIDs, shardID)
 		agg.shards = append(agg.shards, shard)
 	}
+	agg.flushTimesManager = &mockFlushTimesManager{
+		openShardSetIDFn: func(shardSetID uint32) error { return nil },
+		getFlushTimesFn: func() (*schema.ShardSetFlushTimes, error) {
+			return &schema.ShardSetFlushTimes{ByShard: flushTimes}, nil
+		},
+	}
 
-	expectedOwned := []*aggregatorShard{agg.shards[0], agg.shards[2]}
-	expectedToClose := []*aggregatorShard{agg.shards[1], agg.shards[3]}
+	expectedOwned := []*aggregatorShard{agg.shards[0], agg.shards[3], agg.shards[2]}
+	expectedToClose := []*aggregatorShard{agg.shards[1]}
 	owned, toClose := agg.ownedShards()
 	require.Equal(t, expectedOwned, owned)
 	require.Equal(t, expectedToClose, toClose)
 
-	expectedShardIDs := []uint32{0, 2}
+	expectedShardIDs := []uint32{0, 3, 2}
 	shardIDs := make([]uint32, len(agg.shardIDs))
 	copy(shardIDs, agg.shardIDs)
 	sort.Sort(uint32Ascending(shardIDs))
 	require.Equal(t, expectedShardIDs, agg.shardIDs)
 
 	for i := 0; i < 4; i++ {
-		if i == 0 || i == 2 {
-			require.NotNil(t, agg.shards[i])
-		} else {
+		if i == 1 {
 			require.Nil(t, agg.shards[i])
+		} else {
+			require.NotNil(t, agg.shards[i])
 		}
 	}
 }
-*/
 
 func testAggregator(t *testing.T) (*aggregator, kv.Store) {
 	watcher, store := testPlacementWatcherWithNumShards(t, testInstanceID, testNumShards, testPlacementKey)
@@ -377,10 +417,8 @@ func testOptions() Options {
 		})
 }
 
-/*
 type uint32Ascending []uint32
 
 func (a uint32Ascending) Len() int           { return len(a) }
 func (a uint32Ascending) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a uint32Ascending) Less(i, j int) bool { return a[i] < a[j] }
-*/

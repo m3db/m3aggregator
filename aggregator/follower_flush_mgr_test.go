@@ -24,24 +24,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m3db/m3x/watch"
+
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
 )
 
-/*
 func TestFollowerFlushManagerOpen(t *testing.T) {
-	flushTimesKeyFmt := "/shardset/%d/flush"
-	store := mem.NewStore()
 	doneCh := make(chan struct{})
-	opts := NewFlushManagerOptions().
-		SetFlushTimesKeyFmt(flushTimesKeyFmt).
-		SetFlushTimesStore(store)
-	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
-	mgr.Open(testShardSetID)
-	require.Equal(t, "/shardset/0/flush", mgr.flushTimesKey)
-
-	_, err := store.Set(mgr.flushTimesKey, testFlushTimes)
+	watchable := xwatch.NewWatchable()
+	_, watch, err := watchable.Watch()
 	require.NoError(t, err)
+	flushTimesManager := &mockFlushTimesManager{
+		watchFlushTimesFn: func() (xwatch.Watch, error) {
+			return watch, nil
+		},
+	}
+	opts := NewFlushManagerOptions().SetFlushTimesManager(flushTimesManager)
+	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	mgr.Open()
+
+	watchable.Update(testFlushTimes)
 	for {
 		mgr.RLock()
 		state := mgr.flushTimesState
@@ -54,7 +57,6 @@ func TestFollowerFlushManagerOpen(t *testing.T) {
 	require.Equal(t, testFlushTimes, mgr.proto)
 	close(doneCh)
 }
-*/
 
 func TestFollowerFlushManagerCanNotLeadNotCampaigning(t *testing.T) {
 	doneCh := make(chan struct{})
