@@ -202,6 +202,8 @@ func (mgr *flushTimesManager) Close() error {
 	mgr.Unlock()
 
 	mgr.Wait()
+	mgr.flushTimesWatchable.Close()
+	mgr.persistWatchable.Close()
 	return nil
 }
 
@@ -262,19 +264,29 @@ func (mgr *flushTimesManager) persistFlushTimes(persistWatch xwatch.Watch) {
 	}
 }
 
-type flushTimesChecker struct {
+type flushTimesCheckerMetrics struct {
 	noFlushTimes    tally.Counter
 	shardNotFound   tally.Counter
 	notFullyFlushed tally.Counter
 	allFlushed      tally.Counter
 }
 
-func newFlushTimesChecker(scope tally.Scope) flushTimesChecker {
-	return flushTimesChecker{
+func newFlushTimesCheckerMetrics(scope tally.Scope) flushTimesCheckerMetrics {
+	return flushTimesCheckerMetrics{
 		noFlushTimes:    scope.Counter("no-flush-times"),
 		shardNotFound:   scope.Counter("shard-not-found"),
 		notFullyFlushed: scope.Counter("not-fully-flushed"),
 		allFlushed:      scope.Counter("all-flushed"),
+	}
+}
+
+type flushTimesChecker struct {
+	metrics flushTimesCheckerMetrics
+}
+
+func newFlushTimesChecker(scope tally.Scope) flushTimesChecker {
+	return flushTimesChecker{
+		metrics: newFlushTimesCheckerMetrics(scope),
 	}
 }
 
@@ -287,20 +299,20 @@ func (sc flushTimesChecker) HasFlushed(
 	flushTimes *schema.ShardSetFlushTimes,
 ) bool {
 	if flushTimes == nil {
-		sc.noFlushTimes.Inc(1)
+		sc.metrics.noFlushTimes.Inc(1)
 		return false
 	}
 	shardFlushTimes, exists := flushTimes.ByShard[shardID]
 	if !exists {
-		sc.shardNotFound.Inc(1)
+		sc.metrics.shardNotFound.Inc(1)
 		return false
 	}
 	for _, lastFlushedNanos := range shardFlushTimes.ByResolution {
 		if lastFlushedNanos < targetNanos {
-			sc.notFullyFlushed.Inc(1)
+			sc.metrics.notFullyFlushed.Inc(1)
 			return false
 		}
 	}
-	sc.allFlushed.Inc(1)
+	sc.metrics.allFlushed.Inc(1)
 	return true
 }

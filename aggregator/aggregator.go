@@ -365,13 +365,32 @@ func (agg *aggregator) shouldProcessPlacementWithLock(newPlacement placement.Pla
 	return agg.placementCutoverNanos < newPlacement.CutoverNanos()
 }
 
-// updateShardSetWithLock updates the instance's shard set id given the instance from
-// the latest placement, or nil if the current instance is not found in the placement.
+// updateShardSetWithLock resets the instance's shard set id given the instance from
+// the latest placement, or clears it if the instance is nil (i.e., instance not found).
 func (agg *aggregator) updateShardSetIDWithLock(instance placement.Instance) error {
+	if instance == nil {
+		return agg.clearShardSetIDWithLock()
+	}
+	return agg.resetShardSetIDWithLock(instance)
+}
+
+// clearShardSetIDWithLock clears the instance's shard set id.
+func (agg *aggregator) clearShardSetIDWithLock() error {
 	if !agg.shardSetOpen {
-		if instance == nil {
-			return nil
-		}
+		return nil
+	}
+	if err := agg.closeShardSetWithLock(); err != nil {
+		return err
+	}
+	agg.shardSetID = 0
+	agg.shardSetOpen = false
+	return nil
+}
+
+// resetShardSetIDWithLock resets the instance's shard set id given the instance from
+// the latest placement.
+func (agg *aggregator) resetShardSetIDWithLock(instance placement.Instance) error {
+	if !agg.shardSetOpen {
 		shardSetID := instance.ShardSetID()
 		if err := agg.openShardSetWithLock(shardSetID); err != nil {
 			return err
@@ -380,16 +399,11 @@ func (agg *aggregator) updateShardSetIDWithLock(instance placement.Instance) err
 		agg.shardSetOpen = true
 		return nil
 	}
-	if instance != nil && instance.ShardSetID() == agg.shardSetID {
+	if instance.ShardSetID() == agg.shardSetID {
 		return nil
 	}
 	if err := agg.closeShardSetWithLock(); err != nil {
 		return err
-	}
-	if instance == nil {
-		agg.shardSetID = 0
-		agg.shardSetOpen = false
-		return nil
 	}
 	newShardSetID := instance.ShardSetID()
 	if err := agg.openShardSetWithLock(newShardSetID); err != nil {
@@ -508,17 +522,18 @@ func (agg *aggregator) ownedShards() (owned, toClose []*aggregatorShard) {
 	for i := 0; i < len(agg.shardIDs); i++ {
 		shardID := agg.shardIDs[i]
 		shard := agg.shards[shardID]
-		hasFlushedTillCutoff := agg.flushTimesChecker.HasFlushed(
-			shard.ID(),
-			shard.CutoffNanos(),
-			flushTimes,
-		)
 		// NB(xichen): a shard can be closed when all of the following conditions are met:
 		// * The shard is not writeable.
 		// * The shard has been cut off (we do not want to close a shard that has not been
 		//   cut over in that it may be warming up).
 		// * All of the shard's data has been flushed up until the shard's cutoff time.
-		canCloseShard := !shard.IsWritable() && shard.IsCutoff() && hasFlushedTillCutoff
+		canCloseShard := !shard.IsWritable() &&
+			shard.IsCutoff() &&
+			agg.flushTimesChecker.HasFlushed(
+				shard.ID(),
+				shard.CutoffNanos(),
+				flushTimes,
+			)
 		if !canCloseShard {
 			owned = append(owned, shard)
 		} else {

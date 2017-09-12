@@ -128,7 +128,7 @@ func TestFlushTimesManagerWatchSuccess(t *testing.T) {
 
 	select {
 	case <-watch.C():
-		require.Fail(t, "unexpected watch notificaiton")
+		require.Fail(t, "unexpected watch notification")
 	default:
 	}
 

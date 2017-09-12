@@ -382,6 +382,7 @@ func (mgr *electionManager) Resign(ctx context.Context) error {
 			return true
 		}
 	}
+	// Log the context error because the error returned from the retrier is not helpful.
 	if err := mgr.resignWhile(ctxNotDone); err != nil {
 		mgr.metrics.resignTimeout.Inc(1)
 		mgr.logError("resign error", ctx.Err())
@@ -413,6 +414,9 @@ func (mgr *electionManager) Close() error {
 	mgr.Unlock()
 
 	mgr.Wait()
+	mgr.campaignStateWatchable.Close()
+	mgr.electionStateWatchable.Close()
+	mgr.goalStateWatchable.Close()
 	return nil
 }
 

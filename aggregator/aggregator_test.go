@@ -558,6 +558,7 @@ func testAggregatorWithCustomPlacements(
 	return NewAggregator(opts).(*aggregator), store
 }
 
+// nolint: unparam
 func testPlacementWatcherWithPlacementProto(
 	t *testing.T,
 	placementKey string,

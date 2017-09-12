@@ -185,7 +185,7 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 	nowFn := func() time.Time { return now }
 	doneCh := make(chan struct{})
 	opts := NewFlushManagerOptions().
-		SetMaxBufferSize(time.Second).
+		SetMaxBufferSize(time.Minute).
 		SetForcedFlushWindowSize(10 * time.Second).
 		SetCheckEvery(time.Second)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
@@ -193,7 +193,8 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 	mgr.flushTimesState = flushTimesProcessed
 	mgr.lastFlushed = now
 
-	now = now.Add(2 * time.Second)
+	// Advance time by forced flush window size and expect a flush.
+	now = now.Add(10 * time.Second)
 	flushTask, dur := mgr.Prepare(testFlushBuckets)
 
 	expected := []flushersGroup{
@@ -202,11 +203,11 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[0].flushers[0],
-					flushBeforeNanos: 1245000000000,
+					flushBeforeNanos: 1184000000000,
 				},
 				{
 					flusher:          testFlushBuckets[0].flushers[1],
-					flushBeforeNanos: 1245000000000,
+					flushBeforeNanos: 1184000000000,
 				},
 			},
 		},
@@ -215,7 +216,7 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[1].flushers[0],
-					flushBeforeNanos: 1245000000000,
+					flushBeforeNanos: 1184000000000,
 				},
 			},
 		},
@@ -224,7 +225,7 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[2].flushers[0],
-					flushBeforeNanos: 1245000000000,
+					flushBeforeNanos: 1184000000000,
 				},
 			},
 		},
@@ -235,6 +236,12 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 	actual := task.flushersByInterval
 	require.Equal(t, expected, actual)
 	require.Equal(t, now, mgr.lastFlushed)
+
+	// Advance time by less than the forced flush window size and expect no flush.
+	now = now.Add(time.Second)
+	flushTask, dur = mgr.Prepare(testFlushBuckets)
+	require.Nil(t, flushTask)
+	require.Equal(t, mgr.checkEvery, dur)
 }
 
 func TestFollowerFlushManagerWatchFlushTimes(t *testing.T) {
