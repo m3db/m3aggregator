@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m3db/m3cluster/kv/mem"
 	"github.com/m3db/m3x/watch"
 
 	"github.com/stretchr/testify/require"
@@ -56,12 +57,23 @@ func TestFollowerFlushManagerOpen(t *testing.T) {
 	}
 	require.Equal(t, testFlushTimes, mgr.proto)
 	close(doneCh)
+	mgr.Close()
 }
 
 func TestFollowerFlushManagerCanNotLeadNotCampaigning(t *testing.T) {
 	doneCh := make(chan struct{})
 	electionManager := &mockElectionManager{
 		isCampaigningFn: func() bool { return false },
+	}
+	opts := NewFlushManagerOptions().SetElectionManager(electionManager)
+	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	require.False(t, mgr.CanLead())
+}
+
+func TestFollowerFlushManagerCanNotLeadProtoNotUpdated(t *testing.T) {
+	doneCh := make(chan struct{})
+	electionManager := &mockElectionManager{
+		isCampaigningFn: func() bool { return true },
 	}
 	opts := NewFlushManagerOptions().SetElectionManager(electionManager)
 	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
@@ -168,7 +180,7 @@ func TestFollowerFlushManagerPrepareFlushTimesUpdated(t *testing.T) {
 	require.Equal(t, now, mgr.lastFlushed)
 }
 
-func TestFollowerFlushManagerPrepareMaxNoFlushDurationExceeded(t *testing.T) {
+func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 	now := time.Unix(1234, 0)
 	nowFn := func() time.Time { return now }
 	doneCh := make(chan struct{})
@@ -223,6 +235,36 @@ func TestFollowerFlushManagerPrepareMaxNoFlushDurationExceeded(t *testing.T) {
 	actual := task.flushersByInterval
 	require.Equal(t, expected, actual)
 	require.Equal(t, now, mgr.lastFlushed)
+}
+
+func TestFollowerFlushManagerWatchFlushTimes(t *testing.T) {
+	// Set up a flush times manager watching in-memory kv store.
+	store := mem.NewStore()
+	flushTimesManagerOpts := NewFlushTimesManagerOptions().
+		SetFlushTimesKeyFmt(testFlushTimesKeyFmt).
+		SetFlushTimesStore(store)
+	flushTimesManager := NewFlushTimesManager(flushTimesManagerOpts)
+	require.NoError(t, flushTimesManager.Open(testShardSetID))
+
+	doneCh := make(chan struct{})
+	opts := NewFlushManagerOptions().SetFlushTimesManager(flushTimesManager)
+	mgr := newFollowerFlushManager(doneCh, opts).(*followerFlushManager)
+	mgr.Open()
+
+	// Update flush times and wait for change to propagate.
+	_, err := store.Set(testFlushTimesKey, testFlushTimes)
+	require.NoError(t, err)
+	for {
+		mgr.RLock()
+		proto := mgr.proto
+		flushTimesState := mgr.flushTimesState
+		mgr.RUnlock()
+		if flushTimesState == flushTimesUpdated {
+			require.Equal(t, proto, testFlushTimes)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestFollowerFlushTaskRun(t *testing.T) {

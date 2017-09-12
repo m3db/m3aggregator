@@ -26,18 +26,40 @@ import (
 	"time"
 
 	"github.com/m3db/m3x/clock"
+	"github.com/m3db/m3x/watch"
 
 	"github.com/stretchr/testify/require"
 )
 
+func TestFlushManagerReset(t *testing.T) {
+	mgr, _ := testFlushManager(t)
+
+	// Reseting an unopened manager is a no op.
+	require.NoError(t, mgr.Reset())
+	require.NoError(t, mgr.Open())
+	require.NoError(t, mgr.Close())
+
+	// Opening a closed manager causes an error.
+	require.Error(t, mgr.Open())
+
+	// Resetting the manager allows the manager to be reopened.
+	require.NoError(t, mgr.Reset())
+	require.NoError(t, mgr.Open())
+	require.NoError(t, mgr.Close())
+
+	// Resetting an open manager causes an error.
+	mgr.state = flushManagerOpen
+	require.Equal(t, errFlushManagerOpen, mgr.Reset())
+}
+
 func TestFlushManagerOpenAlreadyOpen(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerOpen
 	require.Equal(t, errFlushManagerAlreadyOpenOrClosed, mgr.Open())
 }
 
 func TestFlushManagerOpenSuccess(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.leaderMgr = &mockRoleBasedFlushManager{
 		openFn: func() {},
 	}
@@ -48,13 +70,13 @@ func TestFlushManagerOpenSuccess(t *testing.T) {
 }
 
 func TestFlushManagerRegisterClosed(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerClosed
 	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Register(nil))
 }
 
 func TestFlushManagerRegisterSuccess(t *testing.T) {
-	mgr, now := testFlushManager()
+	mgr, now := testFlushManager(t)
 	*now = time.Unix(1234, 0)
 
 	var (
@@ -110,7 +132,7 @@ func TestFlushManagerRegisterSuccess(t *testing.T) {
 }
 
 func TestFlushManagerUnregisterClosed(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerClosed
 	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Unregister(nil))
 }
@@ -120,7 +142,7 @@ func TestFlushManagerUnregisterBucketNotFound(t *testing.T) {
 		&mockFlusher{flushInterval: time.Second},
 		&mockFlusher{flushInterval: time.Minute},
 	}
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerOpen
 	mgr.buckets = []*flushBucket{
 		&flushBucket{
@@ -132,7 +154,7 @@ func TestFlushManagerUnregisterBucketNotFound(t *testing.T) {
 }
 
 func TestFlushManagerUnregisterFlusherNotFound(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerOpen
 	mgr.buckets = []*flushBucket{
 		&flushBucket{
@@ -151,7 +173,7 @@ func TestFlushManagerUnregisterSuccess(t *testing.T) {
 		&mockFlusher{flushInterval: time.Second},
 		&mockFlusher{flushInterval: time.Second},
 	}
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerOpen
 	mgr.buckets = []*flushBucket{
 		&flushBucket{
@@ -177,7 +199,7 @@ func TestFlushManagerUnregisterSuccess(t *testing.T) {
 }
 
 func TestFlushManagerStatus(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.leaderMgr = &mockRoleBasedFlushManager{
 		canLead: false,
 	}
@@ -192,13 +214,13 @@ func TestFlushManagerStatus(t *testing.T) {
 }
 
 func TestFlushManagerCloseAlreadyClosed(t *testing.T) {
-	mgr, _ := testFlushManager()
+	mgr, _ := testFlushManager(t)
 	mgr.state = flushManagerClosed
 	require.Equal(t, errFlushManagerNotOpenOrClosed, mgr.Close())
 }
 
 func TestFlushManagerCloseSuccess(t *testing.T) {
-	opts, _ := testFlushManagerOptions()
+	opts, _ := testFlushManagerOptions(t)
 	opts = opts.SetCheckEvery(time.Second)
 	mgr := NewFlushManager(opts).(*flushManager)
 	mgr.state = flushManagerOpen
@@ -331,17 +353,26 @@ func TestFlushManagerFlush(t *testing.T) {
 	close(signalCh)
 }
 
-func testFlushManager() (*flushManager, *time.Time) {
-	opts, now := testFlushManagerOptions()
+func testFlushManager(t *testing.T) (*flushManager, *time.Time) {
+	opts, now := testFlushManagerOptions(t)
 	return NewFlushManager(opts).(*flushManager), now
 }
 
-func testFlushManagerOptions() (FlushManagerOptions, *time.Time) {
+func testFlushManagerOptions(t *testing.T) (FlushManagerOptions, *time.Time) {
 	var now time.Time
 	nowFn := func() time.Time { return now }
 	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	watchable := xwatch.NewWatchable()
+	_, watch, err := watchable.Watch()
+	require.NoError(t, err)
+	flushTimesManager := &mockFlushTimesManager{
+		watchFlushTimesFn: func() (xwatch.Watch, error) {
+			return watch, nil
+		},
+	}
 	return NewFlushManagerOptions().
 		SetClockOptions(clockOpts).
+		SetFlushTimesManager(flushTimesManager).
 		SetCheckEvery(0).
 		SetJitterEnabled(false), &now
 }

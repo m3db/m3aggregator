@@ -229,6 +229,8 @@ type goalState struct {
 	state ElectionState
 }
 
+type campaignIsEnabledFn func() (bool, error)
+
 type electionManager struct {
 	sync.RWMutex
 	sync.WaitGroup
@@ -259,6 +261,7 @@ type electionManager struct {
 	nextGoalStateID        int64
 	goalStateLock          *sync.RWMutex
 	goalStateWatchable     xwatch.Watchable
+	campaignIsEnabledFn    campaignIsEnabledFn
 	sleepFn                sleepFn
 	metrics                electionManagerMetrics
 }
@@ -291,6 +294,7 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 		sleepFn:                    time.Sleep,
 		metrics:                    newElectionManagerMetrics(scope),
 	}
+	mgr.campaignIsEnabledFn = mgr.campaignIsEnabled
 	mgr.Lock()
 	mgr.resetWithLock()
 	mgr.Unlock()
@@ -520,7 +524,7 @@ func (mgr *electionManager) checkCampaignStateLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			enabled, err := mgr.campaignIsEnabled()
+			enabled, err := mgr.campaignIsEnabledFn()
 			if err != nil {
 				mgr.metrics.campaignCheckErrors.Inc(1)
 				continue
@@ -551,7 +555,7 @@ func (mgr *electionManager) processCampaignStateChange(newState campaignState) {
 			campaignErr error
 		)
 		shouldResignFn := func(int) bool {
-			enabled, campaignErr = mgr.campaignIsEnabled()
+			enabled, campaignErr = mgr.campaignIsEnabledFn()
 			if campaignErr != nil {
 				mgr.metrics.campaignCheckErrors.Inc(1)
 				return false
@@ -653,7 +657,9 @@ func (mgr *electionManager) campaignIsEnabled() (bool, error) {
 		return true, nil
 	}
 
-	// TODO(xichen): handle this to enable multiple concurrent topology changes.
+	// If we get here, it means no shards are active, and some shards have not yet
+	// cut over, and the other shards have been cut off, which is not expected in
+	// supported topology changes.
 	mgr.metrics.campaignCheckUnexpectedShardTimes.Inc(1)
 	return false, errUnexpectedShardCutoverCutoffTimes
 }

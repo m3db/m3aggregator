@@ -21,9 +21,182 @@
 package aggregator
 
 import (
+	"fmt"
+	"testing"
+	"time"
+
 	schema "github.com/m3db/m3aggregator/generated/proto/flush"
+	"github.com/m3db/m3cluster/kv"
+	"github.com/m3db/m3cluster/kv/mem"
 	"github.com/m3db/m3x/watch"
+
+	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 )
+
+const (
+	testFlushTimesKeyFmt = "test/%d/flush"
+)
+
+var (
+	testFlushTimesKey   = fmt.Sprintf(testFlushTimesKeyFmt, testShardSetID)
+	testFlushTimesProto = &schema.ShardSetFlushTimes{
+		ByShard: map[uint32]*schema.ShardFlushTimes{
+			0: &schema.ShardFlushTimes{
+				ByResolution: map[int64]int64{
+					int64(time.Second): 1000,
+				},
+			},
+			1: &schema.ShardFlushTimes{
+				ByResolution: map[int64]int64{
+					int64(time.Minute): 2000,
+				},
+			},
+		},
+	}
+)
+
+func TestFlushTimesManagerReset(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+
+	// Reseting an unopened manager is a no op.
+	require.NoError(t, mgr.Reset())
+	require.NoError(t, mgr.Open(testShardSetID))
+	require.NoError(t, mgr.Close())
+
+	// Opening a closed manager causes an error.
+	require.Error(t, mgr.Open(testShardSetID))
+
+	// Reseting the manager allows the manager to be reopened.
+	require.NoError(t, mgr.Reset())
+	require.NoError(t, mgr.Open(testShardSetID))
+	require.NoError(t, mgr.Close())
+
+	// Resetting an open manager causes an error.
+	mgr.state = flushTimesManagerOpen
+	require.Equal(t, errFlushTimesManagerOpen, mgr.Reset())
+}
+
+func TestFlushTimesManagerOpenAlreadyOpen(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	mgr.state = flushTimesManagerOpen
+	require.Equal(t, errFlushTimesManagerAlreadyOpenOrClosed, mgr.Open(testShardSetID))
+}
+
+func TestFlushTimesManagerOpenSuccess(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	require.NoError(t, mgr.Open(testShardSetID))
+}
+
+func TestFlushTimesManagerGetClosed(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	_, err := mgr.Get()
+	require.Equal(t, errFlushTimesManagerNotOpenOrClosed, err)
+}
+
+func TestFlushTimesManagerGetSuccess(t *testing.T) {
+	mgr, store := testFlushTimesManager()
+	require.NoError(t, mgr.Open(testShardSetID))
+
+	// Update the flush times and wait for the change to propagate.
+	_, err := store.Set(testFlushTimesKey, testFlushTimesProto)
+	require.NoError(t, err)
+	for {
+		if mgr.flushTimesWatchable.Get() != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	res, err := mgr.Get()
+	require.NoError(t, err)
+	require.Equal(t, res, testFlushTimesProto)
+}
+
+func TestFlushTimesManagerWatchClosed(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	_, err := mgr.Watch()
+	require.Equal(t, errFlushTimesManagerNotOpenOrClosed, err)
+}
+
+func TestFlushTimesManagerWatchSuccess(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	require.NoError(t, mgr.Open(testShardSetID))
+
+	watch, err := mgr.Watch()
+	require.NoError(t, err)
+
+	select {
+	case <-watch.C():
+		require.Fail(t, "unexpected watch notificaiton")
+	default:
+	}
+
+	mgr.flushTimesWatchable.Update(12345)
+	<-watch.C()
+	require.Equal(t, 12345, watch.Get().(int))
+}
+
+func TestFlushTimesManagerStoreAsyncClosed(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	require.Equal(t, errFlushTimesManagerNotOpenOrClosed, mgr.StoreAsync(testFlushTimesProto))
+}
+
+func TestFlushTimesManagerStoreAsyncSuccess(t *testing.T) {
+	mgr, store := testFlushTimesManager()
+	require.NoError(t, mgr.Open(testShardSetID))
+
+	// Store flush times and wait for change to propagate.
+	require.NoError(t, mgr.StoreAsync(testFlushTimesProto))
+	for {
+		value, err := store.Get(testFlushTimesKey)
+		if value != nil && err == nil {
+			var res schema.ShardSetFlushTimes
+			require.NoError(t, value.Unmarshal(&res))
+			require.Equal(t, *testFlushTimesProto, res)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestFlushTimesManagerCloseClosed(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	require.Equal(t, errFlushTimesManagerNotOpenOrClosed, mgr.Close())
+}
+
+func TestFlushTimesManagerCloseSuccess(t *testing.T) {
+	mgr, _ := testFlushTimesManager()
+	require.NoError(t, mgr.Open(testShardSetID))
+	require.NoError(t, mgr.Close())
+}
+
+func TestFlushTimesCheckerHasFlushed(t *testing.T) {
+	checker := newFlushTimesChecker(tally.NoopScope)
+	inputs := []struct {
+		shardID     uint32
+		targetNanos int64
+		flushTimes  *schema.ShardSetFlushTimes
+		expected    bool
+	}{
+		{shardID: 0, targetNanos: 0, flushTimes: nil, expected: false},
+		{shardID: 2, targetNanos: 0, flushTimes: testFlushTimesProto, expected: false},
+		{shardID: 0, targetNanos: 1500, flushTimes: testFlushTimesProto, expected: false},
+		{shardID: 0, targetNanos: 1000, flushTimes: testFlushTimesProto, expected: true},
+	}
+
+	for _, input := range inputs {
+		require.Equal(t, input.expected, checker.HasFlushed(input.shardID, input.targetNanos, input.flushTimes))
+	}
+}
+
+func testFlushTimesManager() (*flushTimesManager, kv.Store) {
+	store := mem.NewStore()
+	opts := NewFlushTimesManagerOptions().
+		SetFlushTimesKeyFmt(testFlushTimesKeyFmt).
+		SetFlushTimesStore(store)
+	return NewFlushTimesManager(opts).(*flushTimesManager), store
+}
 
 type openShardSetIDFn func(shardSetID uint32) error
 type getFlushTimesFn func() (*schema.ShardSetFlushTimes, error)

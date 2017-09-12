@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	schema "github.com/m3db/m3aggregator/generated/proto/flush"
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/leader/campaign"
 	"github.com/m3db/m3cluster/shard"
@@ -84,6 +85,28 @@ func TestElectionStateJSONRoundtrip(t *testing.T) {
 	}
 }
 
+func TestElectionManagerReset(t *testing.T) {
+	opts := testElectionManagerOptions(t)
+	mgr := NewElectionManager(opts).(*electionManager)
+
+	// Reseting an unopened manager is a no op.
+	require.NoError(t, mgr.Reset())
+	require.NoError(t, mgr.Open(testShardSetID))
+	require.NoError(t, mgr.Close())
+
+	// Opening a closed manager causes an error.
+	require.Error(t, mgr.Open(testShardSetID))
+
+	// Resetting the manager allows the manager to be reopened.
+	require.NoError(t, mgr.Reset())
+	require.NoError(t, mgr.Open(testShardSetID))
+	require.NoError(t, mgr.Close())
+
+	// Resetting an open manager causes an error.
+	mgr.state = electionManagerOpen
+	require.Equal(t, errElectionManagerOpen, mgr.Reset())
+}
+
 func TestElectionManagerOpenAlreadyOpen(t *testing.T) {
 	opts := testElectionManagerOptions(t)
 	mgr := NewElectionManager(opts).(*electionManager)
@@ -113,10 +136,44 @@ func TestElectionManagerElectionState(t *testing.T) {
 	require.Equal(t, LeaderState, mgr.ElectionState())
 }
 
+func TestElectionManagerIsCampaigning(t *testing.T) {
+	opts := testElectionManagerOptions(t)
+	mgr := NewElectionManager(opts).(*electionManager)
+
+	inputs := []struct {
+		state    campaignState
+		expected bool
+	}{
+		{state: campaignUnknown, expected: false},
+		{state: campaignDisabled, expected: false},
+		{state: campaignPendingDisabled, expected: false},
+		{state: campaignEnabled, expected: true},
+	}
+	for _, input := range inputs {
+		mgr.campaignStateWatchable.Update(input.state)
+		require.Equal(t, input.expected, mgr.IsCampaigning())
+	}
+}
+
 func TestElectionManagerResignAlreadyClosed(t *testing.T) {
 	opts := testElectionManagerOptions(t)
 	mgr := NewElectionManager(opts).(*electionManager)
 	require.Equal(t, errElectionManagerNotOpenOrClosed, mgr.Resign(context.Background()))
+}
+
+func TestElectionManagerFollowerResign(t *testing.T) {
+	leaderService := &mockLeaderService{
+		campaignFn: func(
+			electionID string,
+			opts services.CampaignOptions,
+		) (<-chan campaign.Status, error) {
+			return make(chan campaign.Status), nil
+		},
+	}
+	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
+	mgr := NewElectionManager(opts).(*electionManager)
+	require.NoError(t, mgr.Open(testShardSetID))
+	require.NoError(t, mgr.Resign(context.Background()))
 }
 
 func TestElectionManagerResignLeaderServiceResignError(t *testing.T) {
@@ -179,21 +236,6 @@ func TestElectionManagerResignTimeout(t *testing.T) {
 	require.Error(t, mgr.Resign(ctx))
 	require.Equal(t, electionManagerOpen, mgr.state)
 	require.NoError(t, mgr.Close())
-}
-
-func TestElectionManagerFollowerResign(t *testing.T) {
-	leaderService := &mockLeaderService{
-		campaignFn: func(
-			electionID string,
-			opts services.CampaignOptions,
-		) (<-chan campaign.Status, error) {
-			return make(chan campaign.Status), nil
-		},
-	}
-	opts := testElectionManagerOptions(t).SetLeaderService(leaderService)
-	mgr := NewElectionManager(opts).(*electionManager)
-	require.NoError(t, mgr.Open(testShardSetID))
-	require.NoError(t, mgr.Resign(context.Background()))
 }
 
 func TestElectionManagerResignSuccess(t *testing.T) {
@@ -273,6 +315,11 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 		leaderFn: func(electionID string) (string, error) {
 			return "someone else", nil
 		},
+		resignFn: func(electionID string) error {
+			campaignCh <- campaign.NewStatus(campaign.Follower)
+			close(campaignCh)
+			return nil
+		},
 	}
 	campaignOpts, err := services.NewCampaignOptions()
 	require.NoError(t, err)
@@ -281,6 +328,14 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
 	mgr := NewElectionManager(opts).(*electionManager)
+
+	var enabled = int32(1)
+	mgr.campaignIsEnabledFn = func() (bool, error) {
+		if atomic.LoadInt32(&enabled) == 1 {
+			return true, nil
+		}
+		return false, nil
+	}
 	require.NoError(t, mgr.Open(testShardSetID))
 
 	// Error status is ignored.
@@ -290,7 +345,7 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 
 	// Same state is a no op.
 	campaignCh <- campaign.NewStatus(campaign.Follower)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	require.Equal(t, FollowerState, mgr.ElectionState())
 
 	// Follower to leader.
@@ -299,28 +354,50 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 		if mgr.ElectionState() == LeaderState {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Asynchronously resign.
+	// Disable campaigning.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
+		atomic.StoreInt32(&enabled, 0)
 		campaignCh <- campaign.NewStatus(campaign.Follower)
 		close(campaignCh)
 	}()
 
 	for {
-		if mgr.ElectionState() == LeaderState {
+		if mgr.ElectionState() == FollowerState {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	wg.Wait()
 
-	// Verifying we are still electing.
+	for {
+		if atomic.LoadInt32(&mgr.campaigning) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Give it some time to go through the retry logic even though
+	// no change is expected.
+	time.Sleep(100 * time.Millisecond)
+	require.Equal(t, int32(0), atomic.LoadInt32(&mgr.campaigning))
+
+	// Enable campaigning again.
+	atomic.StoreInt32(&enabled, 1)
+	for {
+		if atomic.LoadInt32(&mgr.campaigning) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Verifying we are actually campaigning.
 	nextCampaignCh <- campaign.NewStatus(campaign.Leader)
 
 	require.NoError(t, mgr.Close())
@@ -451,6 +528,301 @@ func TestElectionManagerVerifyPendingFollowerStale(t *testing.T) {
 	mgr.doneCh <- struct{}{}
 }
 
+func TestElectionManagerCheckCampaignStateLoop(t *testing.T) {
+	leaderValue := "myself"
+	leaderService := &mockLeaderService{
+		campaignFn: func(
+			electionID string,
+			opts services.CampaignOptions,
+		) (<-chan campaign.Status, error) {
+			return make(chan campaign.Status), nil
+		},
+		leaderFn: func(electionID string) (string, error) {
+			return leaderValue, nil
+		},
+		resignFn: func(electionID string) error {
+			return nil
+		},
+	}
+	campaignOpts, err := services.NewCampaignOptions()
+	require.NoError(t, err)
+	campaignOpts = campaignOpts.SetLeaderValue(leaderValue)
+	opts := testElectionManagerOptions(t).
+		SetCampaignOptions(campaignOpts).
+		SetLeaderService(leaderService)
+	mgr := NewElectionManager(opts).(*electionManager)
+	iterCh := make(chan enabledRes)
+	mgr.campaignIsEnabledFn = func() (bool, error) {
+		res := <-iterCh
+		return res.result, res.err
+	}
+	require.NoError(t, mgr.Open(testShardSetID))
+
+	ensureState := func(targetState campaignState) {
+		for {
+			if mgr.campaignState() == targetState {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Enable campaigning.
+	iterCh <- enabledRes{result: true, err: nil}
+	ensureState(campaignEnabled)
+
+	// Disable campaigning with error.
+	iterCh <- enabledRes{result: false, err: nil}
+	iterCh <- enabledRes{result: false, err: errors.New("enabled error")}
+	ensureState(campaignPendingDisabled)
+
+	// Disable campaigning.
+	iterCh <- enabledRes{result: false, err: nil}
+	iterCh <- enabledRes{result: false, err: nil}
+	iterCh <- enabledRes{result: false, err: nil}
+	ensureState(campaignDisabled)
+
+	// Re-enable campaigning.
+	iterCh <- enabledRes{result: true, err: nil}
+	ensureState(campaignEnabled)
+
+	require.NoError(t, mgr.Close())
+}
+
+func TestElectionManagerCampaignIsEnabledInstanceNotFound(t *testing.T) {
+	opts := testElectionManagerOptions(t)
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return nil, errInstanceNotFoundInPlacement
+		},
+	}
+	enabled, err := mgr.campaignIsEnabled()
+	require.False(t, enabled)
+	require.NoError(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledShardsError(t *testing.T) {
+	errShards := errors.New("shards error")
+	opts := testElectionManagerOptions(t)
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return nil, errShards
+		},
+	}
+	_, err := mgr.campaignIsEnabled()
+	require.Equal(t, errShards, err)
+}
+
+func TestElectionManagerCampaignIsEnabledWithActiveShards(t *testing.T) {
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(7777),
+		shard.NewShard(1).SetCutoverNanos(3333).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+	}
+	now := time.Unix(0, 1234)
+	mgr.nowFn = func() time.Time { return now }
+
+	enabled, err := mgr.campaignIsEnabled()
+	require.True(t, enabled)
+	require.NoError(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledNoCutoverShards(t *testing.T) {
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(7777),
+		shard.NewShard(1).SetCutoverNanos(3333).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+	}
+	now := time.Unix(0, 123)
+	mgr.nowFn = func() time.Time { return now }
+
+	enabled, err := mgr.campaignIsEnabled()
+	require.False(t, enabled)
+	require.NoError(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledAllCutoffShardsFlushed(t *testing.T) {
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(7777),
+		shard.NewShard(1).SetCutoverNanos(3333).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+	}
+	mgr.flushTimesManager = &mockFlushTimesManager{
+		getFlushTimesFn: func() (*schema.ShardSetFlushTimes, error) {
+			return &schema.ShardSetFlushTimes{
+				ByShard: map[uint32]*schema.ShardFlushTimes{
+					0: &schema.ShardFlushTimes{
+						ByResolution: map[int64]int64{
+							int64(time.Second): 8000,
+						},
+					},
+					1: &schema.ShardFlushTimes{
+						ByResolution: map[int64]int64{
+							int64(time.Minute): 9000,
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	now := time.Unix(0, 8000)
+	mgr.nowFn = func() time.Time { return now }
+
+	enabled, err := mgr.campaignIsEnabled()
+	require.False(t, enabled)
+	require.NoError(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledHasReplacementInstance(t *testing.T) {
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(7777),
+		shard.NewShard(1).SetCutoverNanos(3333).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+		hasReplacementInstanceFn: func() (bool, error) {
+			return true, nil
+		},
+	}
+	mgr.flushTimesManager = &mockFlushTimesManager{
+		getFlushTimesFn: func() (*schema.ShardSetFlushTimes, error) {
+			return &schema.ShardSetFlushTimes{
+				ByShard: map[uint32]*schema.ShardFlushTimes{
+					0: &schema.ShardFlushTimes{
+						ByResolution: map[int64]int64{
+							int64(time.Second): 7000,
+						},
+					},
+					1: &schema.ShardFlushTimes{
+						ByResolution: map[int64]int64{
+							int64(time.Minute): 9000,
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	now := time.Unix(0, 8000)
+	mgr.nowFn = func() time.Time { return now }
+
+	enabled, err := mgr.campaignIsEnabled()
+	require.False(t, enabled)
+	require.NoError(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledNoReplacementInstance(t *testing.T) {
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(7777),
+		shard.NewShard(1).SetCutoverNanos(3333).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+		hasReplacementInstanceFn: func() (bool, error) {
+			return false, nil
+		},
+	}
+	mgr.flushTimesManager = &mockFlushTimesManager{
+		getFlushTimesFn: func() (*schema.ShardSetFlushTimes, error) {
+			return &schema.ShardSetFlushTimes{
+				ByShard: map[uint32]*schema.ShardFlushTimes{
+					0: &schema.ShardFlushTimes{
+						ByResolution: map[int64]int64{
+							int64(time.Second): 7000,
+						},
+					},
+					1: &schema.ShardFlushTimes{
+						ByResolution: map[int64]int64{
+							int64(time.Minute): 9000,
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	now := time.Unix(0, 9000)
+	mgr.nowFn = func() time.Time { return now }
+
+	enabled, err := mgr.campaignIsEnabled()
+	require.True(t, enabled)
+	require.NoError(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledAllCutoffShardsWithError(t *testing.T) {
+	errFlushTimesGet := errors.New("error getting flush times")
+	errHasReplacementInstance := errors.New("error determining replacement instance")
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(7777),
+		shard.NewShard(1).SetCutoverNanos(3333).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+		hasReplacementInstanceFn: func() (bool, error) {
+			return false, errHasReplacementInstance
+		},
+	}
+	mgr.flushTimesManager = &mockFlushTimesManager{
+		getFlushTimesFn: func() (*schema.ShardSetFlushTimes, error) {
+			return nil, errFlushTimesGet
+		},
+	}
+	now := time.Unix(0, 9000)
+	mgr.nowFn = func() time.Time { return now }
+
+	_, err := mgr.campaignIsEnabled()
+	require.Error(t, err)
+}
+
+func TestElectionManagerCampaignIsEnabledUnexpectedShardCutoverCutoffTimes(t *testing.T) {
+	expectedShards := shard.NewShards([]shard.Shard{
+		shard.NewShard(0).SetCutoverNanos(1000).SetCutoffNanos(3333),
+		shard.NewShard(1).SetCutoverNanos(6666).SetCutoffNanos(8888),
+	})
+	opts := testElectionManagerOptions(t).SetShardCutoffCheckOffset(time.Duration(1000))
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.placementManager = &mockPlacementManager{
+		shardsFn: func() (shard.Shards, error) {
+			return expectedShards, nil
+		},
+	}
+	now := time.Unix(0, 4444)
+	mgr.nowFn = func() time.Time { return now }
+
+	_, err := mgr.campaignIsEnabled()
+	require.Equal(t, errUnexpectedShardCutoverCutoffTimes, err)
+}
+
 func testElectionManagerOptions(t *testing.T) ElectionManagerOptions {
 	campaignOpts, err := services.NewCampaignOptions()
 	require.NoError(t, err)
@@ -464,6 +836,11 @@ func testElectionManagerOptions(t *testing.T) ElectionManagerOptions {
 	return NewElectionManagerOptions().
 		SetCampaignOptions(campaignOpts).
 		SetPlacementManager(placementManager)
+}
+
+type enabledRes struct {
+	result bool
+	err    error
 }
 
 type campaignFn func(
