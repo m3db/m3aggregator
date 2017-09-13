@@ -514,6 +514,9 @@ func (agg *aggregator) ownedShards() (owned, toClose []*aggregatorShard) {
 	agg.Lock()
 	defer agg.Unlock()
 
+	if len(agg.shardIDs) == 0 {
+		return nil, nil
+	}
 	flushTimes, err := agg.flushTimesManager.Get()
 	if err != nil {
 		agg.metrics.tick.flushTimesErrors.Inc(1)
@@ -587,6 +590,7 @@ func (agg *aggregator) tickInternal() {
 	agg.metrics.shards.owned.Update(float64(numShards))
 	agg.metrics.shards.pendingClose.Update(float64(atomic.LoadInt32(&agg.shardsPendingClose)))
 	if numShards == 0 {
+		agg.sleepFn(agg.checkInterval)
 		return
 	}
 	var (
