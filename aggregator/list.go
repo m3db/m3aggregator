@@ -230,7 +230,9 @@ func (l *metricList) Flush(req FlushRequest) {
 	}
 
 	// Metrics between shard cutover and shard cutoff are consumed.
-	l.flushBeforeFn(req.CutoverNanos, discardType)
+	if req.CutoverNanos > 0 {
+		l.flushBeforeFn(req.CutoverNanos, discardType)
+	}
 	if alignedNowNanos <= req.CutoffNanos {
 		l.flushBeforeFn(alignedNowNanos, consumeType)
 		l.metrics.flushBetweenCutoverCutoff.Inc(1)

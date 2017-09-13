@@ -171,6 +171,19 @@ func TestMetricListFlushWithRequests(t *testing.T) {
 				},
 			},
 		},
+		{
+			request: FlushRequest{
+				CutoverNanos:      0,
+				CutoffNanos:       30000 * int64(time.Second),
+				BufferAfterCutoff: time.Second,
+			},
+			expected: []flushBeforeResult{
+				{
+					beforeNanos: 12345 * int64(time.Second),
+					flushType:   consumeType,
+				},
+			},
+		},
 	}
 	for _, input := range inputs {
 		results = results[:0]
