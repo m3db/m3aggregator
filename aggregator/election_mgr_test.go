@@ -144,7 +144,6 @@ func TestElectionManagerIsCampaigning(t *testing.T) {
 		state    campaignState
 		expected bool
 	}{
-		{state: campaignUnknown, expected: false},
 		{state: campaignDisabled, expected: false},
 		{state: campaignPendingDisabled, expected: false},
 		{state: campaignEnabled, expected: true},

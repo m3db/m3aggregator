@@ -135,12 +135,14 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 
 	var (
 		now                = mgr.nowFn()
+		needsFlush         bool
 		flushersByInterval []flushersGroup
 	)
 	if mgr.flushTimesState == flushTimesUpdated {
 		mgr.flushTimesState = flushTimesProcessed
 		mgr.flushMode = kvUpdateFollowerFlush
 		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
+		needsFlush = true
 		mgr.metrics.kvUpdateFlush.Inc(1)
 	} else {
 		durationSinceLastFlush := now.Sub(mgr.lastFlushed)
@@ -150,11 +152,12 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 		if mgr.flushMode == forcedFollowerFlush && durationSinceLastFlush >= mgr.forcedFlushWindowSize {
 			flushBeforeNanos := now.Add(-mgr.maxBufferSize).UnixNano()
 			flushersByInterval = mgr.flushersFromForcedFlush(buckets, flushBeforeNanos)
+			needsFlush = true
 			mgr.metrics.forcedFlush.Inc(1)
 		}
 	}
 
-	if len(flushersByInterval) == 0 {
+	if !needsFlush {
 		return nil, mgr.checkEvery
 	}
 	mgr.lastFlushed = now

@@ -157,8 +157,7 @@ func (state *ElectionState) UnmarshalJSON(data []byte) error {
 type campaignState int
 
 const (
-	campaignUnknown campaignState = iota
-	campaignDisabled
+	campaignDisabled campaignState = iota
 	campaignPendingDisabled
 	campaignEnabled
 )
@@ -757,7 +756,7 @@ func (mgr *electionManager) resetWithLock() {
 	mgr.doneCh = make(chan struct{})
 	mgr.campaigning = 0
 	mgr.campaignStateWatchable = xwatch.NewWatchable()
-	mgr.campaignStateWatchable.Update(campaignUnknown)
+	mgr.campaignStateWatchable.Update(campaignDisabled)
 	mgr.electionStateWatchable = xwatch.NewWatchable()
 	mgr.electionStateWatchable.Update(FollowerState)
 	mgr.nextGoalStateID = 0
