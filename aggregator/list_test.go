@@ -86,7 +86,7 @@ func TestMetricListClose(t *testing.T) {
 
 func TestMetricListFlushWithRequests(t *testing.T) {
 	var (
-		now     = time.Unix(12345, 6789)
+		now     = time.Unix(12345, 0)
 		nowFn   = func() time.Time { return now }
 		results []flushBeforeResult
 	)

@@ -216,15 +216,12 @@ func (l *metricList) Flush(req FlushRequest) {
 	// because this ensures all the actions before `now` have completed if those actions
 	// are protected by the same read lock.
 	l.timeLock.Lock()
-	now := l.nowFn()
-	resolution := l.resolution
+	nowNanos := l.nowFn().UnixNano()
 	l.timeLock.Unlock()
-	alignedNow := now.Truncate(resolution)
-	alignedNowNanos := alignedNow.UnixNano()
 
 	// Metrics before shard cutover are discarded.
-	if alignedNowNanos <= req.CutoverNanos {
-		l.flushBeforeFn(alignedNowNanos, discardType)
+	if nowNanos <= req.CutoverNanos {
+		l.flushBeforeFn(nowNanos, discardType)
 		l.metrics.flushBeforeCutover.Inc(1)
 		return
 	}
@@ -233,22 +230,22 @@ func (l *metricList) Flush(req FlushRequest) {
 	if req.CutoverNanos > 0 {
 		l.flushBeforeFn(req.CutoverNanos, discardType)
 	}
-	if alignedNowNanos <= req.CutoffNanos {
-		l.flushBeforeFn(alignedNowNanos, consumeType)
+	if nowNanos <= req.CutoffNanos {
+		l.flushBeforeFn(nowNanos, consumeType)
 		l.metrics.flushBetweenCutoverCutoff.Inc(1)
 		return
 	}
 
 	// Metrics after now-keepAfterCutoff are retained.
 	l.flushBeforeFn(req.CutoffNanos, consumeType)
-	alignedBufferEndNanos := alignedNow.Add(-req.BufferAfterCutoff).Truncate(resolution).UnixNano()
-	if alignedBufferEndNanos <= req.CutoffNanos {
+	bufferEndNanos := nowNanos - int64(req.BufferAfterCutoff)
+	if bufferEndNanos <= req.CutoffNanos {
 		l.metrics.flushBetweenCutoffBufferEnd.Inc(1)
 		return
 	}
 
 	// Metrics between cutoff and now-bufferAfterCutoff are discarded.
-	l.flushBeforeFn(alignedBufferEndNanos, discardType)
+	l.flushBeforeFn(bufferEndNanos, discardType)
 	l.metrics.flushAfterBufferEnd.Inc(1)
 }
 
@@ -258,7 +255,8 @@ func (l *metricList) DiscardBefore(beforeNanos int64) {
 }
 
 func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
-	if l.LastFlushedNanos() >= beforeNanos {
+	alignedBeforeNanos := time.Unix(0, beforeNanos).Truncate(l.resolution).UnixNano()
+	if l.LastFlushedNanos() >= alignedBeforeNanos {
 		l.metrics.flushBeforeStale.Inc(1)
 		return
 	}
@@ -277,7 +275,7 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 		// If the element is eligible for collection after the values are
 		// processed, close it and reset the value to nil.
 		elem := e.Value.(metricElem)
-		if elem.Consume(beforeNanos, flushFn) {
+		if elem.Consume(alignedBeforeNanos, flushFn) {
 			elem.Close()
 			e.Value = nil
 			l.toCollect = append(l.toCollect, e)
@@ -308,7 +306,7 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 	numCollected := len(l.toCollect)
 	l.Unlock()
 
-	atomic.StoreInt64(&l.lastFlushedNanos, beforeNanos)
+	atomic.StoreInt64(&l.lastFlushedNanos, alignedBeforeNanos)
 	l.metrics.flushElemCollected.Inc(int64(numCollected))
 	flushBeforeDuration := l.nowFn().Sub(flushBeforeStart)
 	l.metrics.flushBeforeDuration.Record(flushBeforeDuration)

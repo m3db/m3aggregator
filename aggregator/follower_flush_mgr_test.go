@@ -193,9 +193,16 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 	mgr.flushTimesState = flushTimesProcessed
 	mgr.lastFlushed = now
 
-	// Advance time by forced flush window size and expect a flush.
+	// Advance time by forced flush window size and expect no flush because it's
+	// not in forced flush mode.
 	now = now.Add(10 * time.Second)
 	flushTask, dur := mgr.Prepare(testFlushBuckets)
+	require.Nil(t, flushTask)
+	require.Equal(t, time.Second, dur)
+
+	// Advance time by max buffer size and expect a flush.
+	now = now.Add(time.Minute)
+	flushTask, dur = mgr.Prepare(testFlushBuckets)
 
 	expected := []flushersGroup{
 		{
@@ -203,11 +210,11 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[0].flushers[0],
-					flushBeforeNanos: 1184000000000,
+					flushBeforeNanos: 1244000000000,
 				},
 				{
 					flusher:          testFlushBuckets[0].flushers[1],
-					flushBeforeNanos: 1184000000000,
+					flushBeforeNanos: 1244000000000,
 				},
 			},
 		},
@@ -216,7 +223,7 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[1].flushers[0],
-					flushBeforeNanos: 1184000000000,
+					flushBeforeNanos: 1244000000000,
 				},
 			},
 		},
@@ -225,7 +232,7 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 			flushers: []flusherWithTime{
 				{
 					flusher:          testFlushBuckets[2].flushers[0],
-					flushBeforeNanos: 1184000000000,
+					flushBeforeNanos: 1244000000000,
 				},
 			},
 		},
@@ -242,6 +249,14 @@ func TestFollowerFlushManagerPrepareMaxBufferSizeExceeded(t *testing.T) {
 	flushTask, dur = mgr.Prepare(testFlushBuckets)
 	require.Nil(t, flushTask)
 	require.Equal(t, mgr.checkEvery, dur)
+
+	// Reset flush mode and advance time by forced flush window size and expect no
+	// flush because it's no longer in forced flush mode.
+	mgr.flushMode = kvUpdateFollowerFlush
+	now = now.Add(10 * time.Second)
+	flushTask, dur = mgr.Prepare(testFlushBuckets)
+	require.Nil(t, flushTask)
+	require.Equal(t, time.Second, dur)
 }
 
 func TestFollowerFlushManagerWatchFlushTimes(t *testing.T) {
