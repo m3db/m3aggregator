@@ -43,6 +43,7 @@ type followerFlushManagerMetrics struct {
 	resolutionNotFound   tally.Counter
 	kvUpdateFlush        tally.Counter
 	forcedFlush          tally.Counter
+	notCampaigning       tally.Counter
 	flushWindowsNotEnded tally.Counter
 }
 
@@ -53,6 +54,7 @@ func newFollowerFlushManagerMetrics(scope tally.Scope) followerFlushManagerMetri
 		resolutionNotFound:   scope.Counter("resolution-not-found"),
 		kvUpdateFlush:        scope.Counter("kv-update-flush"),
 		forcedFlush:          scope.Counter("forced-flush"),
+		notCampaigning:       scope.Counter("not-campaigning"),
 		flushWindowsNotEnded: scope.Counter("flush-windows-not-ended"),
 	}
 }
@@ -167,6 +169,7 @@ func (mgr *followerFlushManager) CanLead() bool {
 	defer mgr.RUnlock()
 
 	if !mgr.electionManager.IsCampaigning() {
+		mgr.metrics.notCampaigning.Inc(1)
 		return false
 	}
 	if mgr.proto == nil {
