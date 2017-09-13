@@ -110,9 +110,13 @@ type ElectionManagerOptions interface {
 	CampaignStateCheckInterval() time.Duration
 
 	// SetShardCutoffCheckOffset sets the offset when checking if a shard has been cutoff.
+	// The cutoff time is applied in order to stop campaignining when necessary before all
+	// shards are cut off avoiding incomplete data to be flushed.
 	SetShardCutoffCheckOffset(value time.Duration) ElectionManagerOptions
 
 	// ShardCutoffCheckOffset returns the offset when checking if a shard has been cutoff.
+	// The cutoff time is applied in order to stop campaignining when necessary before all
+	// shards are cut off avoiding incomplete data to be flushed.
 	ShardCutoffCheckOffset() time.Duration
 }
 

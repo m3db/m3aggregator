@@ -594,7 +594,7 @@ func TestElectionManagerCampaignIsEnabledInstanceNotFound(t *testing.T) {
 	mgr := NewElectionManager(opts).(*electionManager)
 	mgr.placementManager = &mockPlacementManager{
 		shardsFn: func() (shard.Shards, error) {
-			return nil, errInstanceNotFoundInPlacement
+			return nil, ErrInstanceNotFoundInPlacement
 		},
 	}
 	enabled, err := mgr.campaignIsEnabled()

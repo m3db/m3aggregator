@@ -114,7 +114,7 @@ func TestAggregatorOpenInstanceNotInPlacement(t *testing.T) {
 		openFn:      func() error { return nil },
 		placementFn: func() (placement.Placement, error) { return testPlacement, nil },
 		instanceFromFn: func(placement.Placement) (placement.Instance, error) {
-			return nil, errInstanceNotFoundInPlacement
+			return nil, ErrInstanceNotFoundInPlacement
 		},
 	}
 	require.NoError(t, agg.Open())

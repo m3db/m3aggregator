@@ -349,7 +349,7 @@ func (agg *aggregator) processPlacementWithLock(newPlacement placement.Placement
 	instance, err := agg.placementManager.InstanceFrom(newPlacement)
 	if err == nil {
 		newShardSet = instance.Shards()
-	} else if err == errInstanceNotFoundInPlacement {
+	} else if err == ErrInstanceNotFoundInPlacement {
 		newShardSet = shard.NewShards(nil)
 	} else {
 		return err

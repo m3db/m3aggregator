@@ -31,9 +31,11 @@ import (
 )
 
 var (
+	// ErrInstanceNotFoundInPlacement is returned when instance is not found in placement.
+	ErrInstanceNotFoundInPlacement = errors.New("instance not found in placement")
+
 	errPlacementManagerNotOpenOrClosed = errors.New("placement manager not open or closed")
 	errPlacementManagerOpenOrClosed    = errors.New("placement manager already open or closed")
-	errInstanceNotFoundInPlacement     = errors.New("instance not found in placement")
 )
 
 // PlacementManager manages agg tier placements.
@@ -235,7 +237,7 @@ func (mgr *placementManager) instanceFrom(placement placement.Placement) (placem
 	instance, found := placement.Instance(mgr.instanceID)
 	if !found {
 		mgr.metrics.instanceNotFound.Inc(1)
-		return nil, errInstanceNotFoundInPlacement
+		return nil, ErrInstanceNotFoundInPlacement
 	}
 	return instance, nil
 }

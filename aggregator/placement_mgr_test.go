@@ -133,7 +133,7 @@ func TestPlacementManagerInstanceNotFound(t *testing.T) {
 	require.NoError(t, err)
 	for {
 		_, err := mgr.Instance()
-		if err == errInstanceNotFoundInPlacement {
+		if err == ErrInstanceNotFoundInPlacement {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
