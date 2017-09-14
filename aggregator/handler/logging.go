@@ -46,7 +46,7 @@ func loggingHandler(logger log.Logger) HandleFunc {
 	}
 }
 
-// NewgingHandler creates a new logging handler.
+// NewLoggingHandler creates a new logging handler.
 func NewLoggingHandler(instrumentOpts instrument.Options) aggregator.Handler {
 	handler := loggingHandler(instrumentOpts.Logger())
 	return NewDecodingHandler(handler)
