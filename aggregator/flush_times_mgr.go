@@ -259,7 +259,16 @@ func (mgr *flushTimesManager) persistFlushTimes(persistWatch xwatch.Watch) {
 				_, err := mgr.flushTimesStore.Set(mgr.flushTimesKey, flushTimes)
 				return err
 			})
-			mgr.metrics.flushTimesPersist.ReportSuccessOrError(persistErr, mgr.nowFn().Sub(persistStart))
+			duration := mgr.nowFn().Sub(persistStart)
+			if persistErr == nil {
+				mgr.metrics.flushTimesPersist.ReportSuccess(duration)
+			} else {
+				mgr.metrics.flushTimesPersist.ReportError(duration)
+				mgr.logger.WithFields(
+					xlog.NewLogField("flushTimesKey", mgr.flushTimesKey),
+					xlog.NewLogErrField(persistErr),
+				).Error("flush times persist error")
+			}
 		}
 	}
 }
