@@ -428,6 +428,7 @@ func TestElectionManagerVerifyLeaderDelay(t *testing.T) {
 		SetForever(true)
 	mgr.changeRetrier = xretry.NewRetrier(retryOpts)
 	mgr.electionStateWatchable.Update(PendingFollowerState)
+	mgr.campaignStateWatchable.Update(campaignEnabled)
 
 	_, watch, err := mgr.goalStateWatchable.Watch()
 	require.NoError(t, err)
@@ -470,6 +471,7 @@ func TestElectionManagerVerifyWithLeaderErrors(t *testing.T) {
 	mgr := NewElectionManager(opts).(*electionManager)
 	mgr.electionStateWatchable.Update(PendingFollowerState)
 	mgr.changeRetrier = xretry.NewRetrier(xretry.NewOptions().SetInitialBackoff(100 * time.Millisecond))
+	mgr.campaignStateWatchable.Update(campaignEnabled)
 
 	_, watch, err := mgr.goalStateWatchable.Watch()
 	require.NoError(t, err)
@@ -505,6 +507,7 @@ func TestElectionManagerVerifyPendingFollowerStale(t *testing.T) {
 		SetLeaderService(leaderService)
 	mgr := NewElectionManager(opts).(*electionManager)
 	mgr.electionStateWatchable.Update(PendingFollowerState)
+	mgr.campaignStateWatchable.Update(campaignEnabled)
 
 	_, watch, err := mgr.goalStateWatchable.Watch()
 	require.NoError(t, err)
@@ -525,6 +528,41 @@ func TestElectionManagerVerifyPendingFollowerStale(t *testing.T) {
 
 	// Verify the retrier has exited the infinite retry loop.
 	mgr.doneCh <- struct{}{}
+}
+
+func TestElectionManagerVerifyCampaignDisabled(t *testing.T) {
+	errLeaderService := errors.New("leader service error")
+	leaderService := &mockLeaderService{
+		leaderFn: func(electionID string) (string, error) {
+			return "", errLeaderService
+		},
+	}
+	opts := testElectionManagerOptions(t).
+		SetLeaderService(leaderService)
+	mgr := NewElectionManager(opts).(*electionManager)
+	mgr.electionStateWatchable.Update(PendingFollowerState)
+	mgr.campaignStateWatchable.Update(campaignEnabled)
+
+	_, watch, err := mgr.goalStateWatchable.Watch()
+	require.NoError(t, err)
+
+	mgr.Add(1)
+	go mgr.verifyPendingFollower(watch)
+	mgr.goalStateWatchable.Update(goalState{state: PendingFollowerState})
+
+	// Sleep a little and check nothing changes.
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, PendingFollowerState, mgr.goalStateWatchable.Get().(goalState).state)
+
+	// Disable the campaign and wait for the goal state to update.
+	mgr.campaignStateWatchable.Update(campaignDisabled)
+	for {
+		if mgr.goalStateWatchable.Get().(goalState).state == FollowerState {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	close(mgr.doneCh)
 }
 
 func TestElectionManagerCheckCampaignStateLoop(t *testing.T) {

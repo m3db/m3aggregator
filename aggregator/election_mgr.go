@@ -182,8 +182,8 @@ type electionManagerMetrics struct {
 	campaignCheckUnexpectedShardTimes      tally.Counter
 	verifyLeaderErrors                     tally.Counter
 	verifyLeaderNotChanged                 tally.Counter
+	verifyCampaignDisabled                 tally.Counter
 	verifyPendingChangeStale               tally.Counter
-	verifyNoKnownLeader                    tally.Counter
 	followerResign                         tally.Counter
 	resignTimeout                          tally.Counter
 	resignErrors                           tally.Counter
@@ -211,8 +211,8 @@ func newElectionManagerMetrics(scope tally.Scope) electionManagerMetrics {
 		campaignCheckUnexpectedShardTimes:      campaignCheckScope.Counter("unexpected-shard-times"),
 		verifyLeaderErrors:                     verifyScope.Counter("leader-errors"),
 		verifyLeaderNotChanged:                 verifyScope.Counter("leader-not-changed"),
+		verifyCampaignDisabled:                 verifyScope.Counter("campaign-disabled"),
 		verifyPendingChangeStale:               verifyScope.Counter("pending-change-stale"),
-		verifyNoKnownLeader:                    verifyScope.Counter("no-known-leader"),
 		followerResign:                         resignScope.Counter("follower-resign"),
 		resignTimeout:                          resignScope.Counter("timeout"),
 		resignErrors:                           resignScope.Counter("errors"),
@@ -472,12 +472,16 @@ func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
 			continue
 		}
 
-		// Only continue verifying if the state has not changed.
-		continueFn := func(int) bool {
+		stateUnchangedFn := func() bool {
 			mgr.goalStateLock.RLock()
 			latest := mgr.goalStateWatchable.Get().(goalState)
 			mgr.goalStateLock.RUnlock()
 			return currState.id == latest.id && currState.state == latest.state
+		}
+
+		// Only continue verifying if the state has not changed and campaigning is not disabled.
+		continueFn := func(int) bool {
+			return stateUnchangedFn() && mgr.campaignState() != campaignDisabled
 		}
 
 		// Do not change state if the follower state cannot be verified.
@@ -495,8 +499,12 @@ func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
 			}
 			return nil
 		}); verifyErr != nil {
-			mgr.logError("verify error", verifyErr)
-			continue
+			// If state has changed, we skip this stale change.
+			if !stateUnchangedFn() {
+				continue
+			}
+			// Otherwise the campaign is disabled and there is no need to verify leader.
+			mgr.metrics.verifyCampaignDisabled.Inc(1)
 		}
 
 		mgr.goalStateLock.Lock()
