@@ -48,7 +48,7 @@ type FlushTimesManager interface {
 	Get() (*schema.ShardSetFlushTimes, error)
 
 	// Watch watches for updates to flush times.
-	Watch() (xwatch.Watch, error)
+	Watch() (watch.Watch, error)
 
 	// StoreAsync stores the flush times asynchronously.
 	StoreAsync(value *schema.ShardSetFlushTimes) error
@@ -88,17 +88,17 @@ type flushTimesManager struct {
 	sync.WaitGroup
 
 	nowFn                    clock.NowFn
-	logger                   xlog.Logger
+	logger                   log.Logger
 	flushTimesKeyFmt         string
 	flushTimesStore          kv.Store
-	flushTimesPersistRetrier xretry.Retrier
+	flushTimesPersistRetrier retry.Retrier
 
 	state               flushTimesManagerState
 	doneCh              chan struct{}
 	flushTimesKey       string
 	proto               *schema.ShardSetFlushTimes
-	flushTimesWatchable xwatch.Watchable
-	persistWatchable    xwatch.Watchable
+	flushTimesWatchable watch.Watchable
+	persistWatchable    watch.Watchable
 	metrics             flushTimesManagerMetrics
 }
 
@@ -169,7 +169,7 @@ func (mgr *flushTimesManager) Get() (*schema.ShardSetFlushTimes, error) {
 	return mgr.proto, nil
 }
 
-func (mgr *flushTimesManager) Watch() (xwatch.Watch, error) {
+func (mgr *flushTimesManager) Watch() (watch.Watch, error) {
 	mgr.RLock()
 	defer mgr.RUnlock()
 
@@ -212,8 +212,8 @@ func (mgr *flushTimesManager) resetWithLock() {
 	mgr.doneCh = make(chan struct{})
 	mgr.flushTimesKey = ""
 	mgr.proto = nil
-	mgr.flushTimesWatchable = xwatch.NewWatchable()
-	mgr.persistWatchable = xwatch.NewWatchable()
+	mgr.flushTimesWatchable = watch.NewWatchable()
+	mgr.persistWatchable = watch.NewWatchable()
 }
 
 func (mgr *flushTimesManager) watchFlushTimes(flushTimesWatch kv.ValueWatch) {
@@ -233,8 +233,8 @@ func (mgr *flushTimesManager) watchFlushTimes(flushTimesWatch kv.ValueWatch) {
 		if err := value.Unmarshal(&proto); err != nil {
 			mgr.metrics.flushTimesUnmarshalErrors.Inc(1)
 			mgr.logger.WithFields(
-				xlog.NewLogField("flushTimesKey", mgr.flushTimesKey),
-				xlog.NewLogErrField(err),
+				log.NewField("flushTimesKey", mgr.flushTimesKey),
+				log.NewErrField(err),
 			).Error("flush times unmarshal error")
 			continue
 		}
@@ -245,7 +245,7 @@ func (mgr *flushTimesManager) watchFlushTimes(flushTimesWatch kv.ValueWatch) {
 	}
 }
 
-func (mgr *flushTimesManager) persistFlushTimes(persistWatch xwatch.Watch) {
+func (mgr *flushTimesManager) persistFlushTimes(persistWatch watch.Watch) {
 	defer mgr.Done()
 
 	for {
@@ -265,8 +265,8 @@ func (mgr *flushTimesManager) persistFlushTimes(persistWatch xwatch.Watch) {
 			} else {
 				mgr.metrics.flushTimesPersist.ReportError(duration)
 				mgr.logger.WithFields(
-					xlog.NewLogField("flushTimesKey", mgr.flushTimesKey),
-					xlog.NewLogErrField(persistErr),
+					log.NewField("flushTimesKey", mgr.flushTimesKey),
+					log.NewErrField(persistErr),
 				).Error("flush times persist error")
 			}
 		}

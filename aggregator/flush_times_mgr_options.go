@@ -58,10 +58,10 @@ type FlushTimesManagerOptions interface {
 	FlushTimesStore() kv.Store
 
 	// SetFlushTimesPersistRetrier sets the retrier for persisting flush times.
-	SetFlushTimesPersistRetrier(value xretry.Retrier) FlushTimesManagerOptions
+	SetFlushTimesPersistRetrier(value retry.Retrier) FlushTimesManagerOptions
 
 	// FlushTimesPersistRetrier returns the retrier for persisting flush times.
-	FlushTimesPersistRetrier() xretry.Retrier
+	FlushTimesPersistRetrier() retry.Retrier
 }
 
 type flushTimesManagerOptions struct {
@@ -69,7 +69,7 @@ type flushTimesManagerOptions struct {
 	instrumentOpts           instrument.Options
 	flushTimesKeyFmt         string
 	flushTimesStore          kv.Store
-	flushTimesPersistRetrier xretry.Retrier
+	flushTimesPersistRetrier retry.Retrier
 }
 
 // NewFlushTimesManagerOptions create a new set of flush times manager options.
@@ -78,7 +78,7 @@ func NewFlushTimesManagerOptions() FlushTimesManagerOptions {
 		clockOpts:                clock.NewOptions(),
 		instrumentOpts:           instrument.NewOptions(),
 		flushTimesKeyFmt:         defaultFlushTimesKeyFormat,
-		flushTimesPersistRetrier: xretry.NewRetrier(xretry.NewOptions()),
+		flushTimesPersistRetrier: retry.NewRetrier(retry.NewOptions()),
 	}
 }
 
@@ -122,12 +122,12 @@ func (o *flushTimesManagerOptions) FlushTimesStore() kv.Store {
 	return o.flushTimesStore
 }
 
-func (o *flushTimesManagerOptions) SetFlushTimesPersistRetrier(value xretry.Retrier) FlushTimesManagerOptions {
+func (o *flushTimesManagerOptions) SetFlushTimesPersistRetrier(value retry.Retrier) FlushTimesManagerOptions {
 	opts := *o
 	opts.flushTimesPersistRetrier = value
 	return &opts
 }
 
-func (o *flushTimesManagerOptions) FlushTimesPersistRetrier() xretry.Retrier {
+func (o *flushTimesManagerOptions) FlushTimesPersistRetrier() retry.Retrier {
 	return o.flushTimesPersistRetrier
 }

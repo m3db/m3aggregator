@@ -362,12 +362,12 @@ func testFlushManagerOptions(t *testing.T) (FlushManagerOptions, *time.Time) {
 	var now time.Time
 	nowFn := func() time.Time { return now }
 	clockOpts := clock.NewOptions().SetNowFn(nowFn)
-	watchable := xwatch.NewWatchable()
-	_, watch, err := watchable.Watch()
+	watchable := watch.NewWatchable()
+	_, w, err := watchable.Watch()
 	require.NoError(t, err)
 	flushTimesManager := &mockFlushTimesManager{
-		watchFlushTimesFn: func() (xwatch.Watch, error) {
-			return watch, nil
+		watchFlushTimesFn: func() (watch.Watch, error) {
+			return w, nil
 		},
 	}
 	return NewFlushManagerOptions().

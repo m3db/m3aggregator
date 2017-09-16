@@ -27,7 +27,7 @@ import (
 	schema "github.com/m3db/m3aggregator/generated/proto/flush"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/log"
-	"github.com/m3db/m3x/sync"
+	xsync "github.com/m3db/m3x/sync"
 	"github.com/m3db/m3x/watch"
 
 	"github.com/uber-go/tally"
@@ -71,7 +71,7 @@ type followerFlushManager struct {
 	flushTimesManager     FlushTimesManager
 	maxBufferSize         time.Duration
 	forcedFlushWindowSize time.Duration
-	logger                xlog.Logger
+	logger                log.Logger
 	scope                 tally.Scope
 
 	doneCh          <-chan struct{}
@@ -214,7 +214,7 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 			if !exists {
 				mgr.metrics.shardNotFound.Inc(1)
 				mgr.logger.WithFields(
-					xlog.NewLogField("shard", shard),
+					log.NewField("shard", shard),
 				).Warn("shard not found in flush times")
 				continue
 			}
@@ -223,8 +223,8 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 			if !exists {
 				mgr.metrics.resolutionNotFound.Inc(1)
 				mgr.logger.WithFields(
-					xlog.NewLogField("shard", shard),
-					xlog.NewLogField("resolution", resolution.String()),
+					log.NewField("shard", shard),
+					log.NewField("resolution", resolution.String()),
 				).Warn("resolution not found in flush times")
 				continue
 			}
@@ -263,7 +263,7 @@ func (mgr *followerFlushManager) watchFlushTimes() {
 
 	var (
 		throttlePeriod  = time.Second
-		flushTimesWatch xwatch.Watch
+		flushTimesWatch watch.Watch
 		err             error
 	)
 

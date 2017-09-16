@@ -78,10 +78,10 @@ type FlushManagerOptions interface {
 	MaxJitterFn() FlushJitterFn
 
 	// SetWorkerPool sets the worker pool.
-	SetWorkerPool(value xsync.WorkerPool) FlushManagerOptions
+	SetWorkerPool(value sync.WorkerPool) FlushManagerOptions
 
 	// WorkerPool returns the worker pool.
-	WorkerPool() xsync.WorkerPool
+	WorkerPool() sync.WorkerPool
 
 	// SetPlacementManager sets the placement manager.
 	SetPlacementManager(value PlacementManager) FlushManagerOptions
@@ -130,7 +130,7 @@ type flushManagerOptions struct {
 	checkEvery             time.Duration
 	jitterEnabled          bool
 	maxJitterFn            FlushJitterFn
-	workerPool             xsync.WorkerPool
+	workerPool             sync.WorkerPool
 	placementManager       PlacementManager
 	electionManager        ElectionManager
 	flushTimesManager      FlushTimesManager
@@ -141,7 +141,7 @@ type flushManagerOptions struct {
 
 // NewFlushManagerOptions create a new set of flush manager options.
 func NewFlushManagerOptions() FlushManagerOptions {
-	workerPool := xsync.NewWorkerPool(defaultWorkerPoolSize)
+	workerPool := sync.NewWorkerPool(defaultWorkerPoolSize)
 	workerPool.Init()
 	return &flushManagerOptions{
 		clockOpts:              clock.NewOptions(),
@@ -205,13 +205,13 @@ func (o *flushManagerOptions) MaxJitterFn() FlushJitterFn {
 	return o.maxJitterFn
 }
 
-func (o *flushManagerOptions) SetWorkerPool(value xsync.WorkerPool) FlushManagerOptions {
+func (o *flushManagerOptions) SetWorkerPool(value sync.WorkerPool) FlushManagerOptions {
 	opts := *o
 	opts.workerPool = value
 	return &opts
 }
 
-func (o *flushManagerOptions) WorkerPool() xsync.WorkerPool {
+func (o *flushManagerOptions) WorkerPool() sync.WorkerPool {
 	return o.workerPool
 }
 

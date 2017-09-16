@@ -33,12 +33,12 @@ import (
 
 func TestFollowerFlushManagerOpen(t *testing.T) {
 	doneCh := make(chan struct{})
-	watchable := xwatch.NewWatchable()
-	_, watch, err := watchable.Watch()
+	watchable := watch.NewWatchable()
+	_, w, err := watchable.Watch()
 	require.NoError(t, err)
 	flushTimesManager := &mockFlushTimesManager{
-		watchFlushTimesFn: func() (xwatch.Watch, error) {
-			return watch, nil
+		watchFlushTimesFn: func() (watch.Watch, error) {
+			return w, nil
 		},
 	}
 	opts := NewFlushManagerOptions().SetFlushTimesManager(flushTimesManager)

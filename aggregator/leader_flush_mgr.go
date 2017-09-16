@@ -28,7 +28,7 @@ import (
 	schema "github.com/m3db/m3aggregator/generated/proto/flush"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/log"
-	"github.com/m3db/m3x/sync"
+	xsync "github.com/m3db/m3x/sync"
 
 	"github.com/uber-go/tally"
 )
@@ -57,7 +57,7 @@ type leaderFlushManager struct {
 	flushTimesManager      FlushTimesManager
 	flushTimesPersistEvery time.Duration
 	maxBufferSize          time.Duration
-	logger                 xlog.Logger
+	logger                 log.Logger
 	scope                  tally.Scope
 
 	doneCh              <-chan struct{}

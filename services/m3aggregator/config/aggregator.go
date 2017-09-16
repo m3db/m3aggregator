@@ -397,7 +397,8 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	// NB(xichen): we preallocate a bit over the maximum flush size as a safety measure
 	// because we might write past the max flush size and rewind it during flushing.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("buffered-encoder-pool"))
-	bufferedEncoderPoolOpts := c.BufferedEncoderPool.NewObjectPoolOptions(iOpts)
+	bufferedEncoderPoolOpts := msgpack.NewBufferedEncoderPoolOptions().
+		SetObjectPoolOptions(c.BufferedEncoderPool.NewObjectPoolOptions(iOpts))
 	bufferedEncoderPool := msgpack.NewBufferedEncoderPool(bufferedEncoderPoolOpts)
 	opts = opts.SetBufferedEncoderPool(bufferedEncoderPool)
 	initialBufferSize := c.MaxFlushSize * initialBufferSizeGrowthFactor
@@ -602,7 +603,7 @@ type flushTimesManagerConfiguration struct {
 	FlushTimesKeyFmt string `yaml:"flushTimesKeyFmt" validate:"nonzero"`
 
 	// Retrier for persisting flush times.
-	FlushTimesPersistRetrier xretry.Configuration `yaml:"flushTimesPersistRetrier"`
+	FlushTimesPersistRetrier retry.Configuration `yaml:"flushTimesPersistRetrier"`
 }
 
 func (c flushTimesManagerConfiguration) NewFlushTimesManager(
@@ -624,9 +625,9 @@ type electionManagerConfiguration struct {
 	ServiceID                  serviceIDConfiguration `yaml:"serviceID"`
 	LeaderValue                string                 `yaml:"leaderValue"`
 	ElectionKeyFmt             string                 `yaml:"electionKeyFmt" validate:"nonzero"`
-	CampaignRetrier            xretry.Configuration   `yaml:"campaignRetrier"`
-	ChangeRetrier              xretry.Configuration   `yaml:"changeRetrier"`
-	ResignRetrier              xretry.Configuration   `yaml:"resignRetrier"`
+	CampaignRetrier            retry.Configuration    `yaml:"campaignRetrier"`
+	ChangeRetrier              retry.Configuration    `yaml:"changeRetrier"`
+	ResignRetrier              retry.Configuration    `yaml:"resignRetrier"`
 	CampaignStateCheckInterval time.Duration          `yaml:"campaignStateCheckInterval"`
 	ShardCutoffCheckOffset     time.Duration          `yaml:"shardCutoffCheckOffset"`
 }
@@ -778,7 +779,7 @@ func (c flushManagerConfiguration) NewFlushManager(
 	}
 	if c.NumWorkersPerCPU != 0 {
 		workerPoolSize := int(float64(runtime.NumCPU()) * c.NumWorkersPerCPU)
-		workerPool := xsync.NewWorkerPool(workerPoolSize)
+		workerPool := sync.NewWorkerPool(workerPoolSize)
 		workerPool.Init()
 		opts = opts.SetWorkerPool(workerPool)
 	}

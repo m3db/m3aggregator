@@ -32,7 +32,7 @@ import (
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/leader/campaign"
 	"github.com/m3db/m3x/clock"
-	"github.com/m3db/m3x/errors"
+	xerrors "github.com/m3db/m3x/errors"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/watch"
@@ -235,13 +235,13 @@ type electionManager struct {
 	sync.WaitGroup
 
 	nowFn                      clock.NowFn
-	logger                     xlog.Logger
+	logger                     log.Logger
 	reportInterval             time.Duration
 	campaignOpts               services.CampaignOptions
 	electionOpts               services.ElectionOptions
-	campaignRetrier            xretry.Retrier
-	changeRetrier              xretry.Retrier
-	resignRetrier              xretry.Retrier
+	campaignRetrier            retry.Retrier
+	changeRetrier              retry.Retrier
+	resignRetrier              retry.Retrier
 	electionKeyFmt             string
 	leaderService              services.LeaderService
 	leaderValue                string
@@ -254,12 +254,12 @@ type electionManager struct {
 	state                  electionManagerState
 	doneCh                 chan struct{}
 	campaigning            int32
-	campaignStateWatchable xwatch.Watchable
+	campaignStateWatchable watch.Watchable
 	electionKey            string
-	electionStateWatchable xwatch.Watchable
+	electionStateWatchable watch.Watchable
 	nextGoalStateID        int64
 	goalStateLock          *sync.RWMutex
-	goalStateWatchable     xwatch.Watchable
+	goalStateWatchable     watch.Watchable
 	campaignIsEnabledFn    campaignIsEnabledFn
 	sleepFn                sleepFn
 	metrics                electionManagerMetrics
@@ -270,9 +270,9 @@ func NewElectionManager(opts ElectionManagerOptions) ElectionManager {
 	instrumentOpts := opts.InstrumentOptions()
 	scope := instrumentOpts.MetricsScope()
 	campaignOpts := opts.CampaignOptions()
-	campaignRetrier := xretry.NewRetrier(opts.CampaignRetryOptions().SetForever(true))
-	changeRetrier := xretry.NewRetrier(opts.ChangeRetryOptions().SetForever(true))
-	resignRetrier := xretry.NewRetrier(opts.ResignRetryOptions().SetForever(true))
+	campaignRetrier := retry.NewRetrier(opts.CampaignRetryOptions().SetForever(true))
+	changeRetrier := retry.NewRetrier(opts.ChangeRetryOptions().SetForever(true))
+	resignRetrier := retry.NewRetrier(opts.ResignRetryOptions().SetForever(true))
 	mgr := &electionManager{
 		nowFn:                      opts.ClockOptions().NowFn(),
 		logger:                     instrumentOpts.Logger(),
@@ -419,7 +419,7 @@ func (mgr *electionManager) Close() error {
 	return nil
 }
 
-func (mgr *electionManager) watchGoalStateChanges(watch xwatch.Watch) {
+func (mgr *electionManager) watchGoalStateChanges(watch watch.Watch) {
 	defer func() {
 		watch.Close()
 		mgr.Done()
@@ -454,7 +454,7 @@ func (mgr *electionManager) processGoalState(goalState goalState) {
 	mgr.logger.Info(fmt.Sprintf("election state changed from %v to %v", currState, newState))
 }
 
-func (mgr *electionManager) verifyPendingFollower(watch xwatch.Watch) {
+func (mgr *electionManager) verifyPendingFollower(watch watch.Watch) {
 	defer func() {
 		watch.Close()
 		mgr.Done()
@@ -675,7 +675,7 @@ func (mgr *electionManager) campaignIsEnabled() (bool, error) {
 	return false, errUnexpectedShardCutoverCutoffTimes
 }
 
-func (mgr *electionManager) campaignLoop(campaignStateWatch xwatch.Watch) {
+func (mgr *electionManager) campaignLoop(campaignStateWatch watch.Watch) {
 	defer mgr.Done()
 
 	var campaignStatusCh <-chan campaign.Status
@@ -763,16 +763,16 @@ func (mgr *electionManager) resetWithLock() {
 	mgr.state = electionManagerNotOpen
 	mgr.doneCh = make(chan struct{})
 	mgr.campaigning = 0
-	mgr.campaignStateWatchable = xwatch.NewWatchable()
+	mgr.campaignStateWatchable = watch.NewWatchable()
 	mgr.campaignStateWatchable.Update(campaignDisabled)
-	mgr.electionStateWatchable = xwatch.NewWatchable()
+	mgr.electionStateWatchable = watch.NewWatchable()
 	mgr.electionStateWatchable.Update(FollowerState)
 	mgr.nextGoalStateID = 0
 	mgr.goalStateLock = &sync.RWMutex{}
-	mgr.goalStateWatchable = xwatch.NewWatchable()
+	mgr.goalStateWatchable = watch.NewWatchable()
 }
 
-func (mgr *electionManager) resignWhile(continueFn xretry.ContinueFn) error {
+func (mgr *electionManager) resignWhile(continueFn retry.ContinueFn) error {
 	return mgr.resignRetrier.AttemptWhile(continueFn, func() error {
 		if err := mgr.leaderService.Resign(mgr.electionKey); err != nil {
 			mgr.metrics.resignErrors.Inc(1)
@@ -805,9 +805,9 @@ func (mgr *electionManager) reportMetrics() {
 
 func (mgr *electionManager) logError(desc string, err error) {
 	mgr.logger.WithFields(
-		xlog.NewLogField("electionKey", mgr.electionKey),
-		xlog.NewLogField("electionTTL", time.Duration(mgr.electionOpts.TTLSecs())*time.Second),
-		xlog.NewLogField("leaderValue", mgr.campaignOpts.LeaderValue()),
-		xlog.NewLogErrField(err),
+		log.NewField("electionKey", mgr.electionKey),
+		log.NewField("electionTTL", time.Duration(mgr.electionOpts.TTLSecs())*time.Second),
+		log.NewField("leaderValue", mgr.campaignOpts.LeaderValue()),
+		log.NewErrField(err),
 	).Error(desc)
 }

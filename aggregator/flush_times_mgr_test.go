@@ -200,7 +200,7 @@ func testFlushTimesManager() (*flushTimesManager, kv.Store) {
 
 type openShardSetIDFn func(shardSetID uint32) error
 type getFlushTimesFn func() (*schema.ShardSetFlushTimes, error)
-type watchFlushTimesFn func() (xwatch.Watch, error)
+type watchFlushTimesFn func() (watch.Watch, error)
 type storeAsyncFn func(value *schema.ShardSetFlushTimes) error
 
 type mockFlushTimesManager struct {
@@ -220,7 +220,7 @@ func (m *mockFlushTimesManager) Get() (*schema.ShardSetFlushTimes, error) {
 	return m.getFlushTimesFn()
 }
 
-func (m *mockFlushTimesManager) Watch() (xwatch.Watch, error) {
+func (m *mockFlushTimesManager) Watch() (watch.Watch, error) {
 	return m.watchFlushTimesFn()
 }
 
