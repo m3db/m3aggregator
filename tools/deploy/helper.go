@@ -28,12 +28,11 @@ import (
 	"time"
 
 	"github.com/m3db/m3cluster/kv"
-	"github.com/m3db/m3cluster/services"
-	"github.com/m3db/m3cluster/services/placement"
-	"github.com/m3db/m3x/errors"
+	"github.com/m3db/m3cluster/placement"
+	xerrors "github.com/m3db/m3x/errors"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
-	"github.com/m3db/m3x/sync"
+	xsync "github.com/m3db/m3x/sync"
 )
 
 var (
@@ -58,17 +57,17 @@ type Helper interface {
 
 // TODO(xichen): disable deployment while another is ongoing.
 type helper struct {
-	logger                  xlog.Logger
+	logger                  log.Logger
 	planner                 planner
 	client                  aggregatorClient
 	mgr                     Manager
 	store                   kv.Store
-	retrier                 xretry.Retrier
-	foreverRetrier          xretry.Retrier
+	retrier                 retry.Retrier
+	foreverRetrier          retry.Retrier
 	workers                 xsync.WorkerPool
 	toPlacementInstanceIDFn ToPlacementInstanceIDFn
 	toAPIEndpointFn         ToAPIEndpointFn
-	placementWatcher        services.StagedPlacementWatcher
+	placementWatcher        placement.StagedPlacementWatcher
 	settleBetweenSteps      time.Duration
 }
 
@@ -82,8 +81,8 @@ func NewHelper(opts HelperOptions) (Helper, error) {
 		return nil, err
 	}
 	retryOpts := opts.RetryOptions()
-	retrier := xretry.NewRetrier(retryOpts)
-	foreverRetrier := xretry.NewRetrier(retryOpts.SetForever(true))
+	retrier := retry.NewRetrier(retryOpts)
+	foreverRetrier := retry.NewRetrier(retryOpts.SetForever(true))
 	return helper{
 		logger:                  opts.InstrumentOptions().Logger(),
 		planner:                 planner,
@@ -323,7 +322,7 @@ func (h helper) allInstanceMetadatas() (instanceMetadatas, error) {
 // instances derived from deployment, ensuring there are no duplicate instances
 // and the instances derived from two sources match against each other.
 func (h helper) computeInstanceMetadatas(
-	placementInstances []services.PlacementInstance,
+	placementInstances []placement.Instance,
 	deploymentInstances []Instance,
 ) (instanceMetadatas, error) {
 	if len(placementInstances) != len(deploymentInstances) {
@@ -372,7 +371,7 @@ func (h helper) computeInstanceMetadatas(
 	return metadatas, nil
 }
 
-func (h helper) placementInstances() ([]services.PlacementInstance, error) {
+func (h helper) placementInstances() ([]placement.Instance, error) {
 	stagedPlacement, onStagedPlacementDoneFn, err := h.placementWatcher.ActiveStagedPlacement()
 	if err != nil {
 		return nil, err

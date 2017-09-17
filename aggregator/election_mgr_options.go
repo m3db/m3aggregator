@@ -21,6 +21,8 @@
 package aggregator
 
 import (
+	"time"
+
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
@@ -28,7 +30,9 @@ import (
 )
 
 const (
-	defaultElectionKeyFormat = "/shardset/%d/lock"
+	defaultElectionKeyFormat          = "/shardset/%d/lock"
+	defaultCampaignStateCheckInterval = time.Second
+	defaultShardCutoffCheckOffset     = 30 * time.Second
 )
 
 // ElectionManagerOptions provide a set of options for the election manager.
@@ -58,16 +62,22 @@ type ElectionManagerOptions interface {
 	CampaignOptions() services.CampaignOptions
 
 	// SetCampaignRetryOptions sets the campaign retry options.
-	SetCampaignRetryOptions(value xretry.Options) ElectionManagerOptions
+	SetCampaignRetryOptions(value retry.Options) ElectionManagerOptions
 
 	// CampaignRetryOptions returns the campaign retry options.
-	CampaignRetryOptions() xretry.Options
+	CampaignRetryOptions() retry.Options
 
 	// SetChangeRetryOptions sets the change retry options.
-	SetChangeRetryOptions(value xretry.Options) ElectionManagerOptions
+	SetChangeRetryOptions(value retry.Options) ElectionManagerOptions
 
 	// ChangeRetryOptions returns the change retry options.
-	ChangeRetryOptions() xretry.Options
+	ChangeRetryOptions() retry.Options
+
+	// SetResignRetryOptions sets the resign retry options.
+	SetResignRetryOptions(value retry.Options) ElectionManagerOptions
+
+	// ResignRetryOptions returns the resign retry options
+	ResignRetryOptions() retry.Options
 
 	// SetElectionKeyFmt sets the election key format.
 	SetElectionKeyFmt(value string) ElectionManagerOptions
@@ -80,28 +90,64 @@ type ElectionManagerOptions interface {
 
 	// LeaderService returns the leader service.
 	LeaderService() services.LeaderService
+
+	// SetPlacementManager sets the placement manager.
+	SetPlacementManager(value PlacementManager) ElectionManagerOptions
+
+	// PlacementManager returns the placement manager.
+	PlacementManager() PlacementManager
+
+	// SetFlushTimesManager sets the flush times manager.
+	SetFlushTimesManager(value FlushTimesManager) ElectionManagerOptions
+
+	// FlushTimesManager returns the flush times manager.
+	FlushTimesManager() FlushTimesManager
+
+	// SetCampaignStateCheckInterval sets the interval to check campaign state.
+	SetCampaignStateCheckInterval(value time.Duration) ElectionManagerOptions
+
+	// CampaignStateCheckInterval returns the interval to check campaign state.
+	CampaignStateCheckInterval() time.Duration
+
+	// SetShardCutoffCheckOffset sets the offset when checking if a shard has been cutoff.
+	// The cutoff time is applied in order to stop campaignining when necessary before all
+	// shards are cut off avoiding incomplete data to be flushed.
+	SetShardCutoffCheckOffset(value time.Duration) ElectionManagerOptions
+
+	// ShardCutoffCheckOffset returns the offset when checking if a shard has been cutoff.
+	// The cutoff time is applied in order to stop campaignining when necessary before all
+	// shards are cut off avoiding incomplete data to be flushed.
+	ShardCutoffCheckOffset() time.Duration
 }
 
 type electionManagerOptions struct {
-	clockOpts         clock.Options
-	instrumentOpts    instrument.Options
-	electionOpts      services.ElectionOptions
-	campaignOpts      services.CampaignOptions
-	campaignRetryOpts xretry.Options
-	changeRetryOpts   xretry.Options
-	electionKeyFmt    string
-	leaderService     services.LeaderService
+	clockOpts                  clock.Options
+	instrumentOpts             instrument.Options
+	electionOpts               services.ElectionOptions
+	campaignOpts               services.CampaignOptions
+	campaignRetryOpts          retry.Options
+	changeRetryOpts            retry.Options
+	resignRetryOpts            retry.Options
+	electionKeyFmt             string
+	leaderService              services.LeaderService
+	placementManager           PlacementManager
+	flushTimesManager          FlushTimesManager
+	campaignStateCheckInterval time.Duration
+	shardCutoffCheckOffset     time.Duration
 }
 
 // NewElectionManagerOptions create a new set of options for the election manager.
 func NewElectionManagerOptions() ElectionManagerOptions {
 	return &electionManagerOptions{
-		clockOpts:         clock.NewOptions(),
-		instrumentOpts:    instrument.NewOptions(),
-		electionOpts:      services.NewElectionOptions(),
-		campaignRetryOpts: xretry.NewOptions(),
-		changeRetryOpts:   xretry.NewOptions(),
-		electionKeyFmt:    defaultElectionKeyFormat,
+		clockOpts:                  clock.NewOptions(),
+		instrumentOpts:             instrument.NewOptions(),
+		electionOpts:               services.NewElectionOptions(),
+		campaignRetryOpts:          retry.NewOptions(),
+		changeRetryOpts:            retry.NewOptions(),
+		resignRetryOpts:            retry.NewOptions(),
+		electionKeyFmt:             defaultElectionKeyFormat,
+		campaignStateCheckInterval: defaultCampaignStateCheckInterval,
+		shardCutoffCheckOffset:     defaultShardCutoffCheckOffset,
 	}
 }
 
@@ -145,24 +191,34 @@ func (o *electionManagerOptions) CampaignOptions() services.CampaignOptions {
 	return o.campaignOpts
 }
 
-func (o *electionManagerOptions) SetCampaignRetryOptions(value xretry.Options) ElectionManagerOptions {
+func (o *electionManagerOptions) SetCampaignRetryOptions(value retry.Options) ElectionManagerOptions {
 	opts := *o
 	opts.campaignRetryOpts = value
 	return &opts
 }
 
-func (o *electionManagerOptions) CampaignRetryOptions() xretry.Options {
+func (o *electionManagerOptions) CampaignRetryOptions() retry.Options {
 	return o.campaignRetryOpts
 }
 
-func (o *electionManagerOptions) SetChangeRetryOptions(value xretry.Options) ElectionManagerOptions {
+func (o *electionManagerOptions) SetChangeRetryOptions(value retry.Options) ElectionManagerOptions {
 	opts := *o
 	opts.changeRetryOpts = value
 	return &opts
 }
 
-func (o *electionManagerOptions) ChangeRetryOptions() xretry.Options {
+func (o *electionManagerOptions) ChangeRetryOptions() retry.Options {
 	return o.changeRetryOpts
+}
+
+func (o *electionManagerOptions) SetResignRetryOptions(value retry.Options) ElectionManagerOptions {
+	opts := *o
+	opts.resignRetryOpts = value
+	return &opts
+}
+
+func (o *electionManagerOptions) ResignRetryOptions() retry.Options {
+	return o.resignRetryOpts
 }
 
 func (o *electionManagerOptions) SetElectionKeyFmt(value string) ElectionManagerOptions {
@@ -183,4 +239,44 @@ func (o *electionManagerOptions) SetLeaderService(value services.LeaderService) 
 
 func (o *electionManagerOptions) LeaderService() services.LeaderService {
 	return o.leaderService
+}
+
+func (o *electionManagerOptions) SetPlacementManager(value PlacementManager) ElectionManagerOptions {
+	opts := *o
+	opts.placementManager = value
+	return &opts
+}
+
+func (o *electionManagerOptions) PlacementManager() PlacementManager {
+	return o.placementManager
+}
+
+func (o *electionManagerOptions) SetFlushTimesManager(value FlushTimesManager) ElectionManagerOptions {
+	opts := *o
+	opts.flushTimesManager = value
+	return &opts
+}
+
+func (o *electionManagerOptions) FlushTimesManager() FlushTimesManager {
+	return o.flushTimesManager
+}
+
+func (o *electionManagerOptions) SetCampaignStateCheckInterval(value time.Duration) ElectionManagerOptions {
+	opts := *o
+	opts.campaignStateCheckInterval = value
+	return &opts
+}
+
+func (o *electionManagerOptions) CampaignStateCheckInterval() time.Duration {
+	return o.campaignStateCheckInterval
+}
+
+func (o *electionManagerOptions) SetShardCutoffCheckOffset(value time.Duration) ElectionManagerOptions {
+	opts := *o
+	opts.shardCutoffCheckOffset = value
+	return &opts
+}
+
+func (o *electionManagerOptions) ShardCutoffCheckOffset() time.Duration {
+	return o.shardCutoffCheckOffset
 }

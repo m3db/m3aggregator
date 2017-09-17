@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 	"testing"
@@ -34,31 +35,26 @@ import (
 	httpserver "github.com/m3db/m3aggregator/server/http"
 	msgpackserver "github.com/m3db/m3aggregator/server/msgpack"
 	"github.com/m3db/m3aggregator/services/m3aggregator/serve"
-	"github.com/m3db/m3cluster/proto/util"
+	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3cluster/services"
-	"github.com/m3db/m3cluster/services/placement"
 	"github.com/m3db/m3cluster/shard"
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/clock"
-	"github.com/m3db/m3x/sync"
+	xsync "github.com/m3db/m3x/sync"
+
 	"github.com/stretchr/testify/require"
 )
 
-// nolint: megacheck, varcheck, deadcode
 var (
-	msgpackAddrArg                = flag.String("msgpackAddr", "0.0.0.0:6000", "msgpack server address")
-	httpAddrArg                   = flag.String("httpAddr", "0.0.0.0:6001", "http server address")
-	errServerStartTimedOut        = errors.New("server took too long to start")
-	errServerStopTimedOut         = errors.New("server took too long to stop")
-	errElectionStateChangeTimeout = errors.New("server took too long to change election state")
+	msgpackAddrArg         = flag.String("msgpackAddr", "0.0.0.0:6000", "msgpack server address")
+	httpAddrArg            = flag.String("httpAddr", "0.0.0.0:6001", "http server address")
+	errServerStartTimedOut = errors.New("server took too long to start")
 )
 
 // nowSetterFn is the function that sets the current time.
-// nolint: megacheck
 type nowSetterFn func(t time.Time)
 
-// nolint: megacheck
 type testSetup struct {
 	opts              testOptions
 	msgpackAddr       string
@@ -83,7 +79,6 @@ type testSetup struct {
 	closedCh chan struct{}
 }
 
-// nolint: megacheck, deadcode
 func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 	if opts == nil {
 		opts = newTestOptions()
@@ -134,6 +129,47 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 	})
 	aggregatorOpts = aggregatorOpts.SetEntryPool(entryPool)
 
+	// Set up placement manager.
+	shardSet := make([]shard.Shard, opts.NumShards())
+	for i := 0; i < opts.NumShards(); i++ {
+		shardSet[i] = shard.NewShard(uint32(i)).
+			SetState(shard.Initializing).
+			SetCutoverNanos(0).
+			SetCutoffNanos(math.MaxInt64)
+	}
+	shards := shard.NewShards(shardSet)
+	instance := placement.NewInstance().
+		SetID(opts.InstanceID()).
+		SetShards(shards).
+		SetShardSetID(opts.ShardSetID())
+	testPlacement := placement.NewPlacement().
+		SetInstances([]placement.Instance{instance}).
+		SetShards(shards.AllIDs())
+	stagedPlacement := placement.NewStagedPlacement().
+		SetPlacements([]placement.Placement{testPlacement})
+	stagedPlacementProto, err := stagedPlacement.Proto()
+	require.NoError(t, err)
+	placementKey := opts.PlacementKVKey()
+	placementStore := opts.KVStore()
+	_, err = placementStore.SetIfNotExists(placementKey, stagedPlacementProto)
+	require.NoError(t, err)
+	placementWatcherOpts := placement.NewStagedPlacementWatcherOptions().
+		SetStagedPlacementKey(placementKey).
+		SetStagedPlacementStore(placementStore)
+	placementWatcher := placement.NewStagedPlacementWatcher(placementWatcherOpts)
+	placementManagerOpts := aggregator.NewPlacementManagerOptions().
+		SetInstanceID(opts.InstanceID()).
+		SetStagedPlacementWatcher(placementWatcher)
+	placementManager := aggregator.NewPlacementManager(placementManagerOpts)
+	aggregatorOpts = aggregatorOpts.SetPlacementManager(placementManager)
+
+	// Set up flush times manager.
+	flushTimesManagerOpts := aggregator.NewFlushTimesManagerOptions().
+		SetFlushTimesKeyFmt(opts.FlushTimesKeyFmt()).
+		SetFlushTimesStore(opts.KVStore())
+	flushTimesManager := aggregator.NewFlushTimesManager(flushTimesManagerOpts)
+	aggregatorOpts = aggregatorOpts.SetFlushTimesManager(flushTimesManager)
+
 	// Set up election manager.
 	leaderValue := opts.InstanceID()
 	campaignOpts, err := services.NewCampaignOptions()
@@ -145,47 +181,21 @@ func newTestSetup(t *testing.T, opts testOptions) *testSetup {
 	electionManagerOpts := aggregator.NewElectionManagerOptions().
 		SetCampaignOptions(campaignOpts).
 		SetElectionKeyFmt(opts.ElectionKeyFmt()).
-		SetLeaderService(leaderService)
+		SetLeaderService(leaderService).
+		SetPlacementManager(placementManager).
+		SetFlushTimesManager(flushTimesManager)
 	electionManager := aggregator.NewElectionManager(electionManagerOpts)
 	aggregatorOpts = aggregatorOpts.SetElectionManager(electionManager)
 
 	// Set up flush manager.
 	flushManagerOpts := aggregator.NewFlushManagerOptions().
+		SetPlacementManager(placementManager).
+		SetFlushTimesManager(flushTimesManager).
 		SetElectionManager(electionManager).
-		SetFlushTimesKeyFmt(opts.FlushTimesKeyFmt()).
-		SetFlushTimesStore(opts.KVStore()).
 		SetJitterEnabled(opts.JitterEnabled()).
 		SetMaxJitterFn(opts.MaxJitterFn())
 	flushManager := aggregator.NewFlushManager(flushManagerOpts)
 	aggregatorOpts = aggregatorOpts.SetFlushManager(flushManager)
-
-	// Set up placement watcher.
-	shardSet := make([]shard.Shard, opts.NumShards())
-	for i := 0; i < opts.NumShards(); i++ {
-		shardSet[i] = shard.NewShard(uint32(i)).SetState(shard.Initializing)
-	}
-	shards := shard.NewShards(shardSet)
-	instance := placement.NewInstance().
-		SetID(opts.InstanceID()).
-		SetShards(shards).
-		SetShardSetID(opts.ShardSetID())
-	testPlacement := placement.NewPlacement().
-		SetInstances([]services.PlacementInstance{instance}).
-		SetShards(shards.AllIDs())
-	stagedPlacement := placement.NewStagedPlacement().
-		SetPlacements([]services.Placement{testPlacement})
-	stagedPlacementProto, err := util.StagedPlacementToProto(stagedPlacement)
-	require.NoError(t, err)
-	placementKey := opts.PlacementKVKey()
-	placementStore := opts.KVStore()
-	_, err = placementStore.SetIfNotExists(placementKey, stagedPlacementProto)
-	require.NoError(t, err)
-	placementWatcherOpts := placement.NewStagedPlacementWatcherOptions().
-		SetStagedPlacementKey(placementKey).
-		SetStagedPlacementStore(placementStore)
-	aggregatorOpts = aggregatorOpts.
-		SetInstanceID(opts.InstanceID()).
-		SetStagedPlacementWatcherOptions(placementWatcherOpts)
 
 	// Set up the handler.
 	var (

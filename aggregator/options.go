@@ -26,14 +26,12 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
-	"github.com/m3db/m3cluster/services"
-	"github.com/m3db/m3cluster/services/placement"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
-	"github.com/m3db/m3x/time"
+	xtime "github.com/m3db/m3x/time"
 
 	"github.com/spaolacci/murmur3"
 )
@@ -52,7 +50,6 @@ var (
 	defaultAggregationCountSuffix    = []byte(".count")
 	defaultAggregationStdevSuffix    = []byte(".stdev")
 	defaultAggregationMedianSuffix   = []byte(".median")
-	defaultInstanceID                = "localhost"
 	defaultMinFlushInterval          = 5 * time.Second
 	defaultMaxFlushSize              = 1440
 	defaultEntryTTL                  = 24 * time.Hour
@@ -95,52 +92,63 @@ var (
 	defaultGaugeSuffixOverride = map[policy.AggregationType][]byte{
 		policy.Last: nil,
 	}
+
+	// By default writes are buffered for 10 minutes before traffic is cut over to a shard
+	// in case there are issues with a new instance taking over shards.
+	defaultBufferDurationBeforeShardCutover = 10 * time.Minute
+
+	// By default writes are buffered for one hour after traffic is cut off in case there
+	// are issues with the instances taking over the shards and as such we need to switch
+	// the traffic back to the previous owner of the shards immediately.
+	defaultBufferDurationAfterShardCutoff = time.Hour
 )
 
 type options struct {
 	// Base options.
-	defaultCounterAggregationTypes policy.AggregationTypes
-	defaultTimerAggregationTypes   policy.AggregationTypes
-	defaultGaugeAggregationTypes   policy.AggregationTypes
-	metricPrefix                   []byte
-	counterPrefix                  []byte
-	timerPrefix                    []byte
-	gaugePrefix                    []byte
-	sumSuffix                      []byte
-	sumSqSuffix                    []byte
-	meanSuffix                     []byte
-	lastSuffix                     []byte
-	minSuffix                      []byte
-	maxSuffix                      []byte
-	countSuffix                    []byte
-	stdevSuffix                    []byte
-	medianSuffix                   []byte
-	timerQuantileSuffixFn          QuantileSuffixFn
-	timeLock                       *sync.RWMutex
-	clockOpts                      clock.Options
-	instrumentOpts                 instrument.Options
-	streamOpts                     cm.Options
-	placementWatcherOpts           services.StagedPlacementWatcherOptions
-	instanceID                     string
-	shardFn                        ShardFn
-	flushManager                   FlushManager
-	minFlushInterval               time.Duration
-	maxFlushSize                   int
-	flushHandler                   Handler
-	entryTTL                       time.Duration
-	entryCheckInterval             time.Duration
-	entryCheckBatchPercent         float64
-	maxTimerBatchSizePerWrite      int
-	defaultPolicies                []policy.Policy
-	electionManager                ElectionManager
-	resignTimeout                  time.Duration
-	entryPool                      EntryPool
-	counterElemPool                CounterElemPool
-	timerElemPool                  TimerElemPool
-	gaugeElemPool                  GaugeElemPool
-	bufferedEncoderPool            msgpack.BufferedEncoderPool
-	aggTypesPool                   policy.AggregationTypesPool
-	quantilesPool                  pool.FloatsPool
+	defaultCounterAggregationTypes   policy.AggregationTypes
+	defaultTimerAggregationTypes     policy.AggregationTypes
+	defaultGaugeAggregationTypes     policy.AggregationTypes
+	metricPrefix                     []byte
+	counterPrefix                    []byte
+	timerPrefix                      []byte
+	gaugePrefix                      []byte
+	sumSuffix                        []byte
+	sumSqSuffix                      []byte
+	meanSuffix                       []byte
+	lastSuffix                       []byte
+	minSuffix                        []byte
+	maxSuffix                        []byte
+	countSuffix                      []byte
+	stdevSuffix                      []byte
+	medianSuffix                     []byte
+	timerQuantileSuffixFn            QuantileSuffixFn
+	timeLock                         *sync.RWMutex
+	clockOpts                        clock.Options
+	instrumentOpts                   instrument.Options
+	streamOpts                       cm.Options
+	placementManager                 PlacementManager
+	shardFn                          ShardFn
+	bufferDurationBeforeShardCutover time.Duration
+	bufferDurationAfterShardCutoff   time.Duration
+	flushManager                     FlushManager
+	minFlushInterval                 time.Duration
+	maxFlushSize                     int
+	flushHandler                     Handler
+	entryTTL                         time.Duration
+	entryCheckInterval               time.Duration
+	entryCheckBatchPercent           float64
+	maxTimerBatchSizePerWrite        int
+	defaultPolicies                  []policy.Policy
+	flushTimesManager                FlushTimesManager
+	electionManager                  ElectionManager
+	resignTimeout                    time.Duration
+	entryPool                        EntryPool
+	counterElemPool                  CounterElemPool
+	timerElemPool                    TimerElemPool
+	gaugeElemPool                    GaugeElemPool
+	bufferedEncoderPool              msgpack.BufferedEncoderPool
+	aggTypesPool                     policy.AggregationTypesPool
+	quantilesPool                    pool.FloatsPool
 
 	counterSuffixOverride map[policy.AggregationType][]byte
 	timerSuffixOverride   map[policy.AggregationType][]byte
@@ -185,20 +193,20 @@ func NewOptions() Options {
 		clockOpts:                      clock.NewOptions(),
 		instrumentOpts:                 instrument.NewOptions(),
 		streamOpts:                     cm.NewOptions(),
-		placementWatcherOpts:           placement.NewStagedPlacementWatcherOptions(),
-		instanceID:                     defaultInstanceID,
 		shardFn:                        defaultShardFn,
-		minFlushInterval:               defaultMinFlushInterval,
-		maxFlushSize:                   defaultMaxFlushSize,
-		entryTTL:                       defaultEntryTTL,
-		entryCheckInterval:             defaultEntryCheckInterval,
-		entryCheckBatchPercent:         defaultEntryCheckBatchPercent,
-		maxTimerBatchSizePerWrite:      defaultMaxTimerBatchSizePerWrite,
-		defaultPolicies:                defaultDefaultPolicies,
-		resignTimeout:                  defaultResignTimeout,
-		counterSuffixOverride:          defaultCounterSuffixOverride,
-		timerSuffixOverride:            defaultTimerSuffixOverride,
-		gaugeSuffixOverride:            defaultGaugeSuffixOverride,
+		bufferDurationBeforeShardCutover: defaultBufferDurationBeforeShardCutover,
+		bufferDurationAfterShardCutoff:   defaultBufferDurationAfterShardCutoff,
+		minFlushInterval:                 defaultMinFlushInterval,
+		maxFlushSize:                     defaultMaxFlushSize,
+		entryTTL:                         defaultEntryTTL,
+		entryCheckInterval:               defaultEntryCheckInterval,
+		entryCheckBatchPercent:           defaultEntryCheckBatchPercent,
+		maxTimerBatchSizePerWrite:        defaultMaxTimerBatchSizePerWrite,
+		defaultPolicies:                  defaultDefaultPolicies,
+		resignTimeout:                    defaultResignTimeout,
+		counterSuffixOverride:            defaultCounterSuffixOverride,
+		timerSuffixOverride:              defaultTimerSuffixOverride,
+		gaugeSuffixOverride:              defaultGaugeSuffixOverride,
 	}
 
 	// Initialize pools.
@@ -438,24 +446,14 @@ func (o *options) StreamOptions() cm.Options {
 	return o.streamOpts
 }
 
-func (o *options) SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) Options {
+func (o *options) SetPlacementManager(value PlacementManager) Options {
 	opts := *o
-	opts.placementWatcherOpts = value
+	opts.placementManager = value
 	return &opts
 }
 
-func (o *options) StagedPlacementWatcherOptions() services.StagedPlacementWatcherOptions {
-	return o.placementWatcherOpts
-}
-
-func (o *options) SetInstanceID(value string) Options {
-	opts := *o
-	opts.instanceID = value
-	return &opts
-}
-
-func (o *options) InstanceID() string {
-	return o.instanceID
+func (o *options) PlacementManager() PlacementManager {
+	return o.placementManager
 }
 
 func (o *options) SetShardFn(value ShardFn) Options {
@@ -466,6 +464,36 @@ func (o *options) SetShardFn(value ShardFn) Options {
 
 func (o *options) ShardFn() ShardFn {
 	return o.shardFn
+}
+
+func (o *options) SetBufferDurationBeforeShardCutover(value time.Duration) Options {
+	opts := *o
+	opts.bufferDurationBeforeShardCutover = value
+	return &opts
+}
+
+func (o *options) BufferDurationBeforeShardCutover() time.Duration {
+	return o.bufferDurationBeforeShardCutover
+}
+
+func (o *options) SetBufferDurationAfterShardCutoff(value time.Duration) Options {
+	opts := *o
+	opts.bufferDurationAfterShardCutoff = value
+	return &opts
+}
+
+func (o *options) BufferDurationAfterShardCutoff() time.Duration {
+	return o.bufferDurationAfterShardCutoff
+}
+
+func (o *options) SetFlushTimesManager(value FlushTimesManager) Options {
+	opts := *o
+	opts.flushTimesManager = value
+	return &opts
+}
+
+func (o *options) FlushTimesManager() FlushTimesManager {
+	return o.flushTimesManager
 }
 
 func (o *options) SetElectionManager(value ElectionManager) Options {

@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
-	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
@@ -239,23 +238,35 @@ type Options interface {
 	// StreamOptions returns the stream options
 	StreamOptions() cm.Options
 
-	// SetStagedPlacementWatcherOptions sets the staged placement watcher options.
-	SetStagedPlacementWatcherOptions(value services.StagedPlacementWatcherOptions) Options
+	// SetPlacementManager sets the placement manager.
+	SetPlacementManager(value PlacementManager) Options
 
-	// StagedPlacementWatcherOptions returns the staged placement watcher options.
-	StagedPlacementWatcherOptions() services.StagedPlacementWatcherOptions
-
-	// SetInstanceID sets the current instance id.
-	SetInstanceID(value string) Options
-
-	// InstanceID returns the current instance id.
-	InstanceID() string
+	// PlacementManager returns the placement manager.
+	PlacementManager() PlacementManager
 
 	// SetShardFn sets the sharding function.
 	SetShardFn(value ShardFn) Options
 
 	// ShardFn returns the sharding function.
 	ShardFn() ShardFn
+
+	// SetBufferDurationBeforeShardCutover sets the duration for buffering writes before shard cutover.
+	SetBufferDurationBeforeShardCutover(value time.Duration) Options
+
+	// BufferDurationBeforeShardCutover returns the duration for buffering writes before shard cutover.
+	BufferDurationBeforeShardCutover() time.Duration
+
+	// SetBufferDurationAfterShardCutoff sets the duration for buffering writes after shard cutoff.
+	SetBufferDurationAfterShardCutoff(value time.Duration) Options
+
+	// BufferDurationAfterShardCutoff returns the duration for buffering writes after shard cutoff.
+	BufferDurationAfterShardCutoff() time.Duration
+
+	// SetFlushTimesManager sets the flush times manager.
+	SetFlushTimesManager(value FlushTimesManager) Options
+
+	// FlushTimesManager returns the flush times manager.
+	FlushTimesManager() FlushTimesManager
 
 	// SetElectionManager sets the election manager.
 	SetElectionManager(value ElectionManager) Options

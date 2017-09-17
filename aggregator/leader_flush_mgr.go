@@ -21,32 +21,25 @@
 package aggregator
 
 import (
-	"fmt"
 	"math/rand"
 	"sync"
 	"time"
 
 	schema "github.com/m3db/m3aggregator/generated/proto/flush"
-	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3x/clock"
-	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/log"
-	"github.com/m3db/m3x/retry"
-	"github.com/m3db/m3x/sync"
-	"github.com/m3db/m3x/watch"
+	xsync "github.com/m3db/m3x/sync"
 
 	"github.com/uber-go/tally"
 )
 
 type leaderFlushManagerMetrics struct {
-	queueSize         tally.Gauge
-	flushTimesPersist instrument.MethodMetrics
+	queueSize tally.Gauge
 }
 
 func newLeaderFlushManagerMetrics(scope tally.Scope) leaderFlushManagerMetrics {
 	return leaderFlushManagerMetrics{
-		queueSize:         scope.Gauge("queue-size"),
-		flushTimesPersist: instrument.NewMethodMetrics(scope, "flush-times-persist", 1.0),
+		queueSize: scope.Gauge("queue-size"),
 	}
 }
 
@@ -55,26 +48,24 @@ type randFn func(int64) int64
 type leaderFlushManager struct {
 	sync.RWMutex
 
-	nowFn                    clock.NowFn
-	checkEvery               time.Duration
-	jitterEnabled            bool
-	maxJitterFn              FlushJitterFn
-	workers                  xsync.WorkerPool
-	flushTimesKeyFmt         string
-	flushTimesStore          kv.Store
-	flushTimesPersistEvery   time.Duration
-	flushTimesPersistRetrier xretry.Retrier
-	logger                   xlog.Logger
-	scope                    tally.Scope
+	nowFn                  clock.NowFn
+	checkEvery             time.Duration
+	jitterEnabled          bool
+	maxJitterFn            FlushJitterFn
+	workers                xsync.WorkerPool
+	placementManager       PlacementManager
+	flushTimesManager      FlushTimesManager
+	flushTimesPersistEvery time.Duration
+	maxBufferSize          time.Duration
+	logger                 log.Logger
+	scope                  tally.Scope
 
 	doneCh              <-chan struct{}
 	rand                *rand.Rand
 	randFn              randFn
 	flushTimes          flushMetadataHeap
-	flushTimesKey       string
 	lastPersistAtNanos  int64
 	flushedSincePersist bool
-	persistWatchable    xwatch.Watchable
 	flushTask           *leaderFlushTask
 	metrics             leaderFlushManagerMetrics
 }
@@ -88,41 +79,28 @@ func newLeaderFlushManager(
 	instrumentOpts := opts.InstrumentOptions()
 	scope := instrumentOpts.MetricsScope()
 	mgr := &leaderFlushManager{
-		nowFn:                    nowFn,
-		checkEvery:               opts.CheckEvery(),
-		jitterEnabled:            opts.JitterEnabled(),
-		maxJitterFn:              opts.MaxJitterFn(),
-		workers:                  opts.WorkerPool(),
-		flushTimesKeyFmt:         opts.FlushTimesKeyFmt(),
-		flushTimesStore:          opts.FlushTimesStore(),
-		flushTimesPersistEvery:   opts.FlushTimesPersistEvery(),
-		flushTimesPersistRetrier: opts.FlushTimesPersistRetrier(),
-		logger:             instrumentOpts.Logger(),
-		scope:              scope,
-		doneCh:             doneCh,
-		rand:               rand,
-		randFn:             rand.Int63n,
-		lastPersistAtNanos: nowFn().UnixNano(),
-		persistWatchable:   xwatch.NewWatchable(),
-		metrics:            newLeaderFlushManagerMetrics(scope),
+		nowFn:                  nowFn,
+		checkEvery:             opts.CheckEvery(),
+		jitterEnabled:          opts.JitterEnabled(),
+		maxJitterFn:            opts.MaxJitterFn(),
+		workers:                opts.WorkerPool(),
+		placementManager:       opts.PlacementManager(),
+		flushTimesManager:      opts.FlushTimesManager(),
+		flushTimesPersistEvery: opts.FlushTimesPersistEvery(),
+		maxBufferSize:          opts.MaxBufferSize(),
+		logger:                 instrumentOpts.Logger(),
+		scope:                  scope,
+		doneCh:                 doneCh,
+		rand:                   rand,
+		randFn:                 rand.Int63n,
+		lastPersistAtNanos:     nowFn().UnixNano(),
+		metrics:                newLeaderFlushManagerMetrics(scope),
 	}
 	mgr.flushTask = &leaderFlushTask{mgr: mgr}
 	return mgr
 }
 
-func (mgr *leaderFlushManager) Open(shardSetID uint32) error {
-	mgr.Lock()
-	mgr.flushTimesKey = fmt.Sprintf(mgr.flushTimesKeyFmt, shardSetID)
-	mgr.Unlock()
-
-	_, flushTimesWatch, err := mgr.persistWatchable.Watch()
-	if err != nil {
-		return err
-	}
-	go mgr.persistFlushTimes(flushTimesWatch)
-
-	return nil
-}
+func (mgr *leaderFlushManager) Open() {}
 
 // Init initializes the leader flush manager by enqueuing all
 // the flushers in the buckets.
@@ -182,7 +160,7 @@ func (mgr *leaderFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.
 		mgr.lastPersistAtNanos = nowNanos
 		mgr.flushedSincePersist = false
 		flushTimes = mgr.prepareFlushTimesWithLock(buckets)
-		mgr.persistWatchable.Update(&flushTimes)
+		mgr.flushTimesManager.StoreAsync(&flushTimes)
 	}
 
 	if !shouldFlush {
@@ -206,6 +184,8 @@ func (mgr *leaderFlushManager) OnBucketAdded(
 
 // NB(xichen): leader flush manager can always lead.
 func (mgr *leaderFlushManager) CanLead() bool { return true }
+
+func (mgr *leaderFlushManager) Close() {}
 
 func (mgr *leaderFlushManager) enqueueBucketWithLock(
 	bucketIdx int,
@@ -259,23 +239,6 @@ func (mgr *leaderFlushManager) prepareFlushTimesWithLock(
 	return proto
 }
 
-func (mgr *leaderFlushManager) persistFlushTimes(flushTimesWatch xwatch.Watch) {
-	for {
-		select {
-		case <-mgr.doneCh:
-			return
-		case <-flushTimesWatch.C():
-			flushTimes := flushTimesWatch.Get().(*schema.ShardSetFlushTimes)
-			persistStart := mgr.nowFn()
-			persistErr := mgr.flushTimesPersistRetrier.Attempt(func() error {
-				_, err := mgr.flushTimesStore.Set(mgr.flushTimesKey, flushTimes)
-				return err
-			})
-			mgr.metrics.flushTimesPersist.ReportSuccessOrError(persistErr, mgr.nowFn().Sub(persistStart))
-		}
-	}
-}
-
 func (mgr *leaderFlushManager) nowNanos() int64 { return mgr.nowFn().UnixNano() }
 
 type leaderFlushTask struct {
@@ -286,14 +249,40 @@ type leaderFlushTask struct {
 
 func (t *leaderFlushTask) Run() {
 	mgr := t.mgr
+	shards, err := mgr.placementManager.Shards()
+	if err != nil {
+		mgr.logger.Errorf("unable to determine shards owned by this instance: %v", err)
+		return
+	}
 
-	var wgWorkers sync.WaitGroup
-	start := mgr.nowFn()
+	var (
+		wgWorkers sync.WaitGroup
+		start     = mgr.nowFn()
+	)
 	for _, flusher := range t.flushers {
+		// By default traffic is cut off from a shard, unless the shard is in the list of
+		// shards owned by the instance, in which case the cutover time and the cutoff time
+		// are set to the corresponding cutover and cutoff times of the shard.
+		var cutoverNanos, cutoffNanos int64
+		shardID := flusher.Shard()
+		if shard, found := shards.Shard(shardID); found {
+			cutoverNanos = shard.CutoverNanos()
+			cutoffNanos = shard.CutoffNanos()
+		}
+
+		// We intentionally buffer data for some time after the shard is cut off to ensure
+		// the leaving instance has good data after the shard transfer happens during a
+		// topology change in case we need to back out of the change and move the shard
+		// back to the instance.
+		req := FlushRequest{
+			CutoverNanos:      cutoverNanos,
+			CutoffNanos:       cutoffNanos,
+			BufferAfterCutoff: mgr.maxBufferSize,
+		}
 		flusher := flusher
 		wgWorkers.Add(1)
 		mgr.workers.Go(func() {
-			flusher.Flush()
+			flusher.Flush(req)
 			wgWorkers.Done()
 		})
 	}

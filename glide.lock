@@ -1,5 +1,5 @@
-hash: 1cf1facfd8d784407ebff70d551ccd7cc97dc62dfdb00958ff9efe1b86fb7fec
-updated: 2017-08-22T18:00:39.948952385-04:00
+hash: f6d7a5598b8c8de86c3295a659ed13921c49c629d4b5252dcaa16c98b42d5fbc
+updated: 2017-09-16T17:18:21.531274261-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -122,30 +122,31 @@ imports:
 - name: github.com/karlseguin/ccache
   version: a2d62155777b39595c825ed3824279e642a5db3c
 - name: github.com/m3db/m3cluster
-  version: e6473486b16d5c4dae33f2b89f396c45ebcf822d
+  version: 3ca6883175651960ca2f93ba91198bbb9a84f5be
   subpackages:
   - client
   - client/etcd
   - etcd/watchmanager
-  - generated/proto/metadata
-  - generated/proto/placement
+  - generated/proto/metadatapb
+  - generated/proto/placementpb
   - kv
   - kv/etcd
   - kv/mem
   - kv/util/runtime
-  - proto/util
+  - placement
+  - placement/algo
+  - placement/selector
+  - placement/service
+  - placement/storage
   - services
-  - services/client
+  - services/client/etcd
   - services/heartbeat/etcd
   - services/leader
   - services/leader/campaign
   - services/leader/election
-  - services/placement
-  - services/placement/algo
-  - services/placement/service
   - shard
 - name: github.com/m3db/m3metrics
-  version: f6d7952fb61675c50aaea358b611aa332f1e5dca
+  version: 8f664bcaa26b6a844a479a71aa98d014eaaba748
   subpackages:
   - generated/proto/schema
   - metric/aggregated
@@ -154,7 +155,7 @@ imports:
   - policy
   - protocol/msgpack
 - name: github.com/m3db/m3x
-  version: f3fdee26896eff88aea63d585eceb6ac417f4530
+  version: 6e9713eca6718643e105f574be392f122bcc062e
   subpackages:
   - checked
   - clock
@@ -190,7 +191,7 @@ imports:
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: 195bde7883f7c39ea62b0d92ab7359b5327065cb
+  version: 3e6a7635bac6573d43f49f97b47eb9bda195dba8
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
@@ -208,7 +209,7 @@ imports:
   - process
 - name: github.com/shirou/w32
   version: bb4de0191aa41b5507caa14b0650cdbddcd9280b
-- name: github.com/Sirupsen/logrus
+- name: github.com/sirupsen/logrus
   version: cd7d1bbe41066b6c1f19780f895901052150a575
 - name: github.com/spaolacci/murmur3
   version: 0d12bf811670bf6a1a63828dfbd003eded177fce
@@ -222,7 +223,7 @@ imports:
 - name: github.com/uber-go/atomic
   version: e682c1008ac17bf26d2e4b5ad6cdd08520ed0b22
 - name: github.com/uber-go/tally
-  version: 4b9d9de43ffcb0b7efe67dab2a92c2d58dbf16ab
+  version: be9e53c77349ae2dd4b8c03a6dc20ed9a88b9927
   subpackages:
   - m3
   - m3/customtransports

@@ -18,27 +18,46 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package config
+package aggregator
 
-import (
-	"github.com/m3db/m3x/instrument"
-	"github.com/m3db/m3x/log"
-)
+import "time"
 
-// Configuration contains top-level configuration.
-type Configuration struct {
-	// Logging configuration.
-	Logging log.Configuration `yaml:"logging"`
+// FlushRequest is a request to flush data.
+type FlushRequest struct {
+	// The start time of consumable data.
+	CutoverNanos int64
 
-	// Metrics configuration.
-	Metrics instrument.MetricsConfiguration `yaml:"metrics"`
+	// The end time of consumable data.
+	CutoffNanos int64
 
-	// Msgpack server configuration.
-	Msgpack MsgpackServerConfiguration `yaml:"msgpack"`
-
-	// HTTP server configuration.
-	HTTP HTTPServerConfiguration `yaml:"http"`
-
-	// Aggregator configuration.
-	Aggregator AggregatorConfiguration `yaml:"aggregator"`
+	// If nonzero, data between [now - bufferAfterCutoff, now) are buffered.
+	BufferAfterCutoff time.Duration
 }
+
+// PeriodicFlusher flushes metrics periodically.
+type PeriodicFlusher interface {
+	// Shard returns the shard associated with the flusher.
+	Shard() uint32
+
+	// Resolution returns the resolution of metrics associated with the flusher.
+	Resolution() time.Duration
+
+	// FlushInterval returns the periodic flush interval.
+	FlushInterval() time.Duration
+
+	// LastFlushedNanos returns the last flushed timestamp.
+	LastFlushedNanos() int64
+
+	// Flush performs a flush for a given request.
+	Flush(req FlushRequest)
+
+	// DiscardBefore discards all metrics before a given timestamp.
+	DiscardBefore(beforeNanos int64)
+}
+
+type flushType int
+
+const (
+	consumeType flushType = iota
+	discardType
+)

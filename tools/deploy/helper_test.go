@@ -26,11 +26,10 @@ import (
 	"testing"
 	"time"
 
-	schema "github.com/m3db/m3cluster/generated/proto/placement"
+	"github.com/m3db/m3cluster/generated/proto/placementpb"
 	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/kv/mem"
-	"github.com/m3db/m3cluster/services"
-	"github.com/m3db/m3cluster/services/placement"
+	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3x/retry"
 
 	"github.com/stretchr/testify/require"
@@ -38,26 +37,26 @@ import (
 
 var (
 	testPlacementKey    = "testPlacementKey"
-	testPlacementsProto = &schema.PlacementSnapshots{
-		Snapshots: []*schema.Placement{
-			&schema.Placement{
-				Instances: map[string]*schema.Instance{
-					"placement_instance1": &schema.Instance{
+	testPlacementsProto = &placementpb.PlacementSnapshots{
+		Snapshots: []*placementpb.Placement{
+			&placementpb.Placement{
+				Instances: map[string]*placementpb.Instance{
+					"placement_instance1": &placementpb.Instance{
 						Id:         "placement_instance1",
 						Endpoint:   "placement_instance1_endpoint",
 						ShardSetId: 0,
 					},
-					"placement_instance2": &schema.Instance{
+					"placement_instance2": &placementpb.Instance{
 						Id:         "placement_instance2",
 						Endpoint:   "placement_instance2_endpoint",
 						ShardSetId: 0,
 					},
-					"placement_instance3": &schema.Instance{
+					"placement_instance3": &placementpb.Instance{
 						Id:         "placement_instance3",
 						Endpoint:   "placement_instance3_endpoint",
 						ShardSetId: 1,
 					},
-					"placement_instance4": &schema.Instance{
+					"placement_instance4": &placementpb.Instance{
 						Id:         "placement_instance4",
 						Endpoint:   "placement_instance4_endpoint",
 						ShardSetId: 1,
@@ -66,7 +65,7 @@ var (
 			},
 		},
 	}
-	testPlacementInstances = []services.PlacementInstance{
+	testPlacementInstances = []placement.Instance{
 		placement.NewInstance().
 			SetID("placement_instance1").
 			SetEndpoint("placement_instance1_endpoint").
@@ -170,11 +169,11 @@ func TestHelperClose(t *testing.T) {
 func TestHelperWaitUntilSafeQueryError(t *testing.T) {
 	errQuery := errors.New("error querying instances")
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	helper.mgr = &mockManager{
 		queryFn: func([]string) ([]Instance, error) {
 			return nil, errQuery
@@ -189,11 +188,11 @@ func TestHelperWaitUntilSafeInstanceUnhealthy(t *testing.T) {
 		&mockInstance{isHealthy: false, isDeploying: false},
 	}
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	helper.mgr = &mockManager{
 		queryFn: func([]string) ([]Instance, error) { return instances, nil },
 	}
@@ -206,11 +205,11 @@ func TestHelperWaitUntilSafeInstanceIsDeploying(t *testing.T) {
 		&mockInstance{isHealthy: true, isDeploying: false},
 	}
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	helper.mgr = &mockManager{
 		queryFn: func([]string) ([]Instance, error) { return instances, nil },
 	}
@@ -227,11 +226,11 @@ func TestHelperWaitUntilSafeInstanceUnhealthyFromAPI(t *testing.T) {
 		&mockInstance{isHealthy: true, isDeploying: false},
 	}
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	helper.mgr = &mockManager{
 		queryFn: func([]string) ([]Instance, error) { return instances, nil },
 	}
@@ -263,11 +262,11 @@ func TestHelperValidateError(t *testing.T) {
 		{Validator: func() error { return errValidate }},
 	}
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	require.Error(t, helper.validate(targets))
 }
 
@@ -287,11 +286,11 @@ func TestHelperResignError(t *testing.T) {
 		{Instance: testInstanceMetadatas[1]},
 	}
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.retrier = xretry.NewRetrier(retryOpts)
+	helper.retrier = retry.NewRetrier(retryOpts)
 	helper.client = &mockAggregatorClient{
 		resignFn: func(string) error { return errResign },
 	}
@@ -315,11 +314,11 @@ func TestHelperWaitUntilProgressingQueryError(t *testing.T) {
 	targetIDs := []string{"instance1", "instance2"}
 	revision := "revision1"
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	helper.mgr = &mockManager{
 		queryFn: func([]string) ([]Instance, error) {
 			return nil, errQuery
@@ -336,11 +335,11 @@ func TestHelperWaitUntilProgressingInstanceNotProgressing(t *testing.T) {
 		&mockInstance{isDeploying: false, revision: "revision1"},
 	}
 	helper := testHelperWithValidPlacement(t)
-	retryOpts := xretry.NewOptions().
+	retryOpts := retry.NewOptions().
 		SetMaxRetries(3).
 		SetInitialBackoff(10 * time.Millisecond).
 		SetBackoffFactor(1)
-	helper.foreverRetrier = xretry.NewRetrier(retryOpts)
+	helper.foreverRetrier = retry.NewRetrier(retryOpts)
 	helper.mgr = &mockManager{
 		queryFn: func([]string) ([]Instance, error) {
 			return targetInstances, nil
@@ -494,7 +493,7 @@ func testHelperWithValidPlacement(t *testing.T) helper {
 
 func testHelper(t *testing.T) helper {
 	store := mem.NewStore()
-	_, err := store.Set(testPlacementKey, &schema.PlacementSnapshots{})
+	_, err := store.Set(testPlacementKey, &placementpb.PlacementSnapshots{})
 	require.NoError(t, err)
 	return testHelperWithStore(t, store)
 }
