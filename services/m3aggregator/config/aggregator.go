@@ -21,6 +21,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -38,6 +39,7 @@ import (
 	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3cluster/services"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/instrument"
@@ -50,6 +52,7 @@ import (
 
 const (
 	initialBufferSizeGrowthFactor = 2
+	initialChunkedIDSize          = 256
 )
 
 var (
@@ -134,7 +137,7 @@ type AggregatorConfiguration struct {
 	PlacementManager placementManagerConfiguration `yaml:"placementManager"`
 
 	// Sharding function type.
-	ShardFnType *shardFnType `yaml:"shardFnType"`
+	ShardFnType *hashFnType `yaml:"shardFnType"`
 
 	// Amount of time we buffer writes before shard cutover.
 	BufferDurationBeforeShardCutover time.Duration `yaml:"bufferDurationBeforeShardCutover"`
@@ -159,6 +162,12 @@ type AggregatorConfiguration struct {
 
 	// Maximum flush size in bytes.
 	MaxFlushSize int `yaml:"maxFlushSize"`
+
+	// Total number of backend partitions.
+	TotalPartitions int `yaml:"totalPartitions" validate:"nonzero"`
+
+	// Partition function type.
+	PartitionFnType *hashFnType `yaml:"partitionFnType"`
 
 	// Flushing handler configuration.
 	Flush *handler.FlushHandlerConfiguration `yaml:"flush"`
@@ -269,7 +278,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	opts = opts.SetPlacementManager(placementManager)
 
 	// Set sharding function.
-	shardFnType := defaultShardFn
+	shardFnType := defaultHashFn
 	if c.ShardFnType != nil {
 		shardFnType = *c.ShardFnType
 	}
@@ -324,6 +333,17 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		return nil, err
 	}
 	opts = opts.SetFlushManager(flushManager)
+
+	// Set partitioning function.
+	partitionFnType := defaultHashFn
+	if c.PartitionFnType != nil {
+		partitionFnType = *c.PartitionFnType
+	}
+	partitionFnGen, err := partitionFnType.PartitionFnGen(c.TotalPartitions)
+	if err != nil {
+		return nil, err
+	}
+	opts = opts.SetPartitionFnGen(partitionFnGen)
 
 	// Set flushing handler.
 	if c.MinFlushInterval != 0 {
@@ -531,50 +551,72 @@ func (c *kvClientConfiguration) NewKVClient(instrumentOpts instrument.Options) (
 	return c.Etcd.NewClient(instrumentOpts)
 }
 
-type shardFnType string
+type hashFnType string
 
-// List of supported sharding function types.
+// List of supported hashing function types.
 const (
-	murmur32ShardFn shardFnType = "murmur32"
+	murmur32HashFn hashFnType = "murmur32"
 
-	defaultShardFn = murmur32ShardFn
+	defaultHashFn = murmur32HashFn
 )
 
 var (
-	validShardFnTypes = []shardFnType{
-		murmur32ShardFn,
+	validHashFnTypes = []hashFnType{
+		murmur32HashFn,
 	}
 )
 
-func (t *shardFnType) UnmarshalYAML(unmarshal func(interface{}) error) error {
+func (t *hashFnType) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var str string
 	if err := unmarshal(&str); err != nil {
 		return err
 	}
 	if str == "" {
-		*t = defaultShardFn
+		*t = defaultHashFn
 		return nil
 	}
-	validTypes := make([]string, 0, len(validShardFnTypes))
-	for _, valid := range validShardFnTypes {
+	validTypes := make([]string, 0, len(validHashFnTypes))
+	for _, valid := range validHashFnTypes {
 		if str == string(valid) {
 			*t = valid
 			return nil
 		}
 		validTypes = append(validTypes, string(valid))
 	}
-	return fmt.Errorf("invalid shrading function type '%s' valid types are: %s",
+	return fmt.Errorf("invalid hashing function type '%s' valid types are: %s",
 		str, strings.Join(validTypes, ", "))
 }
 
-func (t shardFnType) ShardFn() (aggregator.ShardFn, error) {
+func (t hashFnType) ShardFn() (aggregator.ShardFn, error) {
 	switch t {
-	case murmur32ShardFn:
+	case murmur32HashFn:
 		return func(id []byte, numShards int) uint32 {
 			return murmur3.Sum32(id) % uint32(numShards)
 		}, nil
 	default:
-		return nil, fmt.Errorf("unrecognized hash gen type %v", t)
+		return nil, fmt.Errorf("unrecognized shard function type %v", t)
+	}
+}
+
+func (t hashFnType) PartitionFnGen(totalPartitions int) (aggregator.PartitionFnGen, error) {
+	switch t {
+	case murmur32HashFn:
+		// NB(xichen): If this turns out to be too CPU intensive due to byte copies, can rewrite
+		// it to compute murmur3 hashes with zero byte copies.
+		return func() aggregator.PartitionFn {
+			// Create a new local buffer on every function invocation, therefore
+			// making the generated partition functions independent of each other.
+			buf := bytes.NewBuffer(make([]byte, 0, initialChunkedIDSize))
+			return func(chunkedID id.ChunkedID) uint32 {
+				buf.Reset()
+				buf.Write(chunkedID.Prefix)
+				buf.Write(chunkedID.Data)
+				buf.Write(chunkedID.Suffix)
+				return murmur3.Sum32(buf.Bytes()) % uint32(totalPartitions)
+			}
+		}, nil
+	default:
+		return nil, fmt.Errorf("unrecognized partition function type %v", t)
 	}
 }
 

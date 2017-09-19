@@ -35,7 +35,7 @@ func NewBroadcastHandler(handlers []aggregator.Handler) aggregator.Handler {
 	return &broadcastHandler{handlers: handlers}
 }
 
-func (b *broadcastHandler) Handle(buffer *aggregator.RefCountedBuffer) error {
+func (b *broadcastHandler) Handle(buffer aggregator.PartitionedBuffer) error {
 	multiErr := errors.NewMultiError()
 	for _, h := range b.handlers {
 		buffer.IncRef()

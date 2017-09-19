@@ -21,12 +21,59 @@
 package config
 
 import (
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/m3db/m3aggregator/aggregator"
+	"github.com/m3db/m3metrics/metric/id"
+
+	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
 )
+
+func TestHashFnTypePartitionFnGen(t *testing.T) {
+	hashFnType := murmur32HashFn
+	totalPartitions := 1024
+	partitionFnGen, err := hashFnType.PartitionFnGen(totalPartitions)
+	require.NoError(t, err)
+
+	// Generate n partition functions.
+	numWorkers := 100
+	partitionFns := make([]aggregator.PartitionFn, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		partitionFns[i] = partitionFnGen()
+	}
+
+	// Verify the generated partition function is thread-safe and the computed
+	// partitions match expectation.
+	var wg sync.WaitGroup
+	inputs := []id.ChunkedID{
+		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
+		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
+		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("baz")},
+		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
+	}
+	for i := 0; i < numWorkers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			for _, input := range inputs {
+				d := murmur3.New32()
+				d.Write(input.Prefix)
+				d.Write(input.Data)
+				d.Write(input.Suffix)
+				expected := d.Sum32() % uint32(totalPartitions)
+				actual := partitionFns[i](input)
+				require.Equal(t, expected, actual)
+			}
+		}()
+	}
+	wg.Wait()
+}
 
 func TestJitterBuckets(t *testing.T) {
 	config := `

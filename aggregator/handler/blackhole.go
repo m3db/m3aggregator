@@ -27,7 +27,7 @@ type blackholeHandler struct{}
 // NewBlackholeHandler creates a new blackhole handler.
 func NewBlackholeHandler() aggregator.Handler { return blackholeHandler{} }
 
-func (h blackholeHandler) Handle(buffer *aggregator.RefCountedBuffer) error {
+func (h blackholeHandler) Handle(buffer aggregator.PartitionedBuffer) error {
 	buffer.DecRef()
 	return nil
 }

@@ -20,13 +20,55 @@
 
 package handler
 
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
 // Type is the handler type.
 type Type string
 
 // A list of supported handler types.
 const (
-	BlackholeHandler Type = "blackhole"
-	LoggingHandler   Type = "logging"
-	ForwardHandler   Type = "forward"
-	BroadcastHandler Type = "broadcast"
+	unknownType     Type = "unknown"
+	blackholeType   Type = "blackhole"
+	loggingType     Type = "logging"
+	forwardType     Type = "forward"
+	partitionedType Type = "partitioned"
+	broadcastType   Type = "broadcast"
 )
+
+var (
+	validHandlerTypes = []Type{
+		blackholeType,
+		loggingType,
+		forwardType,
+		partitionedType,
+		broadcastType,
+	}
+
+	errUnknownHandlerType = errors.New("unknown handler type")
+)
+
+// UnmarshalYAML unmarshals YAML into a type.
+func (t *Type) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var str string
+	if err := unmarshal(&str); err != nil {
+		return err
+	}
+	if str == "" {
+		*t = unknownType
+		return errUnknownHandlerType
+	}
+	validTypes := make([]string, 0, len(validHandlerTypes))
+	for _, valid := range validHandlerTypes {
+		if str == string(valid) {
+			*t = valid
+			return nil
+		}
+		validTypes = append(validTypes, string(valid))
+	}
+	return fmt.Errorf("invalid handler type '%s' valid types are: %s",
+		str, strings.Join(validTypes, ", "))
+}

@@ -33,7 +33,7 @@ import (
 func TestBroadcastHandler(t *testing.T) {
 	var numCloses int
 	mb := &mockBuffer{closeFn: func() { numCloses++ }}
-	buf := aggregator.NewRefCountedBuffer(mb)
+	buf := aggregator.PartitionedBuffer{RefCountedBuffer: aggregator.NewRefCountedBuffer(mb)}
 	bh := NewBroadcastHandler([]aggregator.Handler{NewBlackholeHandler()})
 	require.NoError(t, bh.Handle(buf))
 	require.Equal(t, 1, numCloses)
@@ -47,7 +47,7 @@ func TestBroadcastHandlerWithHandlerError(t *testing.T) {
 	}
 	_, err := mb.buf.Write([]byte{'a', 'b', 'c', 'd'})
 	require.NoError(t, err)
-	buf := aggregator.NewRefCountedBuffer(mb)
+	buf := aggregator.PartitionedBuffer{RefCountedBuffer: aggregator.NewRefCountedBuffer(mb)}
 
 	bh := NewBroadcastHandler([]aggregator.Handler{
 		NewLoggingHandler(instrument.NewOptions()),
@@ -63,7 +63,7 @@ func TestBroadcastHandlerWithNoHandlers(t *testing.T) {
 		buf:     bytes.NewBuffer(nil),
 		closeFn: func() { numCloses++ },
 	}
-	buf := aggregator.NewRefCountedBuffer(mb)
+	buf := aggregator.PartitionedBuffer{RefCountedBuffer: aggregator.NewRefCountedBuffer(mb)}
 
 	bh := NewBroadcastHandler(nil)
 	require.NoError(t, bh.Handle(buf))

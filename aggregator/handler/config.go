@@ -22,27 +22,34 @@ package handler
 
 import (
 	"errors"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
+	"github.com/uber-go/tally"
 )
 
 var (
-	errUnknownFlushHandlerType         = errors.New("unknown flush handler type")
-	errNoForwardHandlerConfiguration   = errors.New("no forward handler configuration")
-	errNoBroadcastHandlerConfiguration = errors.New("no broadcast handler configuration")
+	errUnknownFlushHandlerType           = errors.New("unknown flush handler type")
+	errNoForwardHandlerConfiguration     = errors.New("no forward handler configuration")
+	errNoPartitionedHandlerConfiguration = errors.New("no partitioned handler configuration")
+	errNoBroadcastHandlerConfiguration   = errors.New("no broadcast handler configuration")
 )
 
 // FlushHandlerConfiguration contains configuration for flushing metrics.
 type FlushHandlerConfiguration struct {
 	// Flushing handler type.
-	Type string `yaml:"type" validate:"regexp=(^blackhole$|^logging$|^forward$|^broadcast$)"`
+	Type Type `yaml:"type"`
 
 	// Forward handler configuration.
 	Forward *forwardHandlerConfiguration `yaml:"forward"`
+
+	// Partitioned handler configuration.
+	Partitioned *partitionedHandlerConfiguration `yaml:"partitioned"`
 
 	// Forward handler configuration.
 	Broadcast *broadcastHandlerConfiguration `yaml:"broadcast"`
@@ -53,20 +60,27 @@ func (c *FlushHandlerConfiguration) NewHandler(
 	iOpts instrument.Options,
 ) (aggregator.Handler, error) {
 	scope := iOpts.MetricsScope()
-	switch Type(c.Type) {
-	case BlackholeHandler:
+	switch c.Type {
+	case blackholeType:
 		return NewBlackholeHandler(), nil
-	case LoggingHandler:
+	case loggingType:
 		scope = scope.SubScope("logging")
 		return NewLoggingHandler(iOpts.SetMetricsScope(scope)), nil
-	case ForwardHandler:
+	case forwardType:
 		if c.Forward == nil {
 			return nil, errNoForwardHandlerConfiguration
 		}
 		scope = scope.SubScope("forward").Tagged(map[string]string{"forward-target": c.Forward.Name})
 		logger := iOpts.Logger().WithFields(log.NewField("forward-target", c.Forward.Name))
 		return c.Forward.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
-	case BroadcastHandler:
+	case partitionedType:
+		if c.Partitioned == nil {
+			return nil, errNoPartitionedHandlerConfiguration
+		}
+		scope = scope.SubScope("partitioned").Tagged(map[string]string{"partitioned-backend": c.Partitioned.Name})
+		logger := iOpts.Logger().WithFields(log.NewField("partitioned-backend", c.Partitioned.Name))
+		return c.Partitioned.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
+	case broadcastType:
 		if c.Broadcast == nil {
 			return nil, errNoBroadcastHandlerConfiguration
 		}
@@ -96,17 +110,7 @@ func (c *broadcastHandlerConfiguration) NewHandler(
 	return NewBroadcastHandler(handlers), nil
 }
 
-// forwardHandlerConfiguration contains configuration for forward
-type forwardHandlerConfiguration struct {
-	// Name of the forward target.
-	Name string `yaml:"name"`
-
-	// Server address list.
-	Servers []string `yaml:"servers"`
-
-	// Buffer queue size.
-	QueueSize int `yaml:"queueSize"`
-
+type connectionConfiguration struct {
 	// Connection timeout.
 	ConnectTimeout time.Duration `yaml:"connectTimeout"`
 
@@ -120,14 +124,8 @@ type forwardHandlerConfiguration struct {
 	ReconnectRetrier retry.Configuration `yaml:"reconnect"`
 }
 
-func (c *forwardHandlerConfiguration) NewHandler(
-	instrumentOpts instrument.Options,
-) (aggregator.Handler, error) {
-	opts := NewForwardHandlerOptions().SetInstrumentOptions(instrumentOpts)
-
-	if c.QueueSize != 0 {
-		opts = opts.SetQueueSize(c.QueueSize)
-	}
+func (c *connectionConfiguration) NewConnectionOptions(scope tally.Scope) ConnectionOptions {
+	opts := NewConnectionOptions()
 	if c.ConnectTimeout != 0 {
 		opts = opts.SetConnectTimeout(c.ConnectTimeout)
 	}
@@ -137,10 +135,98 @@ func (c *forwardHandlerConfiguration) NewHandler(
 	if c.ConnectionWriteTimeout != 0 {
 		opts = opts.SetConnectionWriteTimeout(c.ConnectionWriteTimeout)
 	}
-
-	scope := instrumentOpts.MetricsScope().SubScope("reconnect")
-	retrier := c.ReconnectRetrier.NewRetrier(scope)
+	reconnectScope := scope.SubScope("reconnect")
+	retrier := c.ReconnectRetrier.NewRetrier(reconnectScope)
 	opts = opts.SetReconnectRetrier(retrier)
+	return opts
+}
 
+type partitionedHandlerConfiguration struct {
+	// Name of the partitioned backend.
+	Name string `yaml:"name"`
+
+	// Backend server partitions.
+	Partitions []BackendServerPartition
+
+	// Total queue size across all partitions.
+	QueueSize int `yaml:"queueSize"`
+
+	// Connection configuration.
+	Connection connectionConfiguration `yaml:"connection"`
+}
+
+func (c *partitionedHandlerConfiguration) NewHandler(
+	instrumentOpts instrument.Options,
+) (aggregator.Handler, error) {
+	if err := c.validatePartitions(); err != nil {
+		return nil, err
+	}
+	connectionOpts := c.Connection.NewConnectionOptions(instrumentOpts.MetricsScope())
+	opts := NewOptions().
+		SetInstrumentOptions(instrumentOpts).
+		SetConnectionOptions(connectionOpts)
+	if c.QueueSize != 0 {
+		opts = opts.SetQueueSize(c.QueueSize)
+	}
+	return NewPartitionedHandler(c.Partitions, opts)
+}
+
+// validatePartitions ensures a single partition isn't present multiple times, and
+// that a single server isn't assigned to multiple partition ranges.
+func (c *partitionedHandlerConfiguration) validatePartitions() error {
+	var (
+		serversAssigned    = make(map[string]struct{})
+		partitionsAssigned = make(map[int]struct{})
+	)
+	for _, partitions := range c.Partitions {
+		// Make sure we have a deterministic ordering.
+		sortedPartitions := make([]int, 0, len(partitions.Range))
+		for partition := range partitions.Range {
+			sortedPartitions = append(sortedPartitions, int(partition))
+		}
+		sort.Ints(sortedPartitions)
+
+		for _, partition := range sortedPartitions {
+			if _, partitionAlreadyAssigned := partitionsAssigned[partition]; partitionAlreadyAssigned {
+				return fmt.Errorf("partition %d is present in multiple ranges", partition)
+			}
+			partitionsAssigned[partition] = struct{}{}
+		}
+
+		for _, server := range partitions.Servers {
+			if _, serverAlreadyAssigned := serversAssigned[server]; serverAlreadyAssigned {
+				return fmt.Errorf("server %s is present in multiple ranges", server)
+			}
+			serversAssigned[server] = struct{}{}
+		}
+	}
+	return nil
+}
+
+// forwardHandlerConfiguration contains configuration for forward handler.
+type forwardHandlerConfiguration struct {
+	// Name of the forward target.
+	Name string `yaml:"name"`
+
+	// Server address list.
+	Servers []string `yaml:"servers"`
+
+	// Buffer queue size.
+	QueueSize int `yaml:"queueSize"`
+
+	// Connection configuration.
+	Connection connectionConfiguration `yaml:"connection"`
+}
+
+func (c *forwardHandlerConfiguration) NewHandler(
+	instrumentOpts instrument.Options,
+) (aggregator.Handler, error) {
+	connectionOpts := c.Connection.NewConnectionOptions(instrumentOpts.MetricsScope())
+	opts := NewOptions().
+		SetInstrumentOptions(instrumentOpts).
+		SetConnectionOptions(connectionOpts)
+	if c.QueueSize != 0 {
+		opts = opts.SetQueueSize(c.QueueSize)
+	}
 	return NewForwardHandler(c.Servers, opts)
 }

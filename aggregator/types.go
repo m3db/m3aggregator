@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
@@ -32,8 +33,14 @@ import (
 	"github.com/m3db/m3x/pool"
 )
 
-// ShardFn maps a id to a shard given the total number of shards.
+// ShardFn maps a id to an aggregator shard given the total number of shards.
 type ShardFn func(id []byte, numShards int) uint32
+
+// PartitionFn maps a chunked id to a backend partition.
+type PartitionFn func(chunkedID id.ChunkedID) uint32
+
+// PartitionFnGen generates partition functions.
+type PartitionFnGen func() PartitionFn
 
 // CounterElemAlloc allocates a new counter element
 type CounterElemAlloc func() *CounterElem
@@ -98,11 +105,19 @@ type EntryPool interface {
 // QuantileSuffixFn returns the byte-slice suffix for a quantile value
 type QuantileSuffixFn func(quantile float64) []byte
 
+// PartitionedBuffer is a ref-counted buffer for a given partition.
+type PartitionedBuffer struct {
+	*RefCountedBuffer
+
+	Partition uint32
+}
+
 // Handler handles encoded streams containing aggregated metrics alongside their policies.
 type Handler interface {
-	// Handle processes aggregated metrics and policies encoded in the buffer.
-	// The handler is responsible for decrementing the refcount when it's done with the buffer.
-	Handle(buffer *RefCountedBuffer) error
+	// Handle processes aggregated metrics and policies encoded in the buffer for
+	// a given partition. The handler is responsible for decrementing the refcount when
+	// it's done with the buffer.
+	Handle(buffer PartitionedBuffer) error
 
 	// Close closes the handler.
 	Close()
@@ -291,6 +306,14 @@ type Options interface {
 
 	// MaxFlushSize returns the maximum buffer size to trigger a flush
 	MaxFlushSize() int
+
+	// SetPartitionFnGen sets the partition function generator that generates the
+	// partition function to compute the backend partition for a given chunked id.
+	SetPartitionFnGen(value PartitionFnGen) Options
+
+	// PartitionFnGen returns the partition function generator that generates the
+	// partition function to compute the backend partition for a given chunked id.
+	PartitionFnGen() PartitionFnGen
 
 	// SetFlushHandler sets the handler that flushes buffered encoders
 	SetFlushHandler(value Handler) Options

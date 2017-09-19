@@ -22,6 +22,7 @@ package aggregator
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3metrics/metric/aggregated"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
@@ -199,9 +201,9 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 		bufferLock   sync.Mutex
 		buffers      []*RefCountedBuffer
 	)
-	flushFn := func(buffer *RefCountedBuffer) error {
+	flushFn := func(buffer PartitionedBuffer) error {
 		bufferLock.Lock()
-		buffers = append(buffers, buffer)
+		buffers = append(buffers, buffer.RefCountedBuffer)
 		bufferLock.Unlock()
 		return nil
 	}
@@ -223,12 +225,15 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 
 	// Intentionally cause a one-time error during encoding.
 	var count int
-	l.encodeFn = func(mp aggregated.ChunkedMetricWithStoragePolicy) error {
+	l.encodeFn = func(
+		encoder msgpack.AggregatedEncoder,
+		cmp aggregated.ChunkedMetricWithStoragePolicy,
+	) error {
 		if count == 0 {
 			count++
 			return errors.New("foo")
 		}
-		return l.encoder.EncodeChunkedMetricWithStoragePolicy(mp)
+		return encoder.EncodeChunkedMetricWithStoragePolicy(cmp)
 	}
 
 	elemPairs := []testElemPair{
@@ -337,6 +342,97 @@ func TestMetricListFlushBeforeStale(t *testing.T) {
 	require.Equal(t, int64(1234), l.LastFlushedNanos())
 }
 
+func TestMetricListFlushBeforeWithPartitions(t *testing.T) {
+	var (
+		resLock    sync.Mutex
+		partitions []uint32
+		buffers    []*RefCountedBuffer
+	)
+	flushFn := func(buffer PartitionedBuffer) error {
+		resLock.Lock()
+		partitions = append(partitions, buffer.Partition)
+		buffers = append(buffers, buffer.RefCountedBuffer)
+		resLock.Unlock()
+		return nil
+	}
+	handler := &mockHandler{handleFn: flushFn}
+	partitionFnGen := func() PartitionFn {
+		return func(chunkedID id.ChunkedID) uint32 {
+			if string(chunkedID.Data) == string(testCounterID) {
+				return 12
+			}
+			if string(chunkedID.Data) == string(testGaugeID) {
+				return 34
+			}
+			panic(fmt.Sprintf("unexpected chunked id %v", chunkedID))
+		}
+	}
+
+	var now = time.Unix(216, 0).UnixNano()
+	nowTs := time.Unix(0, now)
+	clockOpts := clock.NewOptions().SetNowFn(func() time.Time {
+		return time.Unix(0, atomic.LoadInt64(&now))
+	})
+	opts := testOptions().
+		SetClockOptions(clockOpts).
+		SetMinFlushInterval(0).
+		SetMaxFlushSize(math.MaxInt64).
+		SetFlushHandler(handler).
+		SetPartitionFnGen(partitionFnGen)
+
+	l := newMetricList(testShard, 0, opts)
+	l.resolution = testStoragePolicy.Resolution().Window
+
+	elemPairs := []testElemPair{
+		{
+			elem:   NewCounterElem(testCounterID, testStoragePolicy, policy.DefaultAggregationTypes, opts),
+			metric: testCounter,
+		},
+		{
+			elem:   NewGaugeElem(testGaugeID, testStoragePolicy, policy.DefaultAggregationTypes, opts),
+			metric: testGauge,
+		},
+	}
+
+	for _, ep := range elemPairs {
+		require.NoError(t, ep.elem.AddMetric(nowTs, ep.metric))
+		_, err := l.PushBack(ep.elem)
+		require.NoError(t, err)
+	}
+
+	// Move the time forward by one aggregation interval.
+	nowTs = nowTs.Add(l.resolution)
+	alignedStart := nowTs.Truncate(l.resolution).UnixNano()
+	atomic.StoreInt64(&now, nowTs.UnixNano())
+
+	l.flushBefore(nowTs.Truncate(l.resolution).UnixNano(), consumeType)
+
+	// Counter comes before the gauge because its partition number is smaller.
+	var expectedMetrics []testAggMetric
+	expectedMetrics = append(expectedMetrics, expectedAggMetricsForCounter(alignedStart, testStoragePolicy, policy.DefaultAggregationTypes)...)
+	expectedMetrics = append(expectedMetrics, expectedAggMetricsForGauge(alignedStart, testStoragePolicy, policy.DefaultAggregationTypes)...)
+	validateBuffers(t, expectedMetrics, buffers)
+	require.Equal(t, []uint32{12, 34}, partitions)
+}
+
+func TestMetricListEncoderFor(t *testing.T) {
+	opts := testOptions()
+	l := newMetricList(testShard, time.Second, opts)
+	partition := uint32(1234)
+	encoder := l.encoderFor(partition)
+	require.NotNil(t, encoder)
+	require.Equal(t, 2*defaultNumPartitions, len(l.encodersByPartition))
+	for i := 0; i < len(l.encodersByPartition); i++ {
+		if i == int(partition) {
+			require.Equal(t, encoder, l.encodersByPartition[i])
+			require.NotNil(t, l.encodersByPartition[i])
+		} else {
+			require.Nil(t, l.encodersByPartition[i])
+		}
+	}
+	require.Equal(t, encoder, l.encoderFor(partition))
+}
+
 func TestMetricLists(t *testing.T) {
 	lists := newMetricLists(testShard, testOptions())
 	require.False(t, lists.closed)
@@ -410,11 +506,11 @@ type flushBeforeResult struct {
 	flushType   flushType
 }
 
-type handleFn func(buffer *RefCountedBuffer) error
+type handleFn func(buffer PartitionedBuffer) error
 
 type mockHandler struct {
 	handleFn handleFn
 }
 
-func (h *mockHandler) Handle(buffer *RefCountedBuffer) error { return h.handleFn(buffer) }
+func (h *mockHandler) Handle(buffer PartitionedBuffer) error { return h.handleFn(buffer) }
 func (h *mockHandler) Close()                                {}

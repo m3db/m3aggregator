@@ -23,18 +23,23 @@ package aggregator
 import (
 	"container/list"
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/m3db/m3metrics/metric/aggregated"
-	metricID "github.com/m3db/m3metrics/metric/id"
+	metricid "github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/log"
 
 	"github.com/uber-go/tally"
+)
+
+const (
+	defaultNumPartitions = 1024
 )
 
 var (
@@ -80,7 +85,11 @@ func newMetricListMetrics(scope tally.Scope) metricListMetrics {
 	}
 }
 
-type encodeFn func(mp aggregated.ChunkedMetricWithStoragePolicy) error
+type encodeFn func(
+	encoder msgpack.AggregatedEncoder,
+	cmp aggregated.ChunkedMetricWithStoragePolicy,
+) error
+
 type flushBeforeFn func(beforeNanos int64, flushType flushType)
 
 // metricList stores aggregated metrics at a given resolution
@@ -94,22 +103,23 @@ type metricList struct {
 	log           log.Logger
 	timeLock      *sync.RWMutex
 	maxFlushSize  int
+	partitionFn   PartitionFn
 	flushHandler  Handler
 	encoderPool   msgpack.BufferedEncoderPool
 	resolution    time.Duration
 	flushInterval time.Duration
 	flushMgr      FlushManager
 
-	aggregations       *list.List
-	lastFlushedNanos   int64
-	encoder            msgpack.AggregatedEncoder
-	toCollect          []*list.Element
-	closed             bool
-	encodeFn           encodeFn
-	flushBeforeFn      flushBeforeFn
-	consumeAggMetricFn aggMetricFn
-	discardAggMetricFn aggMetricFn
-	metrics            metricListMetrics
+	closed              bool
+	aggregations        *list.List
+	lastFlushedNanos    int64
+	encodersByPartition []msgpack.AggregatedEncoder
+	toCollect           []*list.Element
+	encodeFn            encodeFn
+	flushBeforeFn       flushBeforeFn
+	consumeAggMetricFn  aggMetricFn
+	discardAggMetricFn  aggMetricFn
+	metrics             metricListMetrics
 }
 
 func newMetricList(shard uint32, resolution time.Duration, opts Options) *metricList {
@@ -125,25 +135,25 @@ func newMetricList(shard uint32, resolution time.Duration, opts Options) *metric
 		map[string]string{"resolution": resolution.String()},
 	)
 	encoderPool := opts.BufferedEncoderPool()
-	encoder := encoderPool.Get()
-	encoder.Reset()
+	partitionFnGen := opts.PartitionFnGen()
 	l := &metricList{
-		shard:         shard,
-		opts:          opts,
-		nowFn:         opts.ClockOptions().NowFn(),
-		log:           opts.InstrumentOptions().Logger(),
-		timeLock:      opts.TimeLock(),
-		maxFlushSize:  opts.MaxFlushSize(),
-		flushHandler:  opts.FlushHandler(),
-		encoderPool:   encoderPool,
-		resolution:    resolution,
-		flushInterval: flushInterval,
-		flushMgr:      opts.FlushManager(),
-		aggregations:  list.New(),
-		encoder:       msgpack.NewAggregatedEncoder(encoder),
-		metrics:       newMetricListMetrics(scope),
+		shard:               shard,
+		opts:                opts,
+		nowFn:               opts.ClockOptions().NowFn(),
+		log:                 opts.InstrumentOptions().Logger(),
+		timeLock:            opts.TimeLock(),
+		maxFlushSize:        opts.MaxFlushSize(),
+		partitionFn:         partitionFnGen(),
+		flushHandler:        opts.FlushHandler(),
+		encoderPool:         encoderPool,
+		resolution:          resolution,
+		flushInterval:       flushInterval,
+		flushMgr:            opts.FlushManager(),
+		aggregations:        list.New(),
+		encodersByPartition: make([]msgpack.AggregatedEncoder, defaultNumPartitions),
+		encodeFn:            encodeChunkedMetricWithStoragePolicy,
+		metrics:             newMetricListMetrics(scope),
 	}
-	l.encodeFn = l.encoder.EncodeChunkedMetricWithStoragePolicy
 	l.flushBeforeFn = l.flushBefore
 	l.consumeAggMetricFn = l.consumeAggregatedMetric
 	l.discardAggMetricFn = l.discardAggregatedMetric
@@ -254,6 +264,8 @@ func (l *metricList) DiscardBefore(beforeNanos int64) {
 	l.metrics.discardBefore.Inc(1)
 }
 
+// flushBefore flushes or discards data before a given time based on the flush type.
+// It is not thread-safe.
 func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 	alignedBeforeNanos := time.Unix(0, beforeNanos).Truncate(l.resolution).UnixNano()
 	if l.LastFlushedNanos() >= alignedBeforeNanos {
@@ -285,11 +297,21 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 
 	// Flush remaining bytes in the buffer.
 	if flushType == consumeType {
-		if encoder := l.encoder.Encoder(); len(encoder.Bytes()) > 0 {
-			newEncoder := l.encoderPool.Get()
-			newEncoder.Reset()
-			l.encoder.Reset(newEncoder)
-			if err := l.flushHandler.Handle(NewRefCountedBuffer(encoder)); err != nil {
+		for partition, encoder := range l.encodersByPartition {
+			if encoder == nil {
+				continue
+			}
+			bufferedEncoder := encoder.Encoder()
+			if len(bufferedEncoder.Bytes()) == 0 {
+				continue
+			}
+			newBufferedEncoder := l.encoderPool.Get()
+			newBufferedEncoder.Reset()
+			encoder.Reset(newBufferedEncoder)
+			if err := l.flushHandler.Handle(PartitionedBuffer{
+				Partition:        uint32(partition),
+				RefCountedBuffer: NewRefCountedBuffer(bufferedEncoder),
+			}); err != nil {
 				l.log.Errorf("flushing metrics error: %v", err)
 				l.metrics.flushBufferConsumeErrors.Inc(1)
 			} else {
@@ -314,40 +336,35 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 
 func (l *metricList) consumeAggregatedMetric(
 	idPrefix []byte,
-	id metricID.RawID,
+	id metricid.RawID,
 	idSuffix []byte,
 	timeNanos int64,
 	value float64,
 	sp policy.StoragePolicy,
 ) {
-	encoder := l.encoder.Encoder()
-	buffer := encoder.Buffer()
+	chunkedID := metricid.ChunkedID{
+		Prefix: idPrefix,
+		Data:   []byte(id),
+		Suffix: idSuffix,
+	}
+	partition := l.partitionFn(chunkedID)
+	encoder := l.encoderFor(partition)
+	bufferedEncoder := encoder.Encoder()
+	buffer := bufferedEncoder.Buffer()
 	sizeBefore := buffer.Len()
-	if err := l.encodeFn(aggregated.ChunkedMetricWithStoragePolicy{
+	chunkedMetricWithPolicy := aggregated.ChunkedMetricWithStoragePolicy{
 		ChunkedMetric: aggregated.ChunkedMetric{
-			ChunkedID: metricID.ChunkedID{
-				Prefix: idPrefix,
-				Data:   []byte(id),
-				Suffix: idSuffix,
-			},
+			ChunkedID: chunkedID,
 			TimeNanos: timeNanos,
 			Value:     value,
 		},
 		StoragePolicy: sp,
-	}); err != nil {
-		l.log.WithFields(
-			log.NewField("idPrefix", string(idPrefix)),
-			log.NewField("id", id.String()),
-			log.NewField("idSuffix", string(idSuffix)),
-			log.NewField("timestamp", time.Unix(0, timeNanos).String()),
-			log.NewField("value", value),
-			log.NewField("policy", sp.String()),
-			log.NewErrField(err),
-		).Error("encode metric with policy error")
+	}
+	if err := l.encodeFn(encoder, chunkedMetricWithPolicy); err != nil {
 		l.metrics.flushMetricConsumeErrors.Inc(1)
 		buffer.Truncate(sizeBefore)
 		// Clear out the encoder error.
-		l.encoder.Reset(encoder)
+		encoder.Reset(bufferedEncoder)
 		return
 	}
 	l.metrics.flushMetricConsumeSuccess.Inc(1)
@@ -359,13 +376,16 @@ func (l *metricList) consumeAggregatedMetric(
 	// Otherwise we get a new buffer and copy the bytes exceeding the max
 	// flush size to it, swap the new buffer with the old one, and flush out
 	// the old buffer.
-	encoder2 := l.encoderPool.Get()
-	encoder2.Reset()
-	data := encoder.Bytes()
-	encoder2.Buffer().Write(data[sizeBefore:sizeAfter])
-	l.encoder.Reset(encoder2)
+	bufferedEncoder2 := l.encoderPool.Get()
+	bufferedEncoder2.Reset()
+	data := bufferedEncoder.Bytes()
+	bufferedEncoder2.Buffer().Write(data[sizeBefore:sizeAfter])
+	encoder.Reset(bufferedEncoder2)
 	buffer.Truncate(sizeBefore)
-	if err := l.flushHandler.Handle(NewRefCountedBuffer(encoder)); err != nil {
+	if err := l.flushHandler.Handle(PartitionedBuffer{
+		Partition:        partition,
+		RefCountedBuffer: NewRefCountedBuffer(bufferedEncoder),
+	}); err != nil {
 		l.log.Errorf("flushing metrics error: %v", err)
 		l.metrics.flushBufferConsumeErrors.Inc(1)
 	} else {
@@ -377,13 +397,39 @@ func (l *metricList) consumeAggregatedMetric(
 // nolint: unparam
 func (l *metricList) discardAggregatedMetric(
 	idPrefix []byte,
-	id metricID.RawID,
+	id metricid.RawID,
 	idSuffix []byte,
 	timeNanos int64,
 	value float64,
 	sp policy.StoragePolicy,
 ) {
 	l.metrics.flushMetricDiscarded.Inc(1)
+}
+
+func (l *metricList) encoderFor(partition uint32) msgpack.AggregatedEncoder {
+	numPartitions := len(l.encodersByPartition)
+	if int(partition) >= numPartitions {
+		newSize := int(math.Max(float64(partition+1), float64(2*numPartitions)))
+		encodersByPartition := make([]msgpack.AggregatedEncoder, newSize)
+		copy(encodersByPartition, l.encodersByPartition)
+		l.encodersByPartition = encodersByPartition
+	}
+	encoder := l.encodersByPartition[partition]
+	if encoder != nil {
+		return encoder
+	}
+	bufferedEncoder := l.encoderPool.Get()
+	bufferedEncoder.Reset()
+	encoder = msgpack.NewAggregatedEncoder(bufferedEncoder)
+	l.encodersByPartition[partition] = encoder
+	return encoder
+}
+
+func encodeChunkedMetricWithStoragePolicy(
+	encoder msgpack.AggregatedEncoder,
+	cmp aggregated.ChunkedMetricWithStoragePolicy,
+) error {
+	return encoder.EncodeChunkedMetricWithStoragePolicy(cmp)
 }
 
 type newMetricListFn func(shard uint32, resolution time.Duration, opts Options) *metricList

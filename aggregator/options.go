@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
@@ -133,6 +134,7 @@ type options struct {
 	flushManager                     FlushManager
 	minFlushInterval                 time.Duration
 	maxFlushSize                     int
+	partitionFnGen                   PartitionFnGen
 	flushHandler                     Handler
 	entryTTL                         time.Duration
 	entryCheckInterval               time.Duration
@@ -198,6 +200,7 @@ func NewOptions() Options {
 		bufferDurationAfterShardCutoff:   defaultBufferDurationAfterShardCutoff,
 		minFlushInterval:                 defaultMinFlushInterval,
 		maxFlushSize:                     defaultMaxFlushSize,
+		partitionFnGen:                   defaultPartitionFnGen,
 		entryTTL:                         defaultEntryTTL,
 		entryCheckInterval:               defaultEntryCheckInterval,
 		entryCheckBatchPercent:           defaultEntryCheckBatchPercent,
@@ -534,6 +537,16 @@ func (o *options) SetMaxFlushSize(value int) Options {
 
 func (o *options) MaxFlushSize() int {
 	return o.maxFlushSize
+}
+
+func (o *options) SetPartitionFnGen(value PartitionFnGen) Options {
+	opts := *o
+	opts.partitionFnGen = value
+	return &opts
+}
+
+func (o *options) PartitionFnGen() PartitionFnGen {
+	return o.partitionFnGen
 }
 
 func (o *options) SetFlushHandler(value Handler) Options {
@@ -904,4 +917,8 @@ func defaultTimerQuantileSuffixFn(quantile float64) []byte {
 
 func defaultShardFn(id []byte, numShards int) uint32 {
 	return murmur3.Sum32(id) % uint32(numShards)
+}
+
+func defaultPartitionFnGen() PartitionFn {
+	return func(id.ChunkedID) uint32 { return 0 }
 }

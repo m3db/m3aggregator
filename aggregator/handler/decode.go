@@ -41,7 +41,7 @@ func NewDecodingHandler(handle HandleFunc) aggregator.Handler {
 	return decodingHandler{handle: handle}
 }
 
-func (h decodingHandler) Handle(buffer *aggregator.RefCountedBuffer) error {
+func (h decodingHandler) Handle(buffer aggregator.PartitionedBuffer) error {
 	defer buffer.DecRef()
 
 	iter := msgpack.NewAggregatedIterator(buffer.Buffer().Buffer(), msgpack.NewAggregatedIteratorOptions())

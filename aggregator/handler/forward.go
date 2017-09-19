@@ -110,7 +110,7 @@ type forwardHandler struct {
 // NewForwardHandler creates a new forwarding handler.
 func NewForwardHandler(
 	servers []string,
-	opts ForwardHandlerOptions,
+	opts Options,
 ) (aggregator.Handler, error) {
 	h, err := newForwardHandler(servers, opts)
 	if err != nil {
@@ -123,10 +123,10 @@ func NewForwardHandler(
 	return h, nil
 }
 
-func (h *forwardHandler) Handle(buffer *aggregator.RefCountedBuffer) error {
+func (h *forwardHandler) Handle(buffer aggregator.PartitionedBuffer) error {
 	// NB(xichen): the buffer contains newly flushed data so it's preferrable to keep
 	// it and drop the oldest buffer in queue in case the queue is full.
-	return h.enqueue(buffer, dropOldestInQueue)
+	return h.enqueue(buffer.RefCountedBuffer, dropOldestInQueue)
 }
 
 func (h *forwardHandler) Close() {
@@ -286,20 +286,21 @@ func (h *forwardHandler) reportMetrics() {
 	}
 }
 
-func newForwardHandler(servers []string, opts ForwardHandlerOptions) (*forwardHandler, error) {
+func newForwardHandler(servers []string, opts Options) (*forwardHandler, error) {
 	if len(servers) == 0 {
 		return nil, errEmptyServerList
 	}
 
 	instrumentOpts := opts.InstrumentOptions()
+	connectionOpts := opts.ConnectionOptions()
 	h := &forwardHandler{
 		servers:                servers,
 		log:                    instrumentOpts.Logger(),
 		nowFn:                  opts.ClockOptions().NowFn(),
-		connectTimeout:         opts.ConnectTimeout(),
-		connectionKeepAlive:    opts.ConnectionKeepAlive(),
-		connectionWriteTimeout: opts.ConnectionWriteTimeout(),
-		reconnectRetrier:       opts.ReconnectRetrier(),
+		connectTimeout:         connectionOpts.ConnectTimeout(),
+		connectionKeepAlive:    connectionOpts.ConnectionKeepAlive(),
+		connectionWriteTimeout: connectionOpts.ConnectionWriteTimeout(),
+		reconnectRetrier:       connectionOpts.ReconnectRetrier(),
 		reportInterval:         instrumentOpts.ReportInterval(),
 		bufCh:                  make(chan *aggregator.RefCountedBuffer, opts.QueueSize()),
 		closedCh:               make(chan struct{}),
