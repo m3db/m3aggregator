@@ -631,7 +631,7 @@ func testOptions() Options {
 			unregisterFn: func(flusher PeriodicFlusher) error { return nil },
 		}).
 		SetFlushHandler(&mockHandler{
-			handleFn: func(buf PartitionedBuffer) error {
+			handleFn: func(buf ShardedBuffer) error {
 				buf.DecRef()
 				return nil
 			},

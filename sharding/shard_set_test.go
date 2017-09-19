@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package partitioning
+package sharding
 
 import (
 	"testing"
@@ -27,7 +27,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-func TestParsePartitionSetErrors(t *testing.T) {
+func TestParseShardSetErrors(t *testing.T) {
 	tests := []struct {
 		yaml        string
 		expectedErr string
@@ -37,66 +37,46 @@ func TestParsePartitionSetErrors(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		var partitions PartitionSet
-		err := yaml.Unmarshal([]byte(test.yaml), &partitions)
+		var shards ShardSet
+		err := yaml.Unmarshal([]byte(test.yaml), &shards)
 		require.Error(t, err)
 		require.Equal(t, test.expectedErr, err.Error())
-		require.Equal(t, 0, len(partitions))
+		require.Equal(t, 0, len(shards))
 	}
 }
 
-func TestParsePartitionSet(t *testing.T) {
+func TestParseShardSet(t *testing.T) {
 	tests := []struct {
 		yaml     string
 		expected []uint32
 	}{
-		{yaml: `partitions: 76`, expected: []uint32{76}},
-		{yaml: `partitions: [3, 6, 5]`, expected: []uint32{3, 5, 6}},
-		{yaml: `partitions: ["3"]`, expected: []uint32{3}},
-		{yaml: `partitions: ["3..8"]`, expected: []uint32{3, 4, 5, 6, 7, 8}},
-		{yaml: `partitions: ["3", "3..8"]`, expected: []uint32{3, 4, 5, 6, 7, 8}},
-		{yaml: `partitions: ["3", "3..8", 9]`, expected: []uint32{3, 4, 5, 6, 7, 8, 9}},
-		{yaml: `partitions: 3`, expected: []uint32{3}},
-		{yaml: `partitions: "3"`, expected: []uint32{3}},
-		{yaml: `partitions: "3..8"`, expected: []uint32{3, 4, 5, 6, 7, 8}},
+		{yaml: `shards: 76`, expected: []uint32{76}},
+		{yaml: `shards: [3, 6, 5]`, expected: []uint32{3, 5, 6}},
+		{yaml: `shards: ["3"]`, expected: []uint32{3}},
+		{yaml: `shards: ["3..8"]`, expected: []uint32{3, 4, 5, 6, 7, 8}},
+		{yaml: `shards: ["3", "3..8"]`, expected: []uint32{3, 4, 5, 6, 7, 8}},
+		{yaml: `shards: ["3", "3..8", 9]`, expected: []uint32{3, 4, 5, 6, 7, 8, 9}},
+		{yaml: `shards: 3`, expected: []uint32{3}},
+		{yaml: `shards: "3"`, expected: []uint32{3}},
+		{yaml: `shards: "3..8"`, expected: []uint32{3, 4, 5, 6, 7, 8}},
 	}
 
 	for i, test := range tests {
 		var cfg struct {
-			Partitions PartitionSet
+			Shards ShardSet
 		}
 
 		err := yaml.Unmarshal([]byte(test.yaml), &cfg)
 		require.NoError(t, err, "received error for test %d", i)
 
-		expectedSet := make(PartitionSet)
+		expectedSet := make(ShardSet)
 		for _, p := range test.expected {
 			expectedSet.Add(p)
 		}
 
-		require.Equal(t, expectedSet, cfg.Partitions, "invalid results for test %d", i)
-		for _, partition := range test.expected {
-			require.True(t, cfg.Partitions.Contains(partition), "%v does not contain %d", cfg.Partitions, partition)
+		require.Equal(t, expectedSet, cfg.Shards, "invalid results for test %d", i)
+		for _, shard := range test.expected {
+			require.True(t, cfg.Shards.Contains(shard), "%v does not contain %d", cfg.Shards, shard)
 		}
-	}
-}
-
-func TestPartitionSetMinMax(t *testing.T) {
-	tests := []struct {
-		yaml        string
-		expectedMin int
-		expectedMax int
-	}{
-		{yaml: "", expectedMin: -1, expectedMax: -1},
-		{yaml: `1..1`, expectedMin: 1, expectedMax: 1},
-		{yaml: `20..30`, expectedMin: 20, expectedMax: 30},
-		{yaml: `[20, 5, 6, 30]`, expectedMin: 5, expectedMax: 30},
-	}
-	for _, test := range tests {
-		var partitions PartitionSet
-		err := yaml.Unmarshal([]byte(test.yaml), &partitions)
-		require.NoError(t, err)
-		require.Equal(t, test.expectedMin, partitions.Min())
-		require.Equal(t, test.expectedMax, partitions.Max())
 	}
 }

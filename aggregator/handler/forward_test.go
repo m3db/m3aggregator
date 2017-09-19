@@ -49,7 +49,7 @@ func TestForwardHandlerHandleClosed(t *testing.T) {
 	require.NoError(t, err)
 
 	h.Close()
-	require.Equal(t, errHandlerClosed, h.Handle(testPartitionedBuffer()))
+	require.Equal(t, errHandlerClosed, h.Handle(testShardedBuffer()))
 }
 
 func TestForwardHandlerHandleQueueFull(t *testing.T) {
@@ -66,7 +66,7 @@ func TestForwardHandlerHandleQueueFull(t *testing.T) {
 	}
 
 	// Handle the buffer and expect it to be queued.
-	require.NoError(t, handler.Handle(testPartitionedBuffer()))
+	require.NoError(t, handler.Handle(testShardedBuffer()))
 }
 
 func TestForwardHandlerForwardToConnNoConnectionClosed(t *testing.T) {
@@ -110,7 +110,7 @@ func TestForwardHandlerForwardToConnWithConnectionClosed(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		data := []byte{byte(i), byte(i + 1)}
 		expected = append(expected, data)
-		buf := testPartitionedBuffer()
+		buf := testShardedBuffer()
 		_, err := buf.Buffer().Buffer().Write(data)
 		require.NoError(t, err)
 		require.NoError(t, h.Handle(buf))
@@ -154,7 +154,7 @@ func TestForwardHandlerForwardToConnReenqueueSuccess(t *testing.T) {
 	}
 
 	// Enqueue some buffers.
-	buf := testPartitionedBuffer()
+	buf := testShardedBuffer()
 	_, err = buf.Buffer().Buffer().Write([]byte{0x3, 0x4, 0x5})
 	require.NoError(t, err)
 	require.NoError(t, h.Handle(buf))
@@ -207,7 +207,7 @@ func TestForwardHandlerForwardToConnReenqueueQueueFull(t *testing.T) {
 	}
 
 	// Enqueue some buffers.
-	buf := testPartitionedBuffer()
+	buf := testShardedBuffer()
 	_, err = buf.Buffer().Buffer().Write([]byte{0x3, 0x4, 0x5})
 	require.NoError(t, err)
 	require.NoError(t, h.Handle(buf))
@@ -257,8 +257,8 @@ func testRefCountedBuffer() *aggregator.RefCountedBuffer {
 	return aggregator.NewRefCountedBuffer(msgpack.NewBufferedEncoder())
 }
 
-func testPartitionedBuffer() aggregator.PartitionedBuffer {
-	return aggregator.PartitionedBuffer{RefCountedBuffer: testRefCountedBuffer()}
+func testShardedBuffer() aggregator.ShardedBuffer {
+	return aggregator.ShardedBuffer{RefCountedBuffer: testRefCountedBuffer()}
 }
 
 func testForwardHandlerOptions() Options {

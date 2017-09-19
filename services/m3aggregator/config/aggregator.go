@@ -21,7 +21,6 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -52,7 +51,7 @@ import (
 
 const (
 	initialBufferSizeGrowthFactor = 2
-	initialChunkedIDSize          = 256
+	initialChunkedIDSize          = 512
 )
 
 var (
@@ -163,11 +162,11 @@ type AggregatorConfiguration struct {
 	// Maximum flush size in bytes.
 	MaxFlushSize int `yaml:"maxFlushSize"`
 
-	// Total number of backend partitions.
-	TotalPartitions int `yaml:"totalPartitions" validate:"nonzero"`
+	// Total number of shards for aggregated metrics.
+	NumAggregatedShards int `yaml:"numAggregatedShards" validate:"nonzero"`
 
-	// Partition function type.
-	PartitionFnType *hashFnType `yaml:"partitionFnType"`
+	// Aggregated shard function type.
+	AggregatedShardFnType *hashFnType `yaml:"aggregatedShardFnType"`
 
 	// Flushing handler configuration.
 	Flush *handler.FlushHandlerConfiguration `yaml:"flush"`
@@ -334,16 +333,16 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	}
 	opts = opts.SetFlushManager(flushManager)
 
-	// Set partitioning function.
-	partitionFnType := defaultHashFn
-	if c.PartitionFnType != nil {
-		partitionFnType = *c.PartitionFnType
+	// Set aggregated sharding function.
+	aggregatedShardFnType := defaultHashFn
+	if c.AggregatedShardFnType != nil {
+		aggregatedShardFnType = *c.AggregatedShardFnType
 	}
-	partitionFnGen, err := partitionFnType.PartitionFnGen(c.TotalPartitions)
+	aggregatedShardFn, err := aggregatedShardFnType.AggregatedShardFn()
 	if err != nil {
 		return nil, err
 	}
-	opts = opts.SetPartitionFnGen(partitionFnGen)
+	opts = opts.SetNumAggregatedShards(c.NumAggregatedShards).SetAggregatedShardFn(aggregatedShardFn)
 
 	// Set flushing handler.
 	if c.MinFlushInterval != 0 {
@@ -353,7 +352,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		opts = opts.SetMaxFlushSize(c.MaxFlushSize)
 	}
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("flush-handler"))
-	flushHandler, err := c.Flush.NewHandler(iOpts)
+	flushHandler, err := c.Flush.NewHandler(c.NumAggregatedShards, iOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -598,25 +597,23 @@ func (t hashFnType) ShardFn() (aggregator.ShardFn, error) {
 	}
 }
 
-func (t hashFnType) PartitionFnGen(totalPartitions int) (aggregator.PartitionFnGen, error) {
+func (t hashFnType) AggregatedShardFn() (aggregator.AggregatedShardFn, error) {
 	switch t {
 	case murmur32HashFn:
-		// NB(xichen): If this turns out to be too CPU intensive due to byte copies, can rewrite
-		// it to compute murmur3 hashes with zero byte copies.
-		return func() aggregator.PartitionFn {
-			// Create a new local buffer on every function invocation, therefore
-			// making the generated partition functions independent of each other.
-			buf := bytes.NewBuffer(make([]byte, 0, initialChunkedIDSize))
-			return func(chunkedID id.ChunkedID) uint32 {
-				buf.Reset()
-				buf.Write(chunkedID.Prefix)
-				buf.Write(chunkedID.Data)
-				buf.Write(chunkedID.Suffix)
-				return murmur3.Sum32(buf.Bytes()) % uint32(totalPartitions)
-			}
+		// NB(xichen): The function only allocates when the id of the aggregated metric
+		// is more than initialChunkedIDSize (i.e., 256 bytes) in size and requires zero
+		// allocation otherwise. If this turns out to be still too CPU intensive due to
+		// byte copies, can rewrite it to compute murmur3 hashes with zero byte copies.
+		return func(chunkedID id.ChunkedID, numShards int) uint32 {
+			var b [initialChunkedIDSize]byte
+			buf := b[:0]
+			buf = append(buf, chunkedID.Prefix...)
+			buf = append(buf, chunkedID.Data...)
+			buf = append(buf, chunkedID.Suffix...)
+			return murmur3.Sum32(buf) % uint32(numShards)
 		}, nil
 	default:
-		return nil, fmt.Errorf("unrecognized partition function type %v", t)
+		return nil, fmt.Errorf("unrecognized aggregated shard function type %v", t)
 	}
 }
 

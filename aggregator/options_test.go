@@ -387,16 +387,16 @@ func TestSetMaxFlushSize(t *testing.T) {
 }
 
 func TestSetFlushHandler(t *testing.T) {
-	var b PartitionedBuffer
-	fn := func(buf PartitionedBuffer) error {
+	var b ShardedBuffer
+	fn := func(buf ShardedBuffer) error {
 		b = buf
 		return nil
 	}
 	value := &mockHandler{handleFn: fn}
 	o := NewOptions().SetFlushHandler(value)
 
-	buf := PartitionedBuffer{
-		Partition:        0,
+	buf := ShardedBuffer{
+		Shard:        0,
 		RefCountedBuffer: NewRefCountedBuffer(msgpack.NewPooledBufferedEncoder(nil)),
 	}
 	defer buf.DecRef()

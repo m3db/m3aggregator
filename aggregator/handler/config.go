@@ -30,14 +30,15 @@ import (
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
+
 	"github.com/uber-go/tally"
 )
 
 var (
-	errUnknownFlushHandlerType           = errors.New("unknown flush handler type")
-	errNoForwardHandlerConfiguration     = errors.New("no forward handler configuration")
-	errNoPartitionedHandlerConfiguration = errors.New("no partitioned handler configuration")
-	errNoBroadcastHandlerConfiguration   = errors.New("no broadcast handler configuration")
+	errUnknownFlushHandlerType         = errors.New("unknown flush handler type")
+	errNoForwardHandlerConfiguration   = errors.New("no forward handler configuration")
+	errNoShardedHandlerConfiguration   = errors.New("no sharded handler configuration")
+	errNoBroadcastHandlerConfiguration = errors.New("no broadcast handler configuration")
 )
 
 // FlushHandlerConfiguration contains configuration for flushing metrics.
@@ -48,8 +49,8 @@ type FlushHandlerConfiguration struct {
 	// Forward handler configuration.
 	Forward *forwardHandlerConfiguration `yaml:"forward"`
 
-	// Partitioned handler configuration.
-	Partitioned *partitionedHandlerConfiguration `yaml:"partitioned"`
+	// Sharded handler configuration.
+	Sharded *shardedHandlerConfiguration `yaml:"sharded"`
 
 	// Forward handler configuration.
 	Broadcast *broadcastHandlerConfiguration `yaml:"broadcast"`
@@ -57,6 +58,7 @@ type FlushHandlerConfiguration struct {
 
 // NewHandler creates a new flush handler
 func (c *FlushHandlerConfiguration) NewHandler(
+	totalShards int,
 	iOpts instrument.Options,
 ) (aggregator.Handler, error) {
 	scope := iOpts.MetricsScope()
@@ -70,22 +72,22 @@ func (c *FlushHandlerConfiguration) NewHandler(
 		if c.Forward == nil {
 			return nil, errNoForwardHandlerConfiguration
 		}
-		scope = scope.SubScope("forward").Tagged(map[string]string{"forward-target": c.Forward.Name})
-		logger := iOpts.Logger().WithFields(log.NewField("forward-target", c.Forward.Name))
+		scope = scope.SubScope("forward").Tagged(map[string]string{"backend": c.Forward.Name})
+		logger := iOpts.Logger().WithFields(log.NewField("backend", c.Forward.Name))
 		return c.Forward.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
-	case partitionedType:
-		if c.Partitioned == nil {
-			return nil, errNoPartitionedHandlerConfiguration
+	case shardedType:
+		if c.Sharded == nil {
+			return nil, errNoShardedHandlerConfiguration
 		}
-		scope = scope.SubScope("partitioned").Tagged(map[string]string{"partitioned-backend": c.Partitioned.Name})
-		logger := iOpts.Logger().WithFields(log.NewField("partitioned-backend", c.Partitioned.Name))
-		return c.Partitioned.NewHandler(iOpts.SetMetricsScope(scope).SetLogger(logger))
+		scope = scope.SubScope("sharded").Tagged(map[string]string{"backend": c.Sharded.Name})
+		logger := iOpts.Logger().WithFields(log.NewField("backend", c.Sharded.Name))
+		return c.Sharded.NewHandler(totalShards, iOpts.SetMetricsScope(scope).SetLogger(logger))
 	case broadcastType:
 		if c.Broadcast == nil {
 			return nil, errNoBroadcastHandlerConfiguration
 		}
 		scope = scope.SubScope("broadcast")
-		return c.Broadcast.NewHandler(iOpts.SetMetricsScope(scope))
+		return c.Broadcast.NewHandler(totalShards, iOpts.SetMetricsScope(scope))
 	default:
 		return nil, errUnknownFlushHandlerType
 	}
@@ -97,11 +99,12 @@ type broadcastHandlerConfiguration struct {
 }
 
 func (c *broadcastHandlerConfiguration) NewHandler(
+	totalShards int,
 	iOpts instrument.Options,
 ) (aggregator.Handler, error) {
 	handlers := make([]aggregator.Handler, 0, len(c.Handlers))
 	for _, cfg := range c.Handlers {
-		handler, err := cfg.NewHandler(iOpts)
+		handler, err := cfg.NewHandler(totalShards, iOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -141,25 +144,31 @@ func (c *connectionConfiguration) NewConnectionOptions(scope tally.Scope) Connec
 	return opts
 }
 
-type partitionedHandlerConfiguration struct {
-	// Name of the partitioned backend.
+type shardedHandlerConfiguration struct {
+	// Name of the sharded backend.
 	Name string `yaml:"name"`
 
-	// Backend server partitions.
-	Partitions []BackendServerPartition
+	// Backend server shards.
+	Shards []BackendServerShard `yaml:"shards"`
 
-	// Total queue size across all partitions.
+	// Total queue size across all shards.
 	QueueSize int `yaml:"queueSize"`
 
 	// Connection configuration.
 	Connection connectionConfiguration `yaml:"connection"`
+
+	// Disable validation (dangerous but useful for testing and staging environments).
+	DisableValidation bool `yaml:"disableValidation"`
 }
 
-func (c *partitionedHandlerConfiguration) NewHandler(
+func (c *shardedHandlerConfiguration) NewHandler(
+	totalShards int,
 	instrumentOpts instrument.Options,
 ) (aggregator.Handler, error) {
-	if err := c.validatePartitions(); err != nil {
-		return nil, err
+	if !c.DisableValidation {
+		if err := c.validateShards(totalShards); err != nil {
+			return nil, err
+		}
 	}
 	connectionOpts := c.Connection.NewConnectionOptions(instrumentOpts.MetricsScope())
 	opts := NewOptions().
@@ -168,37 +177,44 @@ func (c *partitionedHandlerConfiguration) NewHandler(
 	if c.QueueSize != 0 {
 		opts = opts.SetQueueSize(c.QueueSize)
 	}
-	return NewPartitionedHandler(c.Partitions, opts)
+	return NewShardedHandler(c.Shards, totalShards, opts)
 }
 
-// validatePartitions ensures a single partition isn't present multiple times, and
-// that a single server isn't assigned to multiple partition ranges.
-func (c *partitionedHandlerConfiguration) validatePartitions() error {
+// validateShards ensures a single shard isn't present multiple times, and
+// that a single server isn't assigned to multiple shard ranges.
+func (c *shardedHandlerConfiguration) validateShards(totalShards int) error {
 	var (
-		serversAssigned    = make(map[string]struct{})
-		partitionsAssigned = make(map[int]struct{})
+		serversAssigned = make(map[string]struct{})
+		shardsAssigned  = make(map[int]struct{})
 	)
-	for _, partitions := range c.Partitions {
+	for _, shards := range c.Shards {
 		// Make sure we have a deterministic ordering.
-		sortedPartitions := make([]int, 0, len(partitions.Range))
-		for partition := range partitions.Range {
-			sortedPartitions = append(sortedPartitions, int(partition))
+		sortedShards := make([]int, 0, len(shards.Range))
+		for shard := range shards.Range {
+			sortedShards = append(sortedShards, int(shard))
 		}
-		sort.Ints(sortedPartitions)
+		sort.Ints(sortedShards)
 
-		for _, partition := range sortedPartitions {
-			if _, partitionAlreadyAssigned := partitionsAssigned[partition]; partitionAlreadyAssigned {
-				return fmt.Errorf("partition %d is present in multiple ranges", partition)
+		for _, shard := range sortedShards {
+			if shard >= totalShards {
+				return fmt.Errorf("shard %d exceeds total available shards %d", shard, totalShards)
 			}
-			partitionsAssigned[partition] = struct{}{}
+			if _, shardAlreadyAssigned := shardsAssigned[shard]; shardAlreadyAssigned {
+				return fmt.Errorf("shard %d is present in multiple ranges", shard)
+			}
+			shardsAssigned[shard] = struct{}{}
 		}
 
-		for _, server := range partitions.Servers {
+		for _, server := range shards.Servers {
 			if _, serverAlreadyAssigned := serversAssigned[server]; serverAlreadyAssigned {
 				return fmt.Errorf("server %s is present in multiple ranges", server)
 			}
 			serversAssigned[server] = struct{}{}
 		}
+	}
+	if len(shardsAssigned) != totalShards {
+		return fmt.Errorf("missing shards; expected %d total received %d",
+			totalShards, len(shardsAssigned))
 	}
 	return nil
 }

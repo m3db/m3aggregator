@@ -123,7 +123,7 @@ func NewForwardHandler(
 	return h, nil
 }
 
-func (h *forwardHandler) Handle(buffer aggregator.PartitionedBuffer) error {
+func (h *forwardHandler) Handle(buffer aggregator.ShardedBuffer) error {
 	// NB(xichen): the buffer contains newly flushed data so it's preferrable to keep
 	// it and drop the oldest buffer in queue in case the queue is full.
 	return h.enqueue(buffer.RefCountedBuffer, dropOldestInQueue)

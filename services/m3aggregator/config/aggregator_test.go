@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3metrics/metric/id"
 
 	"github.com/spaolacci/murmur3"
@@ -33,22 +32,16 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-func TestHashFnTypePartitionFnGen(t *testing.T) {
+func TestHashFnTypeAggregatedShardFn(t *testing.T) {
 	hashFnType := murmur32HashFn
-	totalPartitions := 1024
-	partitionFnGen, err := hashFnType.PartitionFnGen(totalPartitions)
+	numShards := 1024
+	aggregatedShardFn, err := hashFnType.AggregatedShardFn()
 	require.NoError(t, err)
 
-	// Generate n partition functions.
-	numWorkers := 100
-	partitionFns := make([]aggregator.PartitionFn, numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		partitionFns[i] = partitionFnGen()
-	}
-
-	// Verify the generated partition function is thread-safe and the computed
-	// partitions match expectation.
+	// Verify the aggregated shard function is thread-safe and the computed
+	// shards match expectation.
 	var wg sync.WaitGroup
+	numWorkers := 100
 	inputs := []id.ChunkedID{
 		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
 		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
@@ -56,7 +49,6 @@ func TestHashFnTypePartitionFnGen(t *testing.T) {
 		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
 	}
 	for i := 0; i < numWorkers; i++ {
-		i := i
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -66,8 +58,8 @@ func TestHashFnTypePartitionFnGen(t *testing.T) {
 				d.Write(input.Prefix)
 				d.Write(input.Data)
 				d.Write(input.Suffix)
-				expected := d.Sum32() % uint32(totalPartitions)
-				actual := partitionFns[i](input)
+				expected := d.Sum32() % uint32(numShards)
+				actual := aggregatedShardFn(input, numShards)
 				require.Equal(t, expected, actual)
 			}
 		}()

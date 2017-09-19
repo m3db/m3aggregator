@@ -201,7 +201,7 @@ func TestMetricListFlushConsumingAndCollectingElems(t *testing.T) {
 		bufferLock   sync.Mutex
 		buffers      []*RefCountedBuffer
 	)
-	flushFn := func(buffer PartitionedBuffer) error {
+	flushFn := func(buffer ShardedBuffer) error {
 		bufferLock.Lock()
 		buffers = append(buffers, buffer.RefCountedBuffer)
 		bufferLock.Unlock()
@@ -342,30 +342,28 @@ func TestMetricListFlushBeforeStale(t *testing.T) {
 	require.Equal(t, int64(1234), l.LastFlushedNanos())
 }
 
-func TestMetricListFlushBeforeWithPartitions(t *testing.T) {
+func TestMetricListFlushBeforeWithShards(t *testing.T) {
 	var (
-		resLock    sync.Mutex
-		partitions []uint32
-		buffers    []*RefCountedBuffer
+		resLock sync.Mutex
+		shards  []uint32
+		buffers []*RefCountedBuffer
 	)
-	flushFn := func(buffer PartitionedBuffer) error {
+	flushFn := func(buffer ShardedBuffer) error {
 		resLock.Lock()
-		partitions = append(partitions, buffer.Partition)
+		shards = append(shards, buffer.Shard)
 		buffers = append(buffers, buffer.RefCountedBuffer)
 		resLock.Unlock()
 		return nil
 	}
 	handler := &mockHandler{handleFn: flushFn}
-	partitionFnGen := func() PartitionFn {
-		return func(chunkedID id.ChunkedID) uint32 {
-			if string(chunkedID.Data) == string(testCounterID) {
-				return 12
-			}
-			if string(chunkedID.Data) == string(testGaugeID) {
-				return 34
-			}
-			panic(fmt.Sprintf("unexpected chunked id %v", chunkedID))
+	aggregatedShardFn := func(chunkedID id.ChunkedID, numShards int) uint32 {
+		if string(chunkedID.Data) == string(testCounterID) {
+			return 12
 		}
+		if string(chunkedID.Data) == string(testGaugeID) {
+			return 34
+		}
+		panic(fmt.Sprintf("unexpected chunked id %v", chunkedID))
 	}
 
 	var now = time.Unix(216, 0).UnixNano()
@@ -378,7 +376,7 @@ func TestMetricListFlushBeforeWithPartitions(t *testing.T) {
 		SetMinFlushInterval(0).
 		SetMaxFlushSize(math.MaxInt64).
 		SetFlushHandler(handler).
-		SetPartitionFnGen(partitionFnGen)
+		SetAggregatedShardFn(aggregatedShardFn)
 
 	l := newMetricList(testShard, 0, opts)
 	l.resolution = testStoragePolicy.Resolution().Window
@@ -407,30 +405,30 @@ func TestMetricListFlushBeforeWithPartitions(t *testing.T) {
 
 	l.flushBefore(nowTs.Truncate(l.resolution).UnixNano(), consumeType)
 
-	// Counter comes before the gauge because its partition number is smaller.
+	// Counter comes before the gauge because its shard number is smaller.
 	var expectedMetrics []testAggMetric
 	expectedMetrics = append(expectedMetrics, expectedAggMetricsForCounter(alignedStart, testStoragePolicy, policy.DefaultAggregationTypes)...)
 	expectedMetrics = append(expectedMetrics, expectedAggMetricsForGauge(alignedStart, testStoragePolicy, policy.DefaultAggregationTypes)...)
 	validateBuffers(t, expectedMetrics, buffers)
-	require.Equal(t, []uint32{12, 34}, partitions)
+	require.Equal(t, []uint32{12, 34}, shards)
 }
 
 func TestMetricListEncoderFor(t *testing.T) {
-	opts := testOptions()
+	opts := testOptions().SetNumAggregatedShards(8)
 	l := newMetricList(testShard, time.Second, opts)
-	partition := uint32(1234)
-	encoder := l.encoderFor(partition)
+	shard := uint32(3)
+	encoder := l.encoderFor(shard)
 	require.NotNil(t, encoder)
-	require.Equal(t, 2*defaultNumPartitions, len(l.encodersByPartition))
-	for i := 0; i < len(l.encodersByPartition); i++ {
-		if i == int(partition) {
-			require.Equal(t, encoder, l.encodersByPartition[i])
-			require.NotNil(t, l.encodersByPartition[i])
+	require.Equal(t, 8, len(l.encodersByShard))
+	for i := 0; i < len(l.encodersByShard); i++ {
+		if i == int(shard) {
+			require.Equal(t, encoder, l.encodersByShard[i])
+			require.NotNil(t, l.encodersByShard[i])
 		} else {
-			require.Nil(t, l.encodersByPartition[i])
+			require.Nil(t, l.encodersByShard[i])
 		}
 	}
-	require.Equal(t, encoder, l.encoderFor(partition))
+	require.Equal(t, encoder, l.encoderFor(shard))
 }
 
 func TestMetricLists(t *testing.T) {
@@ -506,11 +504,11 @@ type flushBeforeResult struct {
 	flushType   flushType
 }
 
-type handleFn func(buffer PartitionedBuffer) error
+type handleFn func(buffer ShardedBuffer) error
 
 type mockHandler struct {
 	handleFn handleFn
 }
 
-func (h *mockHandler) Handle(buffer PartitionedBuffer) error { return h.handleFn(buffer) }
-func (h *mockHandler) Close()                                {}
+func (h *mockHandler) Handle(buffer ShardedBuffer) error { return h.handleFn(buffer) }
+func (h *mockHandler) Close()                            {}

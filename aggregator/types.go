@@ -33,14 +33,11 @@ import (
 	"github.com/m3db/m3x/pool"
 )
 
-// ShardFn maps a id to an aggregator shard given the total number of shards.
+// ShardFn maps a id to an aggregator shard given the total number of aggregator shards.
 type ShardFn func(id []byte, numShards int) uint32
 
-// PartitionFn maps a chunked id to a backend partition.
-type PartitionFn func(chunkedID id.ChunkedID) uint32
-
-// PartitionFnGen generates partition functions.
-type PartitionFnGen func() PartitionFn
+// AggregatedShardFn maps a chunked id of an aggregated metric to a shard.
+type AggregatedShardFn func(chunkedID id.ChunkedID, numShards int) uint32
 
 // CounterElemAlloc allocates a new counter element
 type CounterElemAlloc func() *CounterElem
@@ -105,19 +102,19 @@ type EntryPool interface {
 // QuantileSuffixFn returns the byte-slice suffix for a quantile value
 type QuantileSuffixFn func(quantile float64) []byte
 
-// PartitionedBuffer is a ref-counted buffer for a given partition.
-type PartitionedBuffer struct {
+// ShardedBuffer is a ref-counted buffer for a given Shard.
+type ShardedBuffer struct {
 	*RefCountedBuffer
 
-	Partition uint32
+	Shard uint32
 }
 
 // Handler handles encoded streams containing aggregated metrics alongside their policies.
 type Handler interface {
 	// Handle processes aggregated metrics and policies encoded in the buffer for
-	// a given partition. The handler is responsible for decrementing the refcount when
-	// it's done with the buffer.
-	Handle(buffer PartitionedBuffer) error
+	// a given backend shard. The handler is responsible for decrementing the refcount
+	// when it's done with the buffer.
+	Handle(buffer ShardedBuffer) error
 
 	// Close closes the handler.
 	Close()
@@ -307,13 +304,19 @@ type Options interface {
 	// MaxFlushSize returns the maximum buffer size to trigger a flush
 	MaxFlushSize() int
 
-	// SetPartitionFnGen sets the partition function generator that generates the
-	// partition function to compute the backend partition for a given chunked id.
-	SetPartitionFnGen(value PartitionFnGen) Options
+	// SetNumAggregatedShards sets the total number of shards for aggregated metrics.
+	SetNumAggregatedShards(value int) Options
 
-	// PartitionFnGen returns the partition function generator that generates the
-	// partition function to compute the backend partition for a given chunked id.
-	PartitionFnGen() PartitionFnGen
+	// NumAggregatedShards returns the total number of shards for aggregated metrics.
+	NumAggregatedShards() int
+
+	// SetAggregatedShardFn sets the sharding function to compute the shard
+	// of an aggregated metric.
+	SetAggregatedShardFn(value AggregatedShardFn) Options
+
+	// AggregatedShardFn returns the sharding function to compute the shard
+	// of an aggregated metric.
+	AggregatedShardFn() AggregatedShardFn
 
 	// SetFlushHandler sets the handler that flushes buffered encoders
 	SetFlushHandler(value Handler) Options

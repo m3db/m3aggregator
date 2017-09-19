@@ -53,6 +53,7 @@ var (
 	defaultAggregationMedianSuffix   = []byte(".median")
 	defaultMinFlushInterval          = 5 * time.Second
 	defaultMaxFlushSize              = 1440
+	defaultNumAggregatedShards       = 1024
 	defaultEntryTTL                  = 24 * time.Hour
 	defaultEntryCheckInterval        = time.Hour
 	defaultEntryCheckBatchPercent    = 0.01
@@ -134,7 +135,8 @@ type options struct {
 	flushManager                     FlushManager
 	minFlushInterval                 time.Duration
 	maxFlushSize                     int
-	partitionFnGen                   PartitionFnGen
+	numAggregatedShards              int
+	aggregatedShardFn                AggregatedShardFn
 	flushHandler                     Handler
 	entryTTL                         time.Duration
 	entryCheckInterval               time.Duration
@@ -200,7 +202,8 @@ func NewOptions() Options {
 		bufferDurationAfterShardCutoff:   defaultBufferDurationAfterShardCutoff,
 		minFlushInterval:                 defaultMinFlushInterval,
 		maxFlushSize:                     defaultMaxFlushSize,
-		partitionFnGen:                   defaultPartitionFnGen,
+		numAggregatedShards:              defaultNumAggregatedShards,
+		aggregatedShardFn:                defaultAggregatedShardFn,
 		entryTTL:                         defaultEntryTTL,
 		entryCheckInterval:               defaultEntryCheckInterval,
 		entryCheckBatchPercent:           defaultEntryCheckBatchPercent,
@@ -539,14 +542,24 @@ func (o *options) MaxFlushSize() int {
 	return o.maxFlushSize
 }
 
-func (o *options) SetPartitionFnGen(value PartitionFnGen) Options {
+func (o *options) SetNumAggregatedShards(value int) Options {
 	opts := *o
-	opts.partitionFnGen = value
+	opts.numAggregatedShards = value
 	return &opts
 }
 
-func (o *options) PartitionFnGen() PartitionFnGen {
-	return o.partitionFnGen
+func (o *options) NumAggregatedShards() int {
+	return o.numAggregatedShards
+}
+
+func (o *options) SetAggregatedShardFn(value AggregatedShardFn) Options {
+	opts := *o
+	opts.aggregatedShardFn = value
+	return &opts
+}
+
+func (o *options) AggregatedShardFn() AggregatedShardFn {
+	return o.aggregatedShardFn
 }
 
 func (o *options) SetFlushHandler(value Handler) Options {
@@ -919,6 +932,6 @@ func defaultShardFn(id []byte, numShards int) uint32 {
 	return murmur3.Sum32(id) % uint32(numShards)
 }
 
-func defaultPartitionFnGen() PartitionFn {
-	return func(id.ChunkedID) uint32 { return 0 }
+func defaultAggregatedShardFn(id.ChunkedID, int) uint32 {
+	return 0
 }

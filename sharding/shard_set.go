@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package partitioning
+package sharding
 
 import (
 	"errors"
@@ -28,28 +28,32 @@ import (
 )
 
 const (
-	defaultNumPartitions = 32
+	defaultNumShards = 1024
 )
 
 var (
-	// Partition range is expected to provided in the form of startPartition..endPartition.
-	// An example partition range is 0..63.
+	// Shard range is expected to provided in the form of startShard..endShard.
+	// Both startShard and endShard are inclusive. An example shard range is 0..63.
 	rangeRegexp = regexp.MustCompile(`^([0-9]+)(\.\.([0-9]+))?$`)
 
-	errInvalidPartition = errors.New("invalid partition")
+	errInvalidShard = errors.New("invalid shard")
 )
 
-// A PartitionSet is a range of partitions organized as a set.
-type PartitionSet map[uint32]struct{}
+// ShardSet is a range of shards organized as a set.
+type ShardSet map[uint32]struct{}
 
-// UnmarshalYAML unmarshals YAML into a partition set.
-func (ps *PartitionSet) UnmarshalYAML(f func(interface{}) error) error {
-	*ps = make(PartitionSet, defaultNumPartitions)
+// UnmarshalYAML unmarshals YAML into a shard set.
+// The following formats are supported:
+// * StartShard..EndShard, e.g., 0..63.
+// * Single shard, e.g., 5.
+// * Array containing shard ranges and single shards.
+func (ss *ShardSet) UnmarshalYAML(f func(interface{}) error) error {
+	*ss = make(ShardSet, defaultNumShards)
 
 	// If YAML contains a single string, attempt to parse out a single range.
 	var s string
 	if err := f(&s); err == nil {
-		return ps.ParseRange(s)
+		return ss.ParseRange(s)
 	}
 
 	// Otherwise try to parse out a list of ranges.
@@ -58,11 +62,11 @@ func (ps *PartitionSet) UnmarshalYAML(f func(interface{}) error) error {
 		for _, v := range a {
 			switch c := v.(type) {
 			case string:
-				if err := ps.ParseRange(c); err != nil {
+				if err := ss.ParseRange(c); err != nil {
 					return err
 				}
 			case int:
-				ps.Add(uint32(c))
+				ss.Add(uint32(c))
 			default:
 				return fmt.Errorf("unexpected range %v", c)
 			}
@@ -70,69 +74,45 @@ func (ps *PartitionSet) UnmarshalYAML(f func(interface{}) error) error {
 		return nil
 	}
 
-	// Otherwise try to parse out a single partition.
+	// Otherwise try to parse out a single shard.
 	var n int
 	if err := f(&n); err == nil {
-		ps.Add(uint32(n))
+		ss.Add(uint32(n))
 		return nil
 	}
 
-	return errInvalidPartition
+	return errInvalidShard
 }
 
-// Min returns the minimum partition contained by the partition set,
-// or -1 if the partition set is empty.
-func (ps PartitionSet) Min() int {
-	minPartition := -1
-	for p := range ps {
-		if minPartition == -1 || minPartition > int(p) {
-			minPartition = int(p)
-		}
-	}
-	return minPartition
-}
-
-// Max returns the maximum partition contained by the partition set,
-// or -1 if the partition set is empty.
-func (ps PartitionSet) Max() int {
-	maxPartition := -1
-	for p := range ps {
-		if maxPartition < int(p) {
-			maxPartition = int(p)
-		}
-	}
-	return maxPartition
-}
-
-// Contains returns true if the partition set contains the given partition.
-func (ps PartitionSet) Contains(p uint32) bool {
-	_, found := ps[p]
+// Contains returns true if the shard set contains the given shard.
+func (ss ShardSet) Contains(p uint32) bool {
+	_, found := ss[p]
 	return found
 }
 
-// Add adds the partition to the set.
-func (ps PartitionSet) Add(p uint32) {
-	ps[p] = struct{}{}
+// Add adds the shard to the set.
+func (ss ShardSet) Add(p uint32) {
+	ss[p] = struct{}{}
 }
 
-// AddBetween adds partitions between the given min (inclusive) and max (exclusive).
-func (ps PartitionSet) AddBetween(minInclusive, maxExclusive uint32) {
+// AddBetween adds shards between the given min (inclusive) and max (exclusive).
+func (ss ShardSet) AddBetween(minInclusive, maxExclusive uint32) {
 	for i := minInclusive; i < maxExclusive; i++ {
-		ps.Add(i)
+		ss.Add(i)
 	}
 }
 
-// ParseRange parses a range of partitions and adds them to the set.
-func (ps PartitionSet) ParseRange(s string) error {
+// ParseRange parses a range of shards and adds them to the set.
+func (ss ShardSet) ParseRange(s string) error {
 	rangeMatches := rangeRegexp.FindStringSubmatch(s)
 	if len(rangeMatches) != 0 {
-		return ps.addRange(rangeMatches)
+		return ss.addRange(rangeMatches)
 	}
 
 	return fmt.Errorf("invalid range '%s'", s)
 }
 
-func (ps PartitionSet) addRange(matches []string) error {
+func (ss ShardSet) addRange(matches []string) error {
 	min, err := strconv.ParseInt(matches[1], 10, 32)
 	if err != nil {
 		return err
@@ -150,6 +130,6 @@ func (ps PartitionSet) addRange(matches []string) error {
 		return fmt.Errorf("invalid range: %d > %d", min, max)
 	}
 
-	ps.AddBetween(uint32(min), uint32(max)+1)
+	ss.AddBetween(uint32(min), uint32(max)+1)
 	return nil
 }

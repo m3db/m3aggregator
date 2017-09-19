@@ -23,7 +23,6 @@ package aggregator
 import (
 	"container/list"
 	"errors"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,10 +35,6 @@ import (
 	"github.com/m3db/m3x/log"
 
 	"github.com/uber-go/tally"
-)
-
-const (
-	defaultNumPartitions = 1024
 )
 
 var (
@@ -97,29 +92,30 @@ type flushBeforeFn func(beforeNanos int64, flushType flushType)
 type metricList struct {
 	sync.RWMutex
 
-	shard         uint32
-	opts          Options
-	nowFn         clock.NowFn
-	log           log.Logger
-	timeLock      *sync.RWMutex
-	maxFlushSize  int
-	partitionFn   PartitionFn
-	flushHandler  Handler
-	encoderPool   msgpack.BufferedEncoderPool
-	resolution    time.Duration
-	flushInterval time.Duration
-	flushMgr      FlushManager
+	shard               uint32
+	opts                Options
+	nowFn               clock.NowFn
+	log                 log.Logger
+	timeLock            *sync.RWMutex
+	maxFlushSize        int
+	numAggregatedShards int
+	aggregatedShardFn   AggregatedShardFn
+	flushHandler        Handler
+	encoderPool         msgpack.BufferedEncoderPool
+	resolution          time.Duration
+	flushInterval       time.Duration
+	flushMgr            FlushManager
 
-	closed              bool
-	aggregations        *list.List
-	lastFlushedNanos    int64
-	encodersByPartition []msgpack.AggregatedEncoder
-	toCollect           []*list.Element
-	encodeFn            encodeFn
-	flushBeforeFn       flushBeforeFn
-	consumeAggMetricFn  aggMetricFn
-	discardAggMetricFn  aggMetricFn
-	metrics             metricListMetrics
+	closed             bool
+	aggregations       *list.List
+	lastFlushedNanos   int64
+	encodersByShard    []msgpack.AggregatedEncoder
+	toCollect          []*list.Element
+	encodeFn           encodeFn
+	flushBeforeFn      flushBeforeFn
+	consumeAggMetricFn aggMetricFn
+	discardAggMetricFn aggMetricFn
+	metrics            metricListMetrics
 }
 
 func newMetricList(shard uint32, resolution time.Duration, opts Options) *metricList {
@@ -134,8 +130,8 @@ func newMetricList(shard uint32, resolution time.Duration, opts Options) *metric
 	scope := opts.InstrumentOptions().MetricsScope().SubScope("list").Tagged(
 		map[string]string{"resolution": resolution.String()},
 	)
+	numAggregatedShards := opts.NumAggregatedShards()
 	encoderPool := opts.BufferedEncoderPool()
-	partitionFnGen := opts.PartitionFnGen()
 	l := &metricList{
 		shard:               shard,
 		opts:                opts,
@@ -143,14 +139,15 @@ func newMetricList(shard uint32, resolution time.Duration, opts Options) *metric
 		log:                 opts.InstrumentOptions().Logger(),
 		timeLock:            opts.TimeLock(),
 		maxFlushSize:        opts.MaxFlushSize(),
-		partitionFn:         partitionFnGen(),
+		numAggregatedShards: opts.NumAggregatedShards(),
+		aggregatedShardFn:   opts.AggregatedShardFn(),
 		flushHandler:        opts.FlushHandler(),
 		encoderPool:         encoderPool,
 		resolution:          resolution,
 		flushInterval:       flushInterval,
 		flushMgr:            opts.FlushManager(),
 		aggregations:        list.New(),
-		encodersByPartition: make([]msgpack.AggregatedEncoder, defaultNumPartitions),
+		encodersByShard:     make([]msgpack.AggregatedEncoder, numAggregatedShards),
 		encodeFn:            encodeChunkedMetricWithStoragePolicy,
 		metrics:             newMetricListMetrics(scope),
 	}
@@ -297,7 +294,7 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 
 	// Flush remaining bytes in the buffer.
 	if flushType == consumeType {
-		for partition, encoder := range l.encodersByPartition {
+		for shard, encoder := range l.encodersByShard {
 			if encoder == nil {
 				continue
 			}
@@ -308,8 +305,8 @@ func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
 			newBufferedEncoder := l.encoderPool.Get()
 			newBufferedEncoder.Reset()
 			encoder.Reset(newBufferedEncoder)
-			if err := l.flushHandler.Handle(PartitionedBuffer{
-				Partition:        uint32(partition),
+			if err := l.flushHandler.Handle(ShardedBuffer{
+				Shard:            uint32(shard),
 				RefCountedBuffer: NewRefCountedBuffer(bufferedEncoder),
 			}); err != nil {
 				l.log.Errorf("flushing metrics error: %v", err)
@@ -347,8 +344,8 @@ func (l *metricList) consumeAggregatedMetric(
 		Data:   []byte(id),
 		Suffix: idSuffix,
 	}
-	partition := l.partitionFn(chunkedID)
-	encoder := l.encoderFor(partition)
+	aggregatedShard := l.aggregatedShardFn(chunkedID, l.numAggregatedShards)
+	encoder := l.encoderFor(aggregatedShard)
 	bufferedEncoder := encoder.Encoder()
 	buffer := bufferedEncoder.Buffer()
 	sizeBefore := buffer.Len()
@@ -382,8 +379,8 @@ func (l *metricList) consumeAggregatedMetric(
 	bufferedEncoder2.Buffer().Write(data[sizeBefore:sizeAfter])
 	encoder.Reset(bufferedEncoder2)
 	buffer.Truncate(sizeBefore)
-	if err := l.flushHandler.Handle(PartitionedBuffer{
-		Partition:        partition,
+	if err := l.flushHandler.Handle(ShardedBuffer{
+		Shard:            aggregatedShard,
 		RefCountedBuffer: NewRefCountedBuffer(bufferedEncoder),
 	}); err != nil {
 		l.log.Errorf("flushing metrics error: %v", err)
@@ -406,22 +403,15 @@ func (l *metricList) discardAggregatedMetric(
 	l.metrics.flushMetricDiscarded.Inc(1)
 }
 
-func (l *metricList) encoderFor(partition uint32) msgpack.AggregatedEncoder {
-	numPartitions := len(l.encodersByPartition)
-	if int(partition) >= numPartitions {
-		newSize := int(math.Max(float64(partition+1), float64(2*numPartitions)))
-		encodersByPartition := make([]msgpack.AggregatedEncoder, newSize)
-		copy(encodersByPartition, l.encodersByPartition)
-		l.encodersByPartition = encodersByPartition
-	}
-	encoder := l.encodersByPartition[partition]
+func (l *metricList) encoderFor(shard uint32) msgpack.AggregatedEncoder {
+	encoder := l.encodersByShard[shard]
 	if encoder != nil {
 		return encoder
 	}
 	bufferedEncoder := l.encoderPool.Get()
 	bufferedEncoder.Reset()
 	encoder = msgpack.NewAggregatedEncoder(bufferedEncoder)
-	l.encodersByPartition[partition] = encoder
+	l.encodersByShard[shard] = encoder
 	return encoder
 }
 
