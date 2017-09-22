@@ -18,45 +18,49 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package aggregator
+package sharding
 
 import (
-	"sync/atomic"
+	"sync"
+	"testing"
 
-	"github.com/m3db/m3metrics/protocol/msgpack"
+	"github.com/m3db/m3metrics/metric/id"
+
+	"github.com/spaolacci/murmur3"
+	"github.com/stretchr/testify/require"
 )
 
-// RefCountedBuffer is a refcounted buffer.
-type RefCountedBuffer struct {
-	n   int32
-	buf msgpack.Buffer
-}
+func TestMurmur32HashAggregatedShardFn(t *testing.T) {
+	hashType := Murmur32Hash
+	numShards := 1024
+	aggregatedShardFn, err := hashType.AggregatedShardFn()
+	require.NoError(t, err)
 
-// NewRefCountedBuffer creates a new refcounted buffer.
-func NewRefCountedBuffer(buffer msgpack.Buffer) *RefCountedBuffer {
-	return &RefCountedBuffer{n: 1, buf: buffer}
-}
-
-// Buffer returns the internal msgpack buffer.
-func (b *RefCountedBuffer) Buffer() msgpack.Buffer { return b.buf }
-
-// IncRef increments the refcount for the buffer.
-func (b *RefCountedBuffer) IncRef() {
-	if n := int(atomic.AddInt32(&b.n, 1)); n > 0 {
-		return
+	// Verify the aggregated shard function is thread-safe and the computed
+	// shards match expectation.
+	var wg sync.WaitGroup
+	numWorkers := 100
+	inputs := []id.ChunkedID{
+		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
+		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
+		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("baz")},
+		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
 	}
-	panic("invalid ref count")
-}
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-// DecRef decrements the refcount for the buffer.
-func (b *RefCountedBuffer) DecRef() {
-	if n := int(atomic.AddInt32(&b.n, -1)); n == 0 {
-		if b.buf != nil {
-			b.buf.Close()
-		}
-		return
-	} else if n > 0 {
-		return
+			for _, input := range inputs {
+				d := murmur3.New32()
+				d.Write(input.Prefix)
+				d.Write(input.Data)
+				d.Write(input.Suffix)
+				expected := d.Sum32() % uint32(numShards)
+				actual := aggregatedShardFn(input, numShards)
+				require.Equal(t, expected, actual)
+			}
+		}()
 	}
-	panic("invalid ref count")
+	wg.Wait()
 }

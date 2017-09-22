@@ -33,8 +33,6 @@ const (
 	blackholeType Type = "blackhole"
 	loggingType   Type = "logging"
 	forwardType   Type = "forward"
-	shardedType   Type = "sharded"
-	broadcastType Type = "broadcast"
 )
 
 var (
@@ -42,8 +40,6 @@ var (
 		blackholeType,
 		loggingType,
 		forwardType,
-		shardedType,
-		broadcastType,
 	}
 )
 

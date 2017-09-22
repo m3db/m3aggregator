@@ -27,31 +27,22 @@ import (
 	"os"
 	"runtime"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
 	"github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3aggregator/aggregator/handler"
+	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3cluster/client"
 	etcdclient "github.com/m3db/m3cluster/client/etcd"
 	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3cluster/services"
-	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
-	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/sync"
-
-	"github.com/spaolacci/murmur3"
-)
-
-const (
-	initialBufferSizeGrowthFactor = 2
-	initialChunkedIDSize          = 512
 )
 
 var (
@@ -135,8 +126,8 @@ type AggregatorConfiguration struct {
 	// Placement manager.
 	PlacementManager placementManagerConfiguration `yaml:"placementManager"`
 
-	// Sharding function type.
-	ShardFnType *hashFnType `yaml:"shardFnType"`
+	// Hash type used for sharding.
+	HashType *sharding.HashType `yaml:"hashType"`
 
 	// Amount of time we buffer writes before shard cutover.
 	BufferDurationBeforeShardCutover time.Duration `yaml:"bufferDurationBeforeShardCutover"`
@@ -159,17 +150,8 @@ type AggregatorConfiguration struct {
 	// Minimum flush interval across all resolutions.
 	MinFlushInterval time.Duration `yaml:"minFlushInterval"`
 
-	// Maximum flush size in bytes.
-	MaxFlushSize int `yaml:"maxFlushSize"`
-
-	// Total number of shards for aggregated metrics.
-	NumAggregatedShards int `yaml:"numAggregatedShards" validate:"nonzero"`
-
-	// Aggregated shard function type.
-	AggregatedShardFnType *hashFnType `yaml:"aggregatedShardFnType"`
-
 	// Flushing handler configuration.
-	Flush *handler.FlushHandlerConfiguration `yaml:"flush"`
+	Flush handler.FlushHandlerConfiguration `yaml:"flush"`
 
 	// EntryTTL determines how long an entry remains alive before it may be expired due to inactivity.
 	EntryTTL time.Duration `yaml:"entryTTL"`
@@ -197,9 +179,6 @@ type AggregatorConfiguration struct {
 
 	// Pool of entries.
 	EntryPool pool.ObjectPoolConfiguration `yaml:"entryPool"`
-
-	// Pool of buffered encoders.
-	BufferedEncoderPool pool.ObjectPoolConfiguration `yaml:"bufferedEncoderPool"`
 
 	// Pool of aggregation types.
 	AggregationTypesPool pool.ObjectPoolConfiguration `yaml:"aggregationTypesPool"`
@@ -277,11 +256,11 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	opts = opts.SetPlacementManager(placementManager)
 
 	// Set sharding function.
-	shardFnType := defaultHashFn
-	if c.ShardFnType != nil {
-		shardFnType = *c.ShardFnType
+	hashType := sharding.DefaultHash
+	if c.HashType != nil {
+		hashType = *c.HashType
 	}
-	shardFn, err := shardFnType.ShardFn()
+	shardFn, err := hashType.ShardFn()
 	if err != nil {
 		return nil, err
 	}
@@ -333,26 +312,12 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	}
 	opts = opts.SetFlushManager(flushManager)
 
-	// Set aggregated sharding function.
-	aggregatedShardFnType := defaultHashFn
-	if c.AggregatedShardFnType != nil {
-		aggregatedShardFnType = *c.AggregatedShardFnType
-	}
-	aggregatedShardFn, err := aggregatedShardFnType.AggregatedShardFn()
-	if err != nil {
-		return nil, err
-	}
-	opts = opts.SetNumAggregatedShards(c.NumAggregatedShards).SetAggregatedShardFn(aggregatedShardFn)
-
 	// Set flushing handler.
 	if c.MinFlushInterval != 0 {
 		opts = opts.SetMinFlushInterval(c.MinFlushInterval)
 	}
-	if c.MaxFlushSize != 0 {
-		opts = opts.SetMaxFlushSize(c.MaxFlushSize)
-	}
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("flush-handler"))
-	flushHandler, err := c.Flush.NewHandler(c.NumAggregatedShards, iOpts)
+	flushHandler, err := c.Flush.NewHandler(iOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -411,19 +376,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	entryPool := aggregator.NewEntryPool(entryPoolOpts)
 	opts = opts.SetEntryPool(entryPool)
 	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, opts) })
-
-	// Set buffered encoder pool.
-	// NB(xichen): we preallocate a bit over the maximum flush size as a safety measure
-	// because we might write past the max flush size and rewind it during flushing.
-	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("buffered-encoder-pool"))
-	bufferedEncoderPoolOpts := msgpack.NewBufferedEncoderPoolOptions().
-		SetObjectPoolOptions(c.BufferedEncoderPool.NewObjectPoolOptions(iOpts))
-	bufferedEncoderPool := msgpack.NewBufferedEncoderPool(bufferedEncoderPoolOpts)
-	opts = opts.SetBufferedEncoderPool(bufferedEncoderPool)
-	initialBufferSize := c.MaxFlushSize * initialBufferSizeGrowthFactor
-	bufferedEncoderPool.Init(func() msgpack.BufferedEncoder {
-		return msgpack.NewPooledBufferedEncoderSize(bufferedEncoderPool, initialBufferSize)
-	})
 
 	// Set aggregation types pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("aggregation-types-pool"))
@@ -548,73 +500,6 @@ func (c *kvClientConfiguration) NewKVClient(instrumentOpts instrument.Options) (
 		return nil, errNoKVClientConfiguration
 	}
 	return c.Etcd.NewClient(instrumentOpts)
-}
-
-type hashFnType string
-
-// List of supported hashing function types.
-const (
-	murmur32HashFn hashFnType = "murmur32"
-
-	defaultHashFn = murmur32HashFn
-)
-
-var (
-	validHashFnTypes = []hashFnType{
-		murmur32HashFn,
-	}
-)
-
-func (t *hashFnType) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var str string
-	if err := unmarshal(&str); err != nil {
-		return err
-	}
-	if str == "" {
-		*t = defaultHashFn
-		return nil
-	}
-	validTypes := make([]string, 0, len(validHashFnTypes))
-	for _, valid := range validHashFnTypes {
-		if str == string(valid) {
-			*t = valid
-			return nil
-		}
-		validTypes = append(validTypes, string(valid))
-	}
-	return fmt.Errorf("invalid hashing function type '%s' valid types are: %s",
-		str, strings.Join(validTypes, ", "))
-}
-
-func (t hashFnType) ShardFn() (aggregator.ShardFn, error) {
-	switch t {
-	case murmur32HashFn:
-		return func(id []byte, numShards int) uint32 {
-			return murmur3.Sum32(id) % uint32(numShards)
-		}, nil
-	default:
-		return nil, fmt.Errorf("unrecognized shard function type %v", t)
-	}
-}
-
-func (t hashFnType) AggregatedShardFn() (aggregator.AggregatedShardFn, error) {
-	switch t {
-	case murmur32HashFn:
-		// NB(xichen): The function only allocates when the id of the aggregated metric
-		// is more than initialChunkedIDSize (i.e., 256 bytes) in size and requires zero
-		// allocation otherwise. If this turns out to be still too CPU intensive due to
-		// byte copies, can rewrite it to compute murmur3 hashes with zero byte copies.
-		return func(chunkedID id.ChunkedID, numShards int) uint32 {
-			var b [initialChunkedIDSize]byte
-			buf := b[:0]
-			buf = append(buf, chunkedID.Prefix...)
-			buf = append(buf, chunkedID.Data...)
-			buf = append(buf, chunkedID.Suffix...)
-			return murmur3.Sum32(buf) % uint32(numShards)
-		}, nil
-	default:
-		return nil, fmt.Errorf("unrecognized aggregated shard function type %v", t)
-	}
 }
 
 type placementManagerConfiguration struct {

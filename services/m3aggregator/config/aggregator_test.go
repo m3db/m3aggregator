@@ -21,51 +21,12 @@
 package config
 
 import (
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/m3db/m3metrics/metric/id"
-
-	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
 )
-
-func TestHashFnTypeAggregatedShardFn(t *testing.T) {
-	hashFnType := murmur32HashFn
-	numShards := 1024
-	aggregatedShardFn, err := hashFnType.AggregatedShardFn()
-	require.NoError(t, err)
-
-	// Verify the aggregated shard function is thread-safe and the computed
-	// shards match expectation.
-	var wg sync.WaitGroup
-	numWorkers := 100
-	inputs := []id.ChunkedID{
-		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
-		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
-		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("baz")},
-		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
-	}
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			for _, input := range inputs {
-				d := murmur3.New32()
-				d.Write(input.Prefix)
-				d.Write(input.Data)
-				d.Write(input.Suffix)
-				expected := d.Sum32() % uint32(numShards)
-				actual := aggregatedShardFn(input, numShards)
-				require.Equal(t, expected, actual)
-			}
-		}()
-	}
-	wg.Wait()
-}
 
 func TestJitterBuckets(t *testing.T) {
 	config := `

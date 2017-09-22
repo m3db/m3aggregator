@@ -18,38 +18,49 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package aggregator
+package writer
 
 import (
-	"testing"
-
-	"github.com/m3db/m3metrics/protocol/msgpack"
-
-	"github.com/stretchr/testify/require"
+	"github.com/m3db/m3aggregator/aggregator"
+	"github.com/m3db/m3metrics/metric/aggregated"
+	"github.com/m3db/m3x/errors"
 )
 
-func TestRefCountedBufferNilBuffer(t *testing.T) {
-	b := NewRefCountedBuffer(nil)
-	require.Equal(t, int32(1), b.n)
-	require.NotPanics(t, func() { b.DecRef() })
-	require.Equal(t, int32(0), b.n)
+type multiWriter struct {
+	writers []aggregator.Writer
 }
 
-func TestRefCountedBufferNonNilBuffer(t *testing.T) {
-	numIter := 10
-	b := NewRefCountedBuffer(msgpack.NewBufferedEncoder())
-	for i := 0; i < numIter; i++ {
-		b.IncRef()
-	}
-	for i := 0; i < numIter; i++ {
-		b.DecRef()
-	}
-	require.NotPanics(t, func() { b.DecRef() })
-	require.Equal(t, int32(0), b.n)
+// NewMultiWriter creates a new mulwriter.
+func NewMultiWriter(writers []aggregator.Writer) aggregator.Writer {
+	return &multiWriter{writers: writers}
 }
 
-func TestRefCountInvalidRefCountPanics(t *testing.T) {
-	b := NewRefCountedBuffer(nil)
-	require.NotPanics(t, func() { b.DecRef() })
-	require.Panics(t, func() { b.DecRef() })
+func (w *multiWriter) Write(mp aggregated.ChunkedMetricWithStoragePolicy) error {
+	multiErr := errors.NewMultiError()
+	for _, writer := range w.writers {
+		if err := writer.Write(mp); err != nil {
+			multiErr = multiErr.Add(err)
+		}
+	}
+	return multiErr.FinalError()
+}
+
+func (w *multiWriter) Flush() error {
+	multiErr := errors.NewMultiError()
+	for _, writer := range w.writers {
+		if err := writer.Flush(); err != nil {
+			multiErr = multiErr.Add(err)
+		}
+	}
+	return multiErr.FinalError()
+}
+
+func (w *multiWriter) Close() error {
+	multiErr := errors.NewMultiError()
+	for _, writer := range w.writers {
+		if err := writer.Close(); err != nil {
+			multiErr = multiErr.Add(err)
+		}
+	}
+	return multiErr.FinalError()
 }

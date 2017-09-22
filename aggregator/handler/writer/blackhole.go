@@ -18,22 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package writer
 
 import (
 	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3aggregator/aggregator/handler/writer"
-
-	"github.com/uber-go/tally"
+	"github.com/m3db/m3metrics/metric/aggregated"
 )
 
-type blackholeHandler struct{}
+type blackholeWriter struct{}
 
-// NewBlackholeHandler creates a new blackhole handler.
-func NewBlackholeHandler() aggregator.Handler { return blackholeHandler{} }
+// NewBlackholeWriter creates a new blackhole writer.
+func NewBlackholeWriter() aggregator.Writer { return blackholeWriter{} }
 
-func (h blackholeHandler) NewWriter(tally.Scope) (aggregator.Writer, error) {
-	return writer.NewBlackholeWriter(), nil
-}
-
-func (h blackholeHandler) Close() {}
+func (w blackholeWriter) Write(mp aggregated.ChunkedMetricWithStoragePolicy) error { return nil }
+func (w blackholeWriter) Flush() error                                             { return nil }
+func (w blackholeWriter) Close() error                                             { return nil }

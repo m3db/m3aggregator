@@ -18,49 +18,38 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package common
 
 import (
-	"io"
+	"testing"
 
-	"github.com/m3db/m3aggregator/aggregator"
-	"github.com/m3db/m3metrics/metric/aggregated"
-	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/protocol/msgpack"
+
+	"github.com/stretchr/testify/require"
 )
 
-// HandleFunc handles an aggregated metric alongside the policy.
-type HandleFunc func(metric aggregated.Metric, policy policy.StoragePolicy) error
-
-type decodingHandler struct {
-	handle HandleFunc
+func TestRefCountedBufferNilBuffer(t *testing.T) {
+	b := NewRefCountedBuffer(nil)
+	require.Equal(t, int32(1), b.n)
+	require.NotPanics(t, func() { b.DecRef() })
+	require.Equal(t, int32(0), b.n)
 }
 
-// NewDecodingHandler creates a new decoding handler with a custom handle function.
-func NewDecodingHandler(handle HandleFunc) aggregator.Handler {
-	return decodingHandler{handle: handle}
-}
-
-func (h decodingHandler) Handle(buffer aggregator.ShardedBuffer) error {
-	defer buffer.DecRef()
-
-	iter := msgpack.NewAggregatedIterator(buffer.Buffer().Buffer(), msgpack.NewAggregatedIteratorOptions())
-	defer iter.Close()
-
-	for iter.Next() {
-		rawMetric, sp := iter.Value()
-		metric, err := rawMetric.Metric()
-		if err != nil {
-			return err
-		}
-		if err := h.handle(metric, sp); err != nil {
-			return err
-		}
+func TestRefCountedBufferNonNilBuffer(t *testing.T) {
+	numIter := 10
+	b := NewRefCountedBuffer(msgpack.NewBufferedEncoder())
+	for i := 0; i < numIter; i++ {
+		b.IncRef()
 	}
-	if err := iter.Err(); err != nil && err != io.EOF {
-		return err
+	for i := 0; i < numIter; i++ {
+		b.DecRef()
 	}
-	return nil
+	require.NotPanics(t, func() { b.DecRef() })
+	require.Equal(t, int32(0), b.n)
 }
 
-func (h decodingHandler) Close() {}
+func TestRefCountInvalidRefCountPanics(t *testing.T) {
+	b := NewRefCountedBuffer(nil)
+	require.NotPanics(t, func() { b.DecRef() })
+	require.Panics(t, func() { b.DecRef() })
+}

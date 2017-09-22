@@ -21,96 +21,110 @@
 package handler
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/m3db/m3aggregator/aggregator"
+	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
-
 	"github.com/uber-go/tally"
 )
 
-var (
-	errEmptyBackendServerShards = errors.New("empty backend server shards")
-)
-
-// BackendServerShard contains a backend server shard.
-type BackendServerShard struct {
-	// Name of this shard for logging and metrics.
-	Name string `yaml:"name"`
-
-	// Shard range.
-	Range sharding.ShardSet `yaml:"range" validate:"nonzero"`
-
-	// Servers owning the shard.
-	Servers []string `yaml:"servers" validate:"nonzero"`
+// SharderRouter contains a sharder id and a router.
+type SharderRouter struct {
+	sharding.SharderID
+	common.Router
 }
 
-type shardedHandlerMetrics struct {
-	shardNotAssigned tally.Counter
-}
-
-func newShardedHandlerMetrics(scope tally.Scope) shardedHandlerMetrics {
-	return shardedHandlerMetrics{
-		shardNotAssigned: scope.Counter("shard-not-assigned"),
-	}
+type sharderRouters struct {
+	SharderID sharding.SharderID
+	Routers   []common.Router
 }
 
 type shardedHandler struct {
-	handlers []aggregator.Handler
-	metrics  shardedHandlerMetrics
+	routersBySharderID []SharderRouter
+	writerOpts         writer.Options
 }
 
-// NewShardedHandler creates a new sharded handler.
-func NewShardedHandler(
-	shards []BackendServerShard,
-	totalShards int,
-	opts Options,
-) (aggregator.Handler, error) {
-	if len(shards) == 0 {
-		return nil, errEmptyBackendServerShards
-	}
+func newShardedHandler(srs []SharderRouter, writerOpts writer.Options) aggregator.Handler {
+	// Group routers by their sharder ids so that metrics are only encoded once
+	// for backends with the same sharding functions.
 	var (
-		// Divide overall queue size among all shards.
-		shardQueueSize = opts.QueueSize() / len(shards)
-		handlers       = make([]aggregator.Handler, totalShards)
-		instrumentOpts = opts.InstrumentOptions()
-		scope          = instrumentOpts.MetricsScope()
+		nonShardedRouters  = make([]common.Router, 0, len(srs))
+		shardedRoutersByID = make([]sharderRouters, 0, len(srs))
 	)
-	for _, shard := range shards {
-		handlerScope := scope.Tagged(map[string]string{
-			"shard-name": shard.Name,
+	for _, sr := range srs {
+		if sr.SharderID == sharding.NoShardingSharderID {
+			nonShardedRouters = append(nonShardedRouters, sr.Router)
+		} else {
+			found := false
+			for i := range shardedRoutersByID {
+				if shardedRoutersByID[i].SharderID == sr.SharderID {
+					shardedRoutersByID[i].Routers = append(shardedRoutersByID[i].Routers, sr.Router)
+					found = true
+					break
+				}
+			}
+			if !found {
+				shardedRoutersByID = append(shardedRoutersByID, sharderRouters{
+					SharderID: sr.SharderID,
+					Routers:   []common.Router{sr.Router},
+				})
+			}
+		}
+	}
+
+	// If there are both sharded routers and non-sharded routers, the non-sharded
+	// routers are merged into one of the sharded router groups so that metrics are
+	// only encoded once for both sharded and non-sharded routers, saving CPU cycles.
+	// This is okay because non-sharded routers simply forward data to backend queues
+	// regardless of which shard the data belongs to.
+	if len(shardedRoutersByID) == 0 {
+		shardedRoutersByID = append(shardedRoutersByID, sharderRouters{
+			SharderID: sharding.NoShardingSharderID,
+			Routers:   nonShardedRouters,
 		})
-		iOpts := instrumentOpts.SetMetricsScope(handlerScope)
-		handlerOpts := opts.SetInstrumentOptions(iOpts).SetQueueSize(shardQueueSize)
-		h, err := NewForwardHandler(shard.Servers, handlerOpts)
+	} else {
+		shardedRoutersByID[0].Routers = append(shardedRoutersByID[0].Routers, nonShardedRouters...)
+	}
+
+	routersBySharderID := make([]SharderRouter, 0, len(shardedRoutersByID))
+	for _, sr := range shardedRoutersByID {
+		var router common.Router
+		if len(sr.Routers) == 1 {
+			router = sr.Routers[0]
+		} else {
+			router = common.NewBroadcastRouter(sr.Routers)
+		}
+		routersBySharderID = append(routersBySharderID, SharderRouter{
+			SharderID: sr.SharderID,
+			Router:    router,
+		})
+	}
+	return &shardedHandler{
+		routersBySharderID: routersBySharderID,
+		writerOpts:         writerOpts,
+	}
+}
+
+func (h *shardedHandler) NewWriter(scope tally.Scope) (aggregator.Writer, error) {
+	instrumentOpts := h.writerOpts.InstrumentOptions()
+	writerOpts := h.writerOpts.SetInstrumentOptions(instrumentOpts.SetMetricsScope(scope))
+	if len(h.routersBySharderID) == 1 {
+		sr := h.routersBySharderID[0]
+		return writer.NewShardedWriter(sr.SharderID, sr.Router, writerOpts)
+	}
+	writers := make([]aggregator.Writer, 0, len(h.routersBySharderID))
+	for _, sr := range h.routersBySharderID {
+		w, err := writer.NewShardedWriter(sr.SharderID, sr.Router, writerOpts)
 		if err != nil {
 			return nil, err
 		}
-		for s := range shard.Range {
-			handlers[s] = h
-		}
+		writers = append(writers, w)
 	}
-	return &shardedHandler{
-		handlers: handlers,
-		metrics:  newShardedHandlerMetrics(scope),
-	}, nil
-}
-
-func (h *shardedHandler) Handle(buffer aggregator.ShardedBuffer) error {
-	if shard := int(buffer.Shard); shard < len(h.handlers) && h.handlers[shard] != nil {
-		return h.handlers[shard].Handle(buffer)
-	}
-	buffer.DecRef()
-	h.metrics.shardNotAssigned.Inc(1)
-	return fmt.Errorf("shard %d is not assigned to any of the backend servers", buffer.Shard)
+	return writer.NewMultiWriter(writers), nil
 }
 
 func (h *shardedHandler) Close() {
-	for _, handler := range h.handlers {
-		if handler == nil {
-			continue
-		}
-		handler.Close()
+	for _, sr := range h.routersBySharderID {
+		sr.Close()
 	}
 }

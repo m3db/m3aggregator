@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package handler
+package common
 
 import (
 	"time"
@@ -55,18 +55,18 @@ type ConnectionOptions interface {
 	// ConnectionWriteTimeout returns the connection write timeout.
 	ConnectionWriteTimeout() time.Duration
 
-	// SetReconnectRetrier sets the reconnect retrier.
-	SetReconnectRetrier(value retry.Retrier) ConnectionOptions
+	// SetReconnectRetryOptions sets the reconnect retry options.
+	SetReconnectRetryOptions(value retry.Options) ConnectionOptions
 
-	// ReconnectRetrier returns the reconnect retrier.
-	ReconnectRetrier() retry.Retrier
+	// ReconnectRetryOptions returns the reconnect retry options.
+	ReconnectRetryOptions() retry.Options
 }
 
 type connectionOptions struct {
 	connectTimeout         time.Duration
 	connectionKeepAlive    bool
 	connectionWriteTimeout time.Duration
-	reconnectRetrier       retry.Retrier
+	reconnectRetryOpts     retry.Options
 }
 
 // NewConnectionOptions create a new set of connection options.
@@ -75,7 +75,7 @@ func NewConnectionOptions() ConnectionOptions {
 		connectTimeout:         defaultConnectTimeout,
 		connectionKeepAlive:    defaultConnectionKeepAlive,
 		connectionWriteTimeout: defaultConnectionWriteTimeout,
-		reconnectRetrier:       retry.NewRetrier(retry.NewOptions().SetForever(true)),
+		reconnectRetryOpts:     retry.NewOptions(),
 	}
 }
 
@@ -109,53 +109,53 @@ func (o *connectionOptions) ConnectionWriteTimeout() time.Duration {
 	return o.connectionWriteTimeout
 }
 
-func (o *connectionOptions) SetReconnectRetrier(value retry.Retrier) ConnectionOptions {
+func (o *connectionOptions) SetReconnectRetryOptions(value retry.Options) ConnectionOptions {
 	opts := *o
-	opts.reconnectRetrier = value
+	opts.reconnectRetryOpts = value
 	return &opts
 }
 
-func (o *connectionOptions) ReconnectRetrier() retry.Retrier {
-	return o.reconnectRetrier
+func (o *connectionOptions) ReconnectRetryOptions() retry.Options {
+	return o.reconnectRetryOpts
 }
 
-// Options provide a set of options for the handler.
-type Options interface {
+// QueueOptions provide a set of queue options.
+type QueueOptions interface {
 	// SetClockOptions sets the clock options.
-	SetClockOptions(value clock.Options) Options
+	SetClockOptions(value clock.Options) QueueOptions
 
 	// ClockOptions returns the clock options.
 	ClockOptions() clock.Options
 
 	// SetInstrumentOptions sets the instrument options.
-	SetInstrumentOptions(value instrument.Options) Options
+	SetInstrumentOptions(value instrument.Options) QueueOptions
 
 	// InstrumentOptions returns the instrument options.
 	InstrumentOptions() instrument.Options
 
 	// SetConnectionOptions sets the connection options.
-	SetConnectionOptions(value ConnectionOptions) Options
+	SetConnectionOptions(value ConnectionOptions) QueueOptions
 
 	// ConnectionOptions returns the connection options.
 	ConnectionOptions() ConnectionOptions
 
 	// SetQueueSize sets the queue size.
-	SetQueueSize(value int) Options
+	SetQueueSize(value int) QueueOptions
 
 	// QueueSize returns the queue size.
 	QueueSize() int
 }
 
-type options struct {
+type queueOptions struct {
 	clockOpts      clock.Options
 	instrumentOpts instrument.Options
 	connectionOpts ConnectionOptions
 	queueSize      int
 }
 
-// NewOptions create a new set of handler options.
-func NewOptions() Options {
-	return &options{
+// NewQueueOptions create a new set of queue options.
+func NewQueueOptions() QueueOptions {
+	return &queueOptions{
 		clockOpts:      clock.NewOptions(),
 		instrumentOpts: instrument.NewOptions(),
 		connectionOpts: NewConnectionOptions(),
@@ -163,42 +163,42 @@ func NewOptions() Options {
 	}
 }
 
-func (o *options) SetClockOptions(value clock.Options) Options {
+func (o *queueOptions) SetClockOptions(value clock.Options) QueueOptions {
 	opts := *o
 	opts.clockOpts = value
 	return &opts
 }
 
-func (o *options) ClockOptions() clock.Options {
+func (o *queueOptions) ClockOptions() clock.Options {
 	return o.clockOpts
 }
 
-func (o *options) SetInstrumentOptions(value instrument.Options) Options {
+func (o *queueOptions) SetInstrumentOptions(value instrument.Options) QueueOptions {
 	opts := *o
 	opts.instrumentOpts = value
 	return &opts
 }
 
-func (o *options) InstrumentOptions() instrument.Options {
+func (o *queueOptions) InstrumentOptions() instrument.Options {
 	return o.instrumentOpts
 }
 
-func (o *options) SetConnectionOptions(value ConnectionOptions) Options {
+func (o *queueOptions) SetConnectionOptions(value ConnectionOptions) QueueOptions {
 	opts := *o
 	opts.connectionOpts = value
 	return &opts
 }
 
-func (o *options) ConnectionOptions() ConnectionOptions {
+func (o *queueOptions) ConnectionOptions() ConnectionOptions {
 	return o.connectionOpts
 }
 
-func (o *options) SetQueueSize(value int) Options {
+func (o *queueOptions) SetQueueSize(value int) QueueOptions {
 	opts := *o
 	opts.queueSize = value
 	return &opts
 }
 
-func (o *options) QueueSize() int {
+func (o *queueOptions) QueueSize() int {
 	return o.queueSize
 }

@@ -25,19 +25,14 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
-	"github.com/m3db/m3metrics/metric/id"
+	"github.com/m3db/m3aggregator/sharding"
+	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/policy"
-	"github.com/m3db/m3metrics/protocol/msgpack"
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
+	"github.com/uber-go/tally"
 )
-
-// ShardFn maps a id to an aggregator shard given the total number of aggregator shards.
-type ShardFn func(id []byte, numShards int) uint32
-
-// AggregatedShardFn maps a chunked id of an aggregated metric to a shard.
-type AggregatedShardFn func(chunkedID id.ChunkedID, numShards int) uint32
 
 // CounterElemAlloc allocates a new counter element
 type CounterElemAlloc func() *CounterElem
@@ -102,22 +97,25 @@ type EntryPool interface {
 // QuantileSuffixFn returns the byte-slice suffix for a quantile value
 type QuantileSuffixFn func(quantile float64) []byte
 
-// ShardedBuffer is a ref-counted buffer for a given Shard.
-type ShardedBuffer struct {
-	*RefCountedBuffer
-
-	Shard uint32
-}
-
-// Handler handles encoded streams containing aggregated metrics alongside their policies.
+// Handler handles aggregated metrics alongside their policies.
 type Handler interface {
-	// Handle processes aggregated metrics and policies encoded in the buffer for
-	// a given backend shard. The handler is responsible for decrementing the refcount
-	// when it's done with the buffer.
-	Handle(buffer ShardedBuffer) error
+	// NewWriter creates a new writer for writing aggregated metrics and policies.
+	NewWriter(scope tally.Scope) (Writer, error)
 
 	// Close closes the handler.
 	Close()
+}
+
+// Writer writes aggregated metrics alongside their policies.
+type Writer interface {
+	// Write writes an aggregated metric alongside its storage policy.
+	Write(mp aggregated.ChunkedMetricWithStoragePolicy) error
+
+	// Flush flushes data buffered in the writer to backend.
+	Flush() error
+
+	// Close closes the writer.
+	Close() error
 }
 
 // Options provide a set of base and derived options for the aggregator
@@ -257,10 +255,10 @@ type Options interface {
 	PlacementManager() PlacementManager
 
 	// SetShardFn sets the sharding function.
-	SetShardFn(value ShardFn) Options
+	SetShardFn(value sharding.ShardFn) Options
 
 	// ShardFn returns the sharding function.
-	ShardFn() ShardFn
+	ShardFn() sharding.ShardFn
 
 	// SetBufferDurationBeforeShardCutover sets the duration for buffering writes before shard cutover.
 	SetBufferDurationBeforeShardCutover(value time.Duration) Options
@@ -297,26 +295,6 @@ type Options interface {
 
 	// MinFlushInterval returns the minimum flush interval
 	MinFlushInterval() time.Duration
-
-	// SetMaxFlushSize sets the maximum buffer size to trigger a flush
-	SetMaxFlushSize(value int) Options
-
-	// MaxFlushSize returns the maximum buffer size to trigger a flush
-	MaxFlushSize() int
-
-	// SetNumAggregatedShards sets the total number of shards for aggregated metrics.
-	SetNumAggregatedShards(value int) Options
-
-	// NumAggregatedShards returns the total number of shards for aggregated metrics.
-	NumAggregatedShards() int
-
-	// SetAggregatedShardFn sets the sharding function to compute the shard
-	// of an aggregated metric.
-	SetAggregatedShardFn(value AggregatedShardFn) Options
-
-	// AggregatedShardFn returns the sharding function to compute the shard
-	// of an aggregated metric.
-	AggregatedShardFn() AggregatedShardFn
 
 	// SetFlushHandler sets the handler that flushes buffered encoders
 	SetFlushHandler(value Handler) Options
@@ -383,12 +361,6 @@ type Options interface {
 
 	// GaugeElemPool returns the gauge element pool.
 	GaugeElemPool() GaugeElemPool
-
-	// SetBufferedEncoderPool sets the buffered encoder pool.
-	SetBufferedEncoderPool(value msgpack.BufferedEncoderPool) Options
-
-	// BufferedEncoderPool returns the buffered encoder pool.
-	BufferedEncoderPool() msgpack.BufferedEncoderPool
 
 	// SetAggregationTypesPool sets the aggregation types pool.
 	SetAggregationTypesPool(pool policy.AggregationTypesPool) Options
