@@ -76,7 +76,7 @@ func (t *HashType) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 		validTypes = append(validTypes, string(valid))
 	}
-	return fmt.Errorf("invalid hashing type '%s' valid types are: %s",
+	return fmt.Errorf("invalid hash type '%s' valid types are: %s",
 		str, strings.Join(validTypes, ", "))
 }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3metrics/metric/aggregated"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/protocol/msgpack"
 	xerrors "github.com/m3db/m3x/errors"
 
@@ -55,6 +56,8 @@ func newShardedWriterMetrics(scope tally.Scope) shardedWriterMetrics {
 	}
 }
 
+type shardFn func(chunkedID id.ChunkedID) uint32
+
 // shardedWriter encodes data in a shard-aware fashion and routes them to the backend.
 // shardedWriter is not thread safe.
 type shardedWriter struct {
@@ -67,6 +70,7 @@ type shardedWriter struct {
 	closed          bool
 	encodersByShard []msgpack.AggregatedEncoder
 	metrics         shardedWriterMetrics
+	shardFn         shardFn
 }
 
 // NewShardedWriter creates a new sharded writer.
@@ -81,21 +85,23 @@ func NewShardedWriter(
 	}
 	numShards := sharderID.NumShards()
 	instrumentOpts := opts.InstrumentOptions()
-	return &shardedWriter{
+	w := &shardedWriter{
 		AggregatedSharder:   sharder,
 		Router:              router,
 		maxBufferSize:       opts.MaxBufferSize(),
 		bufferedEncoderPool: opts.BufferedEncoderPool(),
 		encodersByShard:     make([]msgpack.AggregatedEncoder, numShards),
 		metrics:             newShardedWriterMetrics(instrumentOpts.MetricsScope()),
-	}, nil
+	}
+	w.shardFn = w.Shard
+	return w, nil
 }
 
 func (w *shardedWriter) Write(mp aggregated.ChunkedMetricWithStoragePolicy) error {
 	if w.closed {
 		return errWriterClosed
 	}
-	shard := w.Shard(mp.ChunkedID)
+	shard := w.shardFn(mp.ChunkedID)
 	encoder := w.encodersByShard[shard]
 	if encoder == nil {
 		bufferedEncoder := w.bufferedEncoderPool.Get()
@@ -168,10 +174,12 @@ func (w *shardedWriter) encode(
 	// the old buffer.
 	bufferedEncoder2 := w.bufferedEncoderPool.Get()
 	bufferedEncoder2.Reset()
-	data := bufferedEncoder.Bytes()
-	bufferedEncoder2.Buffer().Write(data[sizeBefore:sizeAfter])
+	if sizeBefore > 0 {
+		data := bufferedEncoder.Bytes()
+		bufferedEncoder2.Buffer().Write(data[sizeBefore:sizeAfter])
+		buffer.Truncate(sizeBefore)
+	}
 	encoder.Reset(bufferedEncoder2)
-	buffer.Truncate(sizeBefore)
 	if err := w.Route(shard, common.NewRefCountedBuffer(bufferedEncoder)); err != nil {
 		w.metrics.routeErrors.Inc(1)
 		return err

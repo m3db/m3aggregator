@@ -28,7 +28,51 @@ import (
 
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/require"
+	yaml "gopkg.in/yaml.v2"
 )
+
+func TestHashTypeUnmarshalYAML(t *testing.T) {
+	inputs := []struct {
+		str      string
+		expected HashType
+	}{
+		{str: "murmur32", expected: Murmur32Hash},
+	}
+	for _, input := range inputs {
+		var hashType HashType
+		require.NoError(t, yaml.Unmarshal([]byte(input.str), &hashType))
+		require.Equal(t, input.expected, hashType)
+	}
+}
+
+func TestHashTypeUnmarshalYAMLErrors(t *testing.T) {
+	inputs := []string{
+		"huh",
+		"zero",
+	}
+	for _, input := range inputs {
+		var hashType HashType
+		err := yaml.Unmarshal([]byte(input), &hashType)
+		require.Error(t, err)
+		require.Equal(t, "invalid hash type '"+input+"' valid types are: murmur32", err.Error())
+	}
+}
+
+func TestMurmur32HashShardFn(t *testing.T) {
+	hashType := Murmur32Hash
+	numShards := 1024
+	shardFn, err := hashType.ShardFn()
+	require.NoError(t, err)
+
+	inputs := [][]byte{
+		[]byte("foo"),
+		[]byte("bar"),
+		[]byte("baz"),
+	}
+	for _, input := range inputs {
+		require.Equal(t, murmur3.Sum32(input)%uint32(numShards), shardFn(input, numShards))
+	}
+}
 
 func TestMurmur32HashAggregatedShardFn(t *testing.T) {
 	hashType := Murmur32Hash
@@ -63,4 +107,21 @@ func TestMurmur32HashAggregatedShardFn(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestZeroHashAggregatedShardFn(t *testing.T) {
+	hashType := zeroHash
+	numShards := 1024
+	fn, err := hashType.AggregatedShardFn()
+	require.NoError(t, err)
+
+	inputs := []id.ChunkedID{
+		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
+		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
+		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("baz")},
+		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
+	}
+	for _, input := range inputs {
+		require.Equal(t, uint32(0), fn(input, numShards))
+	}
 }

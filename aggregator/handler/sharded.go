@@ -25,6 +25,7 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
+
 	"github.com/uber-go/tally"
 )
 

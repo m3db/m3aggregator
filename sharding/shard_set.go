@@ -112,6 +112,25 @@ func (ss ShardSet) ParseRange(s string) error {
 	return fmt.Errorf("invalid range '%s'", s)
 }
 
+// ParseShardSet parses a shard set from the input string.
+func ParseShardSet(s string) (ShardSet, error) {
+	ss := make(ShardSet, defaultNumShards)
+	if err := ss.ParseRange(s); err != nil {
+		return nil, err
+	}
+	return ss, nil
+}
+
+// MustParseShardSet parses a shard set from the input string, and panics
+// if parsing is unsuccessful.
+func MustParseShardSet(s string) ShardSet {
+	ss, err := ParseShardSet(s)
+	if err == nil {
+		return ss
+	}
+	panic(fmt.Errorf("unable to parse shard set from %s: %v", s, err))
+}
+
 func (ss ShardSet) addRange(matches []string) error {
 	min, err := strconv.ParseInt(matches[1], 10, 32)
 	if err != nil {

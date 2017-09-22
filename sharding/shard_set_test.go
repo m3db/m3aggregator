@@ -27,7 +27,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-func TestParseShardSetErrors(t *testing.T) {
+func TestShardSetParseShardSetErrors(t *testing.T) {
 	tests := []struct {
 		yaml        string
 		expectedErr string
@@ -45,7 +45,7 @@ func TestParseShardSetErrors(t *testing.T) {
 	}
 }
 
-func TestParseShardSet(t *testing.T) {
+func TestShardSetParseShardSet(t *testing.T) {
 	tests := []struct {
 		yaml     string
 		expected []uint32
@@ -68,15 +68,75 @@ func TestParseShardSet(t *testing.T) {
 
 		err := yaml.Unmarshal([]byte(test.yaml), &cfg)
 		require.NoError(t, err, "received error for test %d", i)
+		validateShardSet(t, test.expected, cfg.Shards)
+	}
+}
 
-		expectedSet := make(ShardSet)
-		for _, p := range test.expected {
-			expectedSet.Add(p)
-		}
+func TestParseShardSet(t *testing.T) {
+	tests := []struct {
+		str      string
+		expected []uint32
+	}{
+		{str: `76`, expected: []uint32{76}},
+		{str: `3..8`, expected: []uint32{3, 4, 5, 6, 7, 8}},
+		{str: `3..3`, expected: []uint32{3}},
+	}
 
-		require.Equal(t, expectedSet, cfg.Shards, "invalid results for test %d", i)
-		for _, shard := range test.expected {
-			require.True(t, cfg.Shards.Contains(shard), "%v does not contain %d", cfg.Shards, shard)
-		}
+	for _, test := range tests {
+		parsed, err := ParseShardSet(test.str)
+		require.NoError(t, err)
+		validateShardSet(t, test.expected, parsed)
+	}
+}
+
+func TestParseShardSetErrors(t *testing.T) {
+	tests := []string{
+		`huh`,
+		`76..`,
+		`2..1`,
+	}
+
+	for _, test := range tests {
+		_, err := ParseShardSet(test)
+		require.Error(t, err)
+	}
+}
+
+func TestMustParseShardSet(t *testing.T) {
+	tests := []struct {
+		str      string
+		expected []uint32
+	}{
+		{str: `76`, expected: []uint32{76}},
+		{str: `3..8`, expected: []uint32{3, 4, 5, 6, 7, 8}},
+		{str: `3..3`, expected: []uint32{3}},
+	}
+
+	for _, test := range tests {
+		parsed := MustParseShardSet(test.str)
+		validateShardSet(t, test.expected, parsed)
+	}
+}
+
+func TestMustParseShardSetPanics(t *testing.T) {
+	tests := []string{
+		`huh`,
+		`76..`,
+		`2..1`,
+	}
+
+	for _, test := range tests {
+		require.Panics(t, func() { MustParseShardSet(test) })
+	}
+}
+
+func validateShardSet(t *testing.T, expectedShards []uint32, actual ShardSet) {
+	expectedSet := make(ShardSet)
+	for _, s := range expectedShards {
+		expectedSet.Add(s)
+	}
+	require.Equal(t, expectedSet, actual)
+	for _, shard := range expectedShards {
+		require.True(t, actual.Contains(shard))
 	}
 }

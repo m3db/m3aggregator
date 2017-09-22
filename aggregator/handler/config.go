@@ -290,8 +290,8 @@ func (c *shardedConfiguration) NewSharderRouter(
 
 type backendServerShard struct {
 	Name    string            `yaml:"name"`
-	Range   sharding.ShardSet `validate:"nonzero"`
-	Servers []string          `validate:"nonzero"`
+	Range   sharding.ShardSet `yaml:"range" validate:"nonzero"`
+	Servers []string          `yaml:"servers" validate:"nonzero"`
 }
 
 func (s *backendServerShard) NewRangedQueue(
