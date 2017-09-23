@@ -72,7 +72,7 @@ func TestQueueForwardToConnNoConnectionClosed(t *testing.T) {
 	opts := testQueueOptions().SetQueueSize(3)
 	q, err := newQueue([]string{testFakeServerAddr}, opts)
 	require.NoError(t, err)
-	// Queue up a nil buffer and close the q.
+	// Queue up a nil buffer and close the queue.
 	q.bufCh <- nil
 	q.Close()
 }
@@ -224,11 +224,11 @@ func TestQueueClose(t *testing.T) {
 	q, err := newQueue([]string{testFakeServerAddr}, testQueueOptions())
 	require.NoError(t, err)
 
-	// Close the q sets the flag.
+	// Closing the queue sets the flag.
 	q.Close()
 	require.True(t, q.closed)
 
-	// Close the q a second time is a no op.
+	// Closing the queue a second time is a no op.
 	q.Close()
 	require.True(t, q.closed)
 }

@@ -228,8 +228,8 @@ type shardedConfiguration struct {
 	// Total number of shards.
 	TotalShards int `yaml:"totalShards" validate:"nonzero"`
 
-	// Backend server shards.
-	Shards []backendServerShard `yaml:"shards" validate:"nonzero"`
+	// Backend server shard sets.
+	Shards []backendServerShardSet `yaml:"shards" validate:"nonzero"`
 }
 
 func (c *shardedConfiguration) Validate() error {
@@ -239,8 +239,8 @@ func (c *shardedConfiguration) Validate() error {
 	)
 	for _, shards := range c.Shards {
 		// Make sure we have a deterministic ordering.
-		sortedShards := make([]int, 0, len(shards.Range))
-		for shard := range shards.Range {
+		sortedShards := make([]int, 0, len(shards.ShardSet))
+		for shard := range shards.ShardSet {
 			sortedShards = append(sortedShards, int(shard))
 		}
 		sort.Ints(sortedShards)
@@ -276,39 +276,39 @@ func (c *shardedConfiguration) NewSharderRouter(
 	shardQueueSize := queueOpts.QueueSize() / len(c.Shards)
 	shardQueueOpts := queueOpts.SetQueueSize(shardQueueSize)
 	sharderID := sharding.NewSharderID(c.HashType, c.TotalShards)
-	rangedQueues := make([]common.RangedQueue, 0, len(c.Shards))
+	shardedQueues := make([]common.ShardedQueue, 0, len(c.Shards))
 	for _, shard := range c.Shards {
-		rq, err := shard.NewRangedQueue(shardQueueOpts)
+		sq, err := shard.NewShardedQueue(shardQueueOpts)
 		if err != nil {
 			return SharderRouter{}, err
 		}
-		rangedQueues = append(rangedQueues, rq)
+		shardedQueues = append(shardedQueues, sq)
 	}
-	router := common.NewShardedRouter(rangedQueues, c.TotalShards, routerScope)
+	router := common.NewShardedRouter(shardedQueues, c.TotalShards, routerScope)
 	return SharderRouter{SharderID: sharderID, Router: router}, nil
 }
 
-type backendServerShard struct {
-	Name    string            `yaml:"name"`
-	Range   sharding.ShardSet `yaml:"range" validate:"nonzero"`
-	Servers []string          `yaml:"servers" validate:"nonzero"`
+type backendServerShardSet struct {
+	Name     string            `yaml:"name"`
+	ShardSet sharding.ShardSet `yaml:"shardSet" validate:"nonzero"`
+	Servers  []string          `yaml:"servers" validate:"nonzero"`
 }
 
-func (s *backendServerShard) NewRangedQueue(
+func (s *backendServerShardSet) NewShardedQueue(
 	queueOpts common.QueueOptions,
-) (common.RangedQueue, error) {
+) (common.ShardedQueue, error) {
 	instrumentOpts := queueOpts.InstrumentOptions()
 	connectionOpts := queueOpts.ConnectionOptions()
-	queueScope := instrumentOpts.MetricsScope().Tagged(map[string]string{"shard": s.Name})
+	queueScope := instrumentOpts.MetricsScope().Tagged(map[string]string{"shard-set": s.Name})
 	reconnectRetryOpts := connectionOpts.ReconnectRetryOptions().SetMetricsScope(queueScope)
 	queueOpts = queueOpts.
 		SetInstrumentOptions(instrumentOpts.SetMetricsScope(queueScope)).
 		SetConnectionOptions(connectionOpts.SetReconnectRetryOptions(reconnectRetryOpts))
 	queue, err := common.NewQueue(s.Servers, queueOpts)
 	if err != nil {
-		return common.RangedQueue{}, err
+		return common.ShardedQueue{}, err
 	}
-	return common.RangedQueue{Range: s.Range, Queue: queue}, nil
+	return common.ShardedQueue{ShardSet: s.ShardSet, Queue: queue}, nil
 }
 
 type connectionConfiguration struct {

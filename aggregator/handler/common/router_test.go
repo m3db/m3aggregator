@@ -32,15 +32,15 @@ import (
 
 func TestShardedRouterRoute(t *testing.T) {
 	var (
-		enqueued     [3][]*RefCountedBuffer
-		rangedQueues []RangedQueue
-		totalShards  = 1024
+		enqueued      [3][]*RefCountedBuffer
+		shardedQueues []ShardedQueue
+		totalShards   = 1024
 	)
 	ranges := []string{"10..30", "60..80", "95"}
 	for i, rng := range ranges {
 		i := i
-		rq := RangedQueue{
-			Range: sharding.MustParseShardSet(rng),
+		sq := ShardedQueue{
+			ShardSet: sharding.MustParseShardSet(rng),
 			Queue: &mockQueue{
 				enqueueFn: func(b *RefCountedBuffer) error {
 					enqueued[i] = append(enqueued[i], b)
@@ -48,9 +48,9 @@ func TestShardedRouterRoute(t *testing.T) {
 				},
 			},
 		}
-		rangedQueues = append(rangedQueues, rq)
+		shardedQueues = append(shardedQueues, sq)
 	}
-	router := NewShardedRouter(rangedQueues, totalShards, tally.NoopScope)
+	router := NewShardedRouter(shardedQueues, totalShards, tally.NoopScope)
 
 	inputs := []struct {
 		shard uint32
@@ -75,14 +75,14 @@ func TestShardedRouterRoute(t *testing.T) {
 
 func TestShardedRouterRouteErrors(t *testing.T) {
 	var (
-		enqueued     [3][]*RefCountedBuffer
-		rangedQueues []RangedQueue
-		totalShards  = 1024
+		enqueued      [3][]*RefCountedBuffer
+		shardedQueues []ShardedQueue
+		totalShards   = 1024
 	)
 	ranges := []string{"10..30", "60..80", "95"}
 	for i, rng := range ranges {
-		rq := RangedQueue{
-			Range: sharding.MustParseShardSet(rng),
+		sq := ShardedQueue{
+			ShardSet: sharding.MustParseShardSet(rng),
 			Queue: &mockQueue{
 				enqueueFn: func(b *RefCountedBuffer) error {
 					enqueued[i] = append(enqueued[i], b)
@@ -90,9 +90,9 @@ func TestShardedRouterRouteErrors(t *testing.T) {
 				},
 			},
 		}
-		rangedQueues = append(rangedQueues, rq)
+		shardedQueues = append(shardedQueues, sq)
 	}
-	router := NewShardedRouter(rangedQueues, totalShards, tally.NoopScope)
+	router := NewShardedRouter(shardedQueues, totalShards, tally.NoopScope)
 
 	inputs := []struct {
 		shard uint32

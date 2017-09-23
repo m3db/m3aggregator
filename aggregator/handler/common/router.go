@@ -68,22 +68,21 @@ type shardedRouter struct {
 	metrics shardedRouterMetrics
 }
 
-// RangedQueue is a backend queue responsible for a range of shards.
-type RangedQueue struct {
+// ShardedQueue is a backend queue responsible for a set of shards.
+type ShardedQueue struct {
+	sharding.ShardSet
 	Queue
-
-	Range sharding.ShardSet
 }
 
 // NewShardedRouter creates a sharded router.
 func NewShardedRouter(
-	rangedQueues []RangedQueue,
+	shardedQueues []ShardedQueue,
 	totalShards int,
 	scope tally.Scope,
 ) Router {
 	queues := make([]Queue, totalShards)
-	for _, q := range rangedQueues {
-		for shard := range q.Range {
+	for _, q := range shardedQueues {
+		for shard := range q.ShardSet {
 			queues[shard] = q.Queue
 		}
 	}

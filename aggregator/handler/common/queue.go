@@ -245,8 +245,8 @@ func (q *queue) forwardToConn(addr string, conn *net.TCPConn) {
 				atomic.AddInt32(&q.numOpenConnections, -1)
 				return
 			}
-			_, writeErr := q.writeToConnFn(conn, buf.Buffer().Bytes())
-			if writeErr == nil {
+			_, err := q.writeToConnFn(conn, buf.Buffer().Bytes())
+			if err == nil {
 				q.metrics.writeSuccesses.Inc(1)
 				buf.DecRef()
 				continue
@@ -254,15 +254,15 @@ func (q *queue) forwardToConn(addr string, conn *net.TCPConn) {
 			q.metrics.writeErrors.Inc(1)
 			q.log.WithFields(
 				log.NewField("address", addr),
-				log.NewErrField(writeErr),
+				log.NewErrField(err),
 			).Error("error writing to server")
 
 			// NB(xichen): the buffer contains the oldest flushed data in queue
 			// so it's preferrable to drop it in case the queue is full.
-			if enqueueErr := q.enqueue(buf, dropCurrent); enqueueErr != nil {
+			if err := q.enqueue(buf, dropCurrent); err != nil {
 				q.log.WithFields(
 					log.NewField("address", addr),
-					log.NewErrField(enqueueErr),
+					log.NewErrField(err),
 				).Error("error enqueuing the buffer")
 			}
 
