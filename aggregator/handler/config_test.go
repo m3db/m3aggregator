@@ -42,12 +42,12 @@ sharded:
   totalShards: 128
   shards:
     - name: shard0
-      range: 0..63
+      shardSet: 0..63
       servers:
         - server1
         - server2
     - name: shard1
-      range: 64..127
+      shardSet: 64..127
       servers:
         - server3
         - server4
@@ -69,12 +69,12 @@ sharded:
   totalShards: 128
   shards:
     - name: shard0
-      range: 0..63
+      shardSet: 0..63
       servers:
         - server1
         - server2
     - name: shard1
-      range: 64..127
+      shardSet: 64..127
       servers:
         - server3
         - server4
@@ -96,12 +96,12 @@ sharded:
   totalShards: 128
   shards:
     - name: shard0
-      range: 0..63
+      shardSet: 0..63
       servers:
         - server1
         - server2
     - name: shard1
-      range: 63..127
+      shardSet: 63..127
       servers:
         - server3
         - server4
@@ -114,12 +114,12 @@ sharded:
   totalShards: 128
   shards:
     - name: shard0
-      range: 0..63
+      shardSet: 0..63
       servers:
         - server1
         - server2
     - name: shard1
-      range: 64..128
+      shardSet: 64..128
       servers:
         - server3
         - server4
@@ -132,12 +132,12 @@ sharded:
   totalShards: 128
   shards:
     - name: shard0
-      range: 0..63
+      shardSet: 0..63
       servers:
         - server1
         - server2
     - name: shard1
-      range: 64..127
+      shardSet: 64..127
       servers:
         - server1
         - server4
@@ -150,7 +150,7 @@ sharded:
   totalShards: 128
   shards:
     - name: shard0
-      range: 0..63
+      shardSet: 0..63
       servers:
         - server1
         - server2
