@@ -89,7 +89,7 @@ func (c FlushHandlerConfiguration) NewHandler(
 			return nil, errNoWriterConfiguration
 		}
 		writerOpts := c.Writer.NewWriterOptions(instrumentOpts)
-		shardedHandler := newShardedHandler(sharderRouters, writerOpts)
+		shardedHandler := NewShardedHandler(sharderRouters, writerOpts)
 		handlers = append(handlers, shardedHandler)
 	}
 	if len(handlers) == 1 {

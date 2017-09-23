@@ -45,7 +45,8 @@ type shardedHandler struct {
 	writerOpts         writer.Options
 }
 
-func newShardedHandler(srs []SharderRouter, writerOpts writer.Options) aggregator.Handler {
+// NewShardedHandler creates a new sharded handler.
+func NewShardedHandler(srs []SharderRouter, writerOpts writer.Options) aggregator.Handler {
 	// Group routers by their sharder ids so that metrics are only encoded once
 	// for backends with the same sharding functions.
 	var (

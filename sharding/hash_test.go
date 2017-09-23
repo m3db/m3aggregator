@@ -26,7 +26,6 @@ import (
 
 	"github.com/m3db/m3metrics/metric/id"
 
-	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
 )
@@ -64,13 +63,16 @@ func TestMurmur32HashShardFn(t *testing.T) {
 	shardFn, err := hashType.ShardFn()
 	require.NoError(t, err)
 
-	inputs := [][]byte{
-		[]byte("foo"),
-		[]byte("bar"),
-		[]byte("baz"),
+	inputs := []struct {
+		data     []byte
+		expected uint32
+	}{
+		{data: []byte("foo"), expected: 32},
+		{data: []byte("bar"), expected: 397},
+		{data: []byte("baz"), expected: 234},
 	}
 	for _, input := range inputs {
-		require.Equal(t, murmur3.Sum32(input)%uint32(numShards), shardFn(input, numShards))
+		require.Equal(t, input.expected, shardFn(input.data, numShards))
 	}
 }
 
@@ -84,11 +86,26 @@ func TestMurmur32HashAggregatedShardFn(t *testing.T) {
 	// shards match expectation.
 	var wg sync.WaitGroup
 	numWorkers := 100
-	inputs := []id.ChunkedID{
-		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
-		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
-		{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("baz")},
-		{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
+	inputs := []struct {
+		data     id.ChunkedID
+		expected uint32
+	}{
+		{
+			data:     id.ChunkedID{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("")},
+			expected: 397,
+		},
+		{
+			data:     id.ChunkedID{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("")},
+			expected: 189,
+		},
+		{
+			data:     id.ChunkedID{Prefix: []byte(""), Data: []byte("bar"), Suffix: []byte("baz")},
+			expected: 350,
+		},
+		{
+			data:     id.ChunkedID{Prefix: []byte("foo"), Data: []byte("bar"), Suffix: []byte("baz")},
+			expected: 950,
+		},
 	}
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -96,13 +113,7 @@ func TestMurmur32HashAggregatedShardFn(t *testing.T) {
 			defer wg.Done()
 
 			for _, input := range inputs {
-				d := murmur3.New32()
-				d.Write(input.Prefix)
-				d.Write(input.Data)
-				d.Write(input.Suffix)
-				expected := d.Sum32() % uint32(numShards)
-				actual := aggregatedShardFn(input, numShards)
-				require.Equal(t, expected, actual)
+				require.Equal(t, input.expected, aggregatedShardFn(input.data, numShards))
 			}
 		}()
 	}

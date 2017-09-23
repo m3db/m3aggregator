@@ -30,7 +30,7 @@ type multiWriter struct {
 	writers []aggregator.Writer
 }
 
-// NewMultiWriter creates a new mulwriter.
+// NewMultiWriter creates a new multi-writer.
 func NewMultiWriter(writers []aggregator.Writer) aggregator.Writer {
 	return &multiWriter{writers: writers}
 }

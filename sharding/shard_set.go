@@ -32,14 +32,34 @@ const (
 )
 
 var (
-	// Shard range is expected to provided in the form of startShard..endShard.
+	// Shard range is expected to be provided in the form of startShard..endShard.
 	// Both startShard and endShard are inclusive. An example shard range is 0..63.
 	rangeRegexp = regexp.MustCompile(`^([0-9]+)(\.\.([0-9]+))?$`)
 
 	errInvalidShard = errors.New("invalid shard")
 )
 
-// ShardSet is a range of shards organized as a set.
+// ParseShardSet parses a shard set from the input string.
+func ParseShardSet(s string) (ShardSet, error) {
+	ss := make(ShardSet, defaultNumShards)
+	if err := ss.ParseRange(s); err != nil {
+		return nil, err
+	}
+	return ss, nil
+}
+
+// MustParseShardSet parses a shard set from the input string, and panics
+// if parsing is unsuccessful.
+func MustParseShardSet(s string) ShardSet {
+	ss, err := ParseShardSet(s)
+	if err == nil {
+		return ss
+	}
+	panic(fmt.Errorf("unable to parse shard set from %s: %v", s, err))
+}
+
+// ShardSet is a collection of shards organized as a set.
+// The shards contained in the set can be discontinuous.
 type ShardSet map[uint32]struct{}
 
 // UnmarshalYAML unmarshals YAML into a shard set.
@@ -56,7 +76,7 @@ func (ss *ShardSet) UnmarshalYAML(f func(interface{}) error) error {
 		return ss.ParseRange(s)
 	}
 
-	// Otherwise try to parse out a list of ranges.
+	// Otherwise try to parse out a list of ranges or single shards.
 	var a []interface{}
 	if err := f(&a); err == nil {
 		for _, v := range a {
@@ -110,25 +130,6 @@ func (ss ShardSet) ParseRange(s string) error {
 	}
 
 	return fmt.Errorf("invalid range '%s'", s)
-}
-
-// ParseShardSet parses a shard set from the input string.
-func ParseShardSet(s string) (ShardSet, error) {
-	ss := make(ShardSet, defaultNumShards)
-	if err := ss.ParseRange(s); err != nil {
-		return nil, err
-	}
-	return ss, nil
-}
-
-// MustParseShardSet parses a shard set from the input string, and panics
-// if parsing is unsuccessful.
-func MustParseShardSet(s string) ShardSet {
-	ss, err := ParseShardSet(s)
-	if err == nil {
-		return ss
-	}
-	panic(fmt.Errorf("unable to parse shard set from %s: %v", s, err))
 }
 
 func (ss ShardSet) addRange(matches []string) error {

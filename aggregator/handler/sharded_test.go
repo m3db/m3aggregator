@@ -39,7 +39,7 @@ func TestNewShardedHandlerOneNonSharded(t *testing.T) {
 			Router:    router,
 		},
 	}
-	handler := newShardedHandler(srs, nil).(*shardedHandler)
+	handler := NewShardedHandler(srs, nil).(*shardedHandler)
 	expected := []SharderRouter{
 		{
 			SharderID: sharding.NoShardingSharderID,
@@ -61,7 +61,7 @@ func TestNewShardedHandlerMultipleNonSharded(t *testing.T) {
 			Router:    routers[1],
 		},
 	}
-	handler := newShardedHandler(srs, nil).(*shardedHandler)
+	handler := NewShardedHandler(srs, nil).(*shardedHandler)
 	expected := []SharderRouter{
 		{
 			SharderID: sharding.NoShardingSharderID,
@@ -79,7 +79,7 @@ func TestNewShardedHandlerOneSharded(t *testing.T) {
 			Router:    router,
 		},
 	}
-	handler := newShardedHandler(srs, nil).(*shardedHandler)
+	handler := NewShardedHandler(srs, nil).(*shardedHandler)
 	expected := []SharderRouter{
 		{
 			SharderID: sharding.NewSharderID(sharding.Murmur32Hash, 1024),
@@ -102,7 +102,7 @@ func TestNewShardedHandlerMultipleShardedSameSharderID(t *testing.T) {
 			Router:    routers[1],
 		},
 	}
-	handler := newShardedHandler(srs, nil).(*shardedHandler)
+	handler := NewShardedHandler(srs, nil).(*shardedHandler)
 	expected := []SharderRouter{
 		{
 			SharderID: sharderID,
@@ -128,7 +128,7 @@ func TestNewShardedHandlerMultipleShardedDifferentSharderIDs(t *testing.T) {
 			Router:    routers[2],
 		},
 	}
-	handler := newShardedHandler(srs, nil).(*shardedHandler)
+	handler := NewShardedHandler(srs, nil).(*shardedHandler)
 	expected := []SharderRouter{
 		{
 			SharderID: sharding.NewSharderID(sharding.Murmur32Hash, 1024),
@@ -172,7 +172,7 @@ func TestNewShardedHandlerBothShardedAndNonSharded(t *testing.T) {
 			Router:    routers[4],
 		},
 	}
-	handler := newShardedHandler(srs, nil).(*shardedHandler)
+	handler := NewShardedHandler(srs, nil).(*shardedHandler)
 	expected := []SharderRouter{
 		{
 			SharderID: sharding.NewSharderID(sharding.Murmur32Hash, 1024),
@@ -190,7 +190,7 @@ func TestShardedHandlerNewWriterSingleSharder(t *testing.T) {
 	sharderID := sharding.NewSharderID(sharding.Murmur32Hash, 1024)
 	router := &mockRouter{id: 1}
 	opts := writer.NewOptions()
-	handler := newShardedHandler(nil, opts).(*shardedHandler)
+	handler := NewShardedHandler(nil, opts).(*shardedHandler)
 	handler.routersBySharderID = []SharderRouter{
 		{
 			SharderID: sharderID,
@@ -207,7 +207,7 @@ func TestShardedHandlerNewWriterMultipleSharder(t *testing.T) {
 		&mockRouter{id: 2},
 	}
 	opts := writer.NewOptions()
-	handler := newShardedHandler(nil, opts).(*shardedHandler)
+	handler := NewShardedHandler(nil, opts).(*shardedHandler)
 	handler.routersBySharderID = []SharderRouter{
 		{
 			SharderID: sharding.NewSharderID(sharding.Murmur32Hash, 1024),
@@ -228,7 +228,7 @@ func TestShardedHandlerNewWriterError(t *testing.T) {
 		&mockRouter{id: 2},
 	}
 	opts := writer.NewOptions()
-	handler := newShardedHandler(nil, opts).(*shardedHandler)
+	handler := NewShardedHandler(nil, opts).(*shardedHandler)
 	handler.routersBySharderID = []SharderRouter{
 		{
 			SharderID: sharding.NewSharderID(sharding.HashType("abcd"), 1024),
