@@ -29,6 +29,7 @@ import (
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/protocol/msgpack"
+	"github.com/m3db/m3x/clock"
 	xerrors "github.com/m3db/m3x/errors"
 
 	"github.com/uber-go/tally"
@@ -64,10 +65,14 @@ type shardedWriter struct {
 	sharding.AggregatedSharder
 	common.Router
 
-	maxBufferSize       int
-	bufferedEncoderPool msgpack.BufferedEncoderPool
+	nowFn                     clock.NowFn
+	maxBufferSize             int
+	bufferedEncoderPool       msgpack.BufferedEncoderPool
+	includeEncodingTime       bool
+	includeEncodingTimeEveryN int
 
 	closed          bool
+	numWritten      int
 	encodersByShard []msgpack.AggregatedEncoder
 	metrics         shardedWriterMetrics
 	shardFn         shardFn
@@ -86,12 +91,15 @@ func NewShardedWriter(
 	numShards := sharderID.NumShards()
 	instrumentOpts := opts.InstrumentOptions()
 	w := &shardedWriter{
-		AggregatedSharder:   sharder,
-		Router:              router,
-		maxBufferSize:       opts.MaxBufferSize(),
-		bufferedEncoderPool: opts.BufferedEncoderPool(),
-		encodersByShard:     make([]msgpack.AggregatedEncoder, numShards),
-		metrics:             newShardedWriterMetrics(instrumentOpts.MetricsScope()),
+		AggregatedSharder:         sharder,
+		Router:                    router,
+		nowFn:                     opts.ClockOptions().NowFn(),
+		maxBufferSize:             opts.MaxBufferSize(),
+		bufferedEncoderPool:       opts.BufferedEncoderPool(),
+		includeEncodingTime:       opts.IncludeEncodingTime(),
+		includeEncodingTimeEveryN: opts.IncludeEncodingTimeEveryN(),
+		encodersByShard:           make([]msgpack.AggregatedEncoder, numShards),
+		metrics:                   newShardedWriterMetrics(instrumentOpts.MetricsScope()),
 	}
 	w.shardFn = w.Shard
 	return w, nil
@@ -156,7 +164,26 @@ func (w *shardedWriter) encode(
 	bufferedEncoder := encoder.Encoder()
 	buffer := bufferedEncoder.Buffer()
 	sizeBefore := buffer.Len()
-	if err := encoder.EncodeChunkedMetricWithStoragePolicy(mp); err != nil {
+
+	// Encode data.
+	var (
+		includeEncodingTime bool
+		err                 error
+	)
+	if w.includeEncodingTime {
+		w.numWritten++
+		if w.numWritten >= w.includeEncodingTimeEveryN {
+			w.numWritten = 0
+			includeEncodingTime = true
+		}
+	}
+	if !includeEncodingTime {
+		err = encoder.EncodeChunkedMetricWithStoragePolicy(mp)
+	} else {
+		encodedAtNanos := w.nowFn().UnixNano()
+		err = encoder.EncodeChunkedMetricWithStoragePolicyAndEncodeTime(mp, encodedAtNanos)
+	}
+	if err != nil {
 		w.metrics.encodeErrors.Inc(1)
 		buffer.Truncate(sizeBefore)
 		// Clear out the encoder error.
@@ -164,8 +191,9 @@ func (w *shardedWriter) encode(
 		return nil
 	}
 	w.metrics.encodeSuccess.Inc(1)
-	sizeAfter := buffer.Len()
+
 	// If the buffer size is not big enough, do nothing.
+	sizeAfter := buffer.Len()
 	if sizeAfter < w.maxBufferSize {
 		return nil
 	}

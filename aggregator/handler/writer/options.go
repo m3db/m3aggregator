@@ -22,15 +22,24 @@ package writer
 
 import (
 	"github.com/m3db/m3metrics/protocol/msgpack"
+	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
 )
 
 const (
-	defaultMaxBufferSize = 1440
+	defaultMaxBufferSize             = 1440
+	defaultIncludeEncodingTime       = false
+	defaultIncludeEncodingTimeEveryN = 100
 )
 
 // Options provide a set of options for the writer.
 type Options interface {
+	// SetClockOptions sets the clock options.
+	SetClockOptions(value clock.Options) Options
+
+	// ClockOptions returns the clock options.
+	ClockOptions() clock.Options
+
 	// SetInstrumentOptions sets the instrument options.
 	SetInstrumentOptions(value instrument.Options) Options
 
@@ -48,12 +57,35 @@ type Options interface {
 
 	// BufferedEncoderPool returns the buffered encoder pool.
 	BufferedEncoderPool() msgpack.BufferedEncoderPool
+
+	// SetIncludeEncodingTime sets whether the time at which metrics and policies are
+	// encoded is included alongside the encoded data. Such encoding time can be used
+	// to compute end-to-end latencies for example.
+	SetIncludeEncodingTime(value bool) Options
+
+	// IncludeEncodingTime returns whether the time at which metrics and policies are
+	// encoded is included alongside the encoded data. Such encoding time can be used
+	// to compute end-to-end latencies for example.
+	IncludeEncodingTime() bool
+
+	// SetIncludeEncodingTimeEveryN sets the value that determines that the encoding
+	// time is included every N writes. This option only applies when including encoding
+	// time is enabled.
+	SetIncludeEncodingTimeEveryN(value int) Options
+
+	// IncludeEncodingTimeEveryN returns the value that determines that the encoding
+	// time is included every N writes. This option only applies when including encoding
+	// time is enabled.
+	IncludeEncodingTimeEveryN() int
 }
 
 type options struct {
-	instrumentOpts      instrument.Options
-	maxBufferSize       int
-	bufferedEncoderPool msgpack.BufferedEncoderPool
+	clockOpts                 clock.Options
+	instrumentOpts            instrument.Options
+	maxBufferSize             int
+	bufferedEncoderPool       msgpack.BufferedEncoderPool
+	includeEncodingTime       bool
+	includeEncodingTimeEveryN int
 }
 
 // NewOptions provide a set of writer options.
@@ -63,10 +95,23 @@ func NewOptions() Options {
 		return msgpack.NewPooledBufferedEncoder(bufferedEncoderPool)
 	})
 	return &options{
-		instrumentOpts:      instrument.NewOptions(),
-		maxBufferSize:       defaultMaxBufferSize,
-		bufferedEncoderPool: bufferedEncoderPool,
+		clockOpts:                 clock.NewOptions(),
+		instrumentOpts:            instrument.NewOptions(),
+		maxBufferSize:             defaultMaxBufferSize,
+		bufferedEncoderPool:       bufferedEncoderPool,
+		includeEncodingTime:       defaultIncludeEncodingTime,
+		includeEncodingTimeEveryN: defaultIncludeEncodingTimeEveryN,
 	}
+}
+
+func (o *options) SetClockOptions(value clock.Options) Options {
+	opts := *o
+	opts.clockOpts = value
+	return &opts
+}
+
+func (o *options) ClockOptions() clock.Options {
+	return o.clockOpts
 }
 
 func (o *options) SetInstrumentOptions(value instrument.Options) Options {
@@ -97,4 +142,24 @@ func (o *options) SetBufferedEncoderPool(value msgpack.BufferedEncoderPool) Opti
 
 func (o *options) BufferedEncoderPool() msgpack.BufferedEncoderPool {
 	return o.bufferedEncoderPool
+}
+
+func (o *options) SetIncludeEncodingTime(value bool) Options {
+	opts := *o
+	opts.includeEncodingTime = value
+	return &opts
+}
+
+func (o *options) IncludeEncodingTime() bool {
+	return o.includeEncodingTime
+}
+
+func (o *options) SetIncludeEncodingTimeEveryN(value int) Options {
+	opts := *o
+	opts.includeEncodingTimeEveryN = value
+	return &opts
+}
+
+func (o *options) IncludeEncodingTimeEveryN() int {
+	return o.includeEncodingTimeEveryN
 }

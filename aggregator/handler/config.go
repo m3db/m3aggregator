@@ -104,6 +104,12 @@ type writerConfiguration struct {
 
 	// Pool of buffered encoders.
 	BufferedEncoderPool pool.ObjectPoolConfiguration `yaml:"bufferedEncoderPool"`
+
+	// Whether to include encoding time in the payload.
+	IncludeEncodingTime *bool `yaml:"includeEncodingTime"`
+
+	// How frequently is the encoding time included in the payload.
+	IncludeEncodingTimeEveryN int `yaml:"includeEncodingTimeEveryN"`
 }
 
 func (c *writerConfiguration) NewWriterOptions(
@@ -112,6 +118,12 @@ func (c *writerConfiguration) NewWriterOptions(
 	opts := writer.NewOptions().SetInstrumentOptions(instrumentOpts)
 	if c.MaxBufferSize > 0 {
 		opts = opts.SetMaxBufferSize(c.MaxBufferSize)
+	}
+	if c.IncludeEncodingTime != nil {
+		opts = opts.SetIncludeEncodingTime(*c.IncludeEncodingTime)
+	}
+	if c.IncludeEncodingTimeEveryN != 0 {
+		opts = opts.SetIncludeEncodingTimeEveryN(c.IncludeEncodingTimeEveryN)
 	}
 
 	// Set buffered encoder pool.
