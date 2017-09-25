@@ -27,9 +27,9 @@ import (
 )
 
 const (
-	defaultMaxBufferSize             = 1440
-	defaultIncludeEncodingTime       = false
-	defaultIncludeEncodingTimeEveryN = 100
+	defaultMaxBufferSize            = 1440
+	defaultIncludeEncodingTime      = false
+	defaultEncodingTimeSamplingRate = 0.01
 )
 
 // Options provide a set of options for the writer.
@@ -68,24 +68,24 @@ type Options interface {
 	// to compute end-to-end latencies for example.
 	IncludeEncodingTime() bool
 
-	// SetIncludeEncodingTimeEveryN sets the value that determines that the encoding
-	// time is included every N writes. This option only applies when including encoding
+	// SetEncodingTimeSampleRate sets the sampling rate at which the encoding time is
+	// included in the encoded data. This option only applies when including encoding
 	// time is enabled.
-	SetIncludeEncodingTimeEveryN(value int) Options
+	SetEncodingTimeSamplingRate(value float64) Options
 
-	// IncludeEncodingTimeEveryN returns the value that determines that the encoding
-	// time is included every N writes. This option only applies when including encoding
+	// EncodingTimeSamplingRate returns the sampling rate at which the encoding time is
+	// included in the encoded data. This option only applies when including encoding
 	// time is enabled.
-	IncludeEncodingTimeEveryN() int
+	EncodingTimeSamplingRate() float64
 }
 
 type options struct {
-	clockOpts                 clock.Options
-	instrumentOpts            instrument.Options
-	maxBufferSize             int
-	bufferedEncoderPool       msgpack.BufferedEncoderPool
-	includeEncodingTime       bool
-	includeEncodingTimeEveryN int
+	clockOpts                clock.Options
+	instrumentOpts           instrument.Options
+	maxBufferSize            int
+	bufferedEncoderPool      msgpack.BufferedEncoderPool
+	includeEncodingTime      bool
+	encodingTimeSamplingRate float64
 }
 
 // NewOptions provide a set of writer options.
@@ -95,12 +95,12 @@ func NewOptions() Options {
 		return msgpack.NewPooledBufferedEncoder(bufferedEncoderPool)
 	})
 	return &options{
-		clockOpts:                 clock.NewOptions(),
-		instrumentOpts:            instrument.NewOptions(),
-		maxBufferSize:             defaultMaxBufferSize,
-		bufferedEncoderPool:       bufferedEncoderPool,
-		includeEncodingTime:       defaultIncludeEncodingTime,
-		includeEncodingTimeEveryN: defaultIncludeEncodingTimeEveryN,
+		clockOpts:                clock.NewOptions(),
+		instrumentOpts:           instrument.NewOptions(),
+		maxBufferSize:            defaultMaxBufferSize,
+		bufferedEncoderPool:      bufferedEncoderPool,
+		includeEncodingTime:      defaultIncludeEncodingTime,
+		encodingTimeSamplingRate: defaultEncodingTimeSamplingRate,
 	}
 }
 
@@ -154,12 +154,12 @@ func (o *options) IncludeEncodingTime() bool {
 	return o.includeEncodingTime
 }
 
-func (o *options) SetIncludeEncodingTimeEveryN(value int) Options {
+func (o *options) SetEncodingTimeSamplingRate(value float64) Options {
 	opts := *o
-	opts.includeEncodingTimeEveryN = value
+	opts.encodingTimeSamplingRate = value
 	return &opts
 }
 
-func (o *options) IncludeEncodingTimeEveryN() int {
-	return o.includeEncodingTimeEveryN
+func (o *options) EncodingTimeSamplingRate() float64 {
+	return o.encodingTimeSamplingRate
 }

@@ -152,7 +152,7 @@ func TestShardedWriterWriteWithEncodeTimeNoFlush(t *testing.T) {
 		SetClockOptions(clock.NewOptions().SetNowFn(nowFn)).
 		SetMaxBufferSize(math.MaxInt64).
 		SetIncludeEncodingTime(true).
-		SetIncludeEncodingTimeEveryN(2)
+		SetEncodingTimeSamplingRate(0.5)
 	writer := testShardedWriter(t, opts)
 	writer.shardFn = func(chunkedID id.ChunkedID) uint32 {
 		if isSameChunkedID(chunkedID, testChunkedID) {
@@ -163,6 +163,14 @@ func TestShardedWriterWriteWithEncodeTimeNoFlush(t *testing.T) {
 		}
 		require.Fail(t, "unexpected chunked id %v", chunkedID)
 		return 0
+	}
+	var iter int
+	writer.randFn = func() float64 {
+		iter++
+		if iter%2 == 0 {
+			return 0.1
+		}
+		return 0.9
 	}
 
 	inputs := []aggregated.ChunkedMetricWithStoragePolicy{

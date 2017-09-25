@@ -22,6 +22,7 @@ package writer
 
 import (
 	"errors"
+	"math/rand"
 
 	"github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
@@ -58,6 +59,7 @@ func newShardedWriterMetrics(scope tally.Scope) shardedWriterMetrics {
 }
 
 type shardFn func(chunkedID id.ChunkedID) uint32
+type randFn func() float64
 
 // shardedWriter encodes data in a shard-aware fashion and routes them to the backend.
 // shardedWriter is not thread safe.
@@ -65,17 +67,18 @@ type shardedWriter struct {
 	sharding.AggregatedSharder
 	common.Router
 
-	nowFn                     clock.NowFn
-	maxBufferSize             int
-	bufferedEncoderPool       msgpack.BufferedEncoderPool
-	includeEncodingTime       bool
-	includeEncodingTimeEveryN int
+	nowFn                    clock.NowFn
+	maxBufferSize            int
+	bufferedEncoderPool      msgpack.BufferedEncoderPool
+	includeEncodingTime      bool
+	encodingTimeSamplingRate float64
 
 	closed          bool
-	numWritten      int
+	rand            *rand.Rand
 	encodersByShard []msgpack.AggregatedEncoder
 	metrics         shardedWriterMetrics
 	shardFn         shardFn
+	randFn          randFn
 }
 
 // NewShardedWriter creates a new sharded writer.
@@ -89,19 +92,22 @@ func NewShardedWriter(
 		return nil, err
 	}
 	numShards := sharderID.NumShards()
+	nowFn := opts.ClockOptions().NowFn()
 	instrumentOpts := opts.InstrumentOptions()
 	w := &shardedWriter{
-		AggregatedSharder:         sharder,
-		Router:                    router,
-		nowFn:                     opts.ClockOptions().NowFn(),
-		maxBufferSize:             opts.MaxBufferSize(),
-		bufferedEncoderPool:       opts.BufferedEncoderPool(),
-		includeEncodingTime:       opts.IncludeEncodingTime(),
-		includeEncodingTimeEveryN: opts.IncludeEncodingTimeEveryN(),
-		encodersByShard:           make([]msgpack.AggregatedEncoder, numShards),
-		metrics:                   newShardedWriterMetrics(instrumentOpts.MetricsScope()),
+		AggregatedSharder:        sharder,
+		Router:                   router,
+		nowFn:                    nowFn,
+		maxBufferSize:            opts.MaxBufferSize(),
+		bufferedEncoderPool:      opts.BufferedEncoderPool(),
+		includeEncodingTime:      opts.IncludeEncodingTime(),
+		encodingTimeSamplingRate: opts.EncodingTimeSamplingRate(),
+		rand:            rand.New(rand.NewSource(nowFn().UnixNano())),
+		encodersByShard: make([]msgpack.AggregatedEncoder, numShards),
+		metrics:         newShardedWriterMetrics(instrumentOpts.MetricsScope()),
 	}
 	w.shardFn = w.Shard
+	w.randFn = w.rand.Float64
 	return w, nil
 }
 
@@ -170,12 +176,8 @@ func (w *shardedWriter) encode(
 		includeEncodingTime bool
 		err                 error
 	)
-	if w.includeEncodingTime {
-		w.numWritten++
-		if w.numWritten >= w.includeEncodingTimeEveryN {
-			w.numWritten = 0
-			includeEncodingTime = true
-		}
+	if w.includeEncodingTime && w.randFn() < w.encodingTimeSamplingRate {
+		includeEncodingTime = true
 	}
 	if !includeEncodingTime {
 		err = encoder.EncodeChunkedMetricWithStoragePolicy(mp)
