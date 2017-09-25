@@ -70,7 +70,6 @@ type shardedWriter struct {
 	nowFn                    clock.NowFn
 	maxBufferSize            int
 	bufferedEncoderPool      msgpack.BufferedEncoderPool
-	includeEncodingTime      bool
 	encodingTimeSamplingRate float64
 
 	closed          bool
@@ -100,7 +99,6 @@ func NewShardedWriter(
 		nowFn:                    nowFn,
 		maxBufferSize:            opts.MaxBufferSize(),
 		bufferedEncoderPool:      opts.BufferedEncoderPool(),
-		includeEncodingTime:      opts.IncludeEncodingTime(),
 		encodingTimeSamplingRate: opts.EncodingTimeSamplingRate(),
 		rand:            rand.New(rand.NewSource(nowFn().UnixNano())),
 		encodersByShard: make([]msgpack.AggregatedEncoder, numShards),
@@ -172,18 +170,12 @@ func (w *shardedWriter) encode(
 	sizeBefore := buffer.Len()
 
 	// Encode data.
-	var (
-		includeEncodingTime bool
-		err                 error
-	)
-	if w.includeEncodingTime && w.randFn() < w.encodingTimeSamplingRate {
-		includeEncodingTime = true
-	}
-	if !includeEncodingTime {
-		err = encoder.EncodeChunkedMetricWithStoragePolicy(mp)
-	} else {
+	var err error
+	if w.encodingTimeSamplingRate > 0 && w.randFn() < w.encodingTimeSamplingRate {
 		encodedAtNanos := w.nowFn().UnixNano()
 		err = encoder.EncodeChunkedMetricWithStoragePolicyAndEncodeTime(mp, encodedAtNanos)
+	} else {
+		err = encoder.EncodeChunkedMetricWithStoragePolicy(mp)
 	}
 	if err != nil {
 		w.metrics.encodeErrors.Inc(1)

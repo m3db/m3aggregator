@@ -28,8 +28,7 @@ import (
 
 const (
 	defaultMaxBufferSize            = 1440
-	defaultIncludeEncodingTime      = false
-	defaultEncodingTimeSamplingRate = 0.01
+	defaultEncodingTimeSamplingRate = 0
 )
 
 // Options provide a set of options for the writer.
@@ -58,24 +57,14 @@ type Options interface {
 	// BufferedEncoderPool returns the buffered encoder pool.
 	BufferedEncoderPool() msgpack.BufferedEncoderPool
 
-	// SetIncludeEncodingTime sets whether the time at which metrics and policies are
-	// encoded is included alongside the encoded data. Such encoding time can be used
-	// to compute end-to-end latencies for example.
-	SetIncludeEncodingTime(value bool) Options
-
-	// IncludeEncodingTime returns whether the time at which metrics and policies are
-	// encoded is included alongside the encoded data. Such encoding time can be used
-	// to compute end-to-end latencies for example.
-	IncludeEncodingTime() bool
-
 	// SetEncodingTimeSampleRate sets the sampling rate at which the encoding time is
-	// included in the encoded data. This option only applies when including encoding
-	// time is enabled.
+	// included in the encoded data. A value of 0 means the encoding time is never included,
+	// and a value of 1 means the encoding time is always included.
 	SetEncodingTimeSamplingRate(value float64) Options
 
 	// EncodingTimeSamplingRate returns the sampling rate at which the encoding time is
-	// included in the encoded data. This option only applies when including encoding
-	// time is enabled.
+	// included in the encoded data. A value of 0 means the encoding time is never included,
+	// and a value of 1 means the encoding time is always included.
 	EncodingTimeSamplingRate() float64
 }
 
@@ -84,7 +73,6 @@ type options struct {
 	instrumentOpts           instrument.Options
 	maxBufferSize            int
 	bufferedEncoderPool      msgpack.BufferedEncoderPool
-	includeEncodingTime      bool
 	encodingTimeSamplingRate float64
 }
 
@@ -99,7 +87,6 @@ func NewOptions() Options {
 		instrumentOpts:           instrument.NewOptions(),
 		maxBufferSize:            defaultMaxBufferSize,
 		bufferedEncoderPool:      bufferedEncoderPool,
-		includeEncodingTime:      defaultIncludeEncodingTime,
 		encodingTimeSamplingRate: defaultEncodingTimeSamplingRate,
 	}
 }
@@ -142,16 +129,6 @@ func (o *options) SetBufferedEncoderPool(value msgpack.BufferedEncoderPool) Opti
 
 func (o *options) BufferedEncoderPool() msgpack.BufferedEncoderPool {
 	return o.bufferedEncoderPool
-}
-
-func (o *options) SetIncludeEncodingTime(value bool) Options {
-	opts := *o
-	opts.includeEncodingTime = value
-	return &opts
-}
-
-func (o *options) IncludeEncodingTime() bool {
-	return o.includeEncodingTime
 }
 
 func (o *options) SetEncodingTimeSamplingRate(value float64) Options {

@@ -151,7 +151,6 @@ func TestShardedWriterWriteWithEncodeTimeNoFlush(t *testing.T) {
 	opts := NewOptions().
 		SetClockOptions(clock.NewOptions().SetNowFn(nowFn)).
 		SetMaxBufferSize(math.MaxInt64).
-		SetIncludeEncodingTime(true).
 		SetEncodingTimeSamplingRate(0.5)
 	writer := testShardedWriter(t, opts)
 	writer.shardFn = func(chunkedID id.ChunkedID) uint32 {
