@@ -108,8 +108,8 @@ type writerConfiguration struct {
 	// Whether to include encoding time in the payload.
 	IncludeEncodingTime *bool `yaml:"includeEncodingTime"`
 
-	// How frequently is the encoding time included in the payload.
-	IncludeEncodingTimeEveryN int `yaml:"includeEncodingTimeEveryN"`
+	// How frequent is the encoding time sampled and included in the payload.
+	EncodingTimeSamplingRate float64 `yaml:"encodingTimeSamplingRate"`
 }
 
 func (c *writerConfiguration) NewWriterOptions(
@@ -122,8 +122,8 @@ func (c *writerConfiguration) NewWriterOptions(
 	if c.IncludeEncodingTime != nil {
 		opts = opts.SetIncludeEncodingTime(*c.IncludeEncodingTime)
 	}
-	if c.IncludeEncodingTimeEveryN != 0 {
-		opts = opts.SetIncludeEncodingTimeEveryN(c.IncludeEncodingTimeEveryN)
+	if c.EncodingTimeSamplingRate != 0 {
+		opts = opts.SetEncodingTimeSamplingRate(c.EncodingTimeSamplingRate)
 	}
 
 	// Set buffered encoder pool.
