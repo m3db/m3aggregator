@@ -214,14 +214,14 @@ func (mgr *placementManager) placementWithLock() (placement.Placement, error) {
 		mgr.metrics.activeStagedPlacementErrors.Inc(1)
 		return nil, err
 	}
-	defer onStagedPlacementDoneFn()
-
 	placement, onPlacementDoneFn, err := stagedPlacement.ActivePlacement()
 	if err != nil {
+		onStagedPlacementDoneFn()
 		mgr.metrics.activePlacementErrors.Inc(1)
 		return nil, err
 	}
-	defer onPlacementDoneFn()
+	onPlacementDoneFn()
+	onStagedPlacementDoneFn()
 	return placement, nil
 }
 
