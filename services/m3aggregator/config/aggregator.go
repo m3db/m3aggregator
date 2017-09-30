@@ -120,9 +120,6 @@ type AggregatorConfiguration struct {
 	// Client configuration for key value store.
 	KVClient kvClientConfiguration `yaml:"kvClient" validate:"nonzero"`
 
-	// Election KV namespace.
-	ElectionKVNamespace string `yaml:"electionKVNamespace" validate:"nonzero"`
-
 	// KV configuration.
 	KVConfig kv.Configuration `yaml:"kvConfig"`
 
@@ -294,7 +291,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	electionManager, err := c.ElectionManager.NewElectionManager(
 		client,
 		instanceID,
-		c.ElectionKVNamespace,
+		c.KVConfig.Namespace,
 		placementManager,
 		flushTimesManager,
 		iOpts,
