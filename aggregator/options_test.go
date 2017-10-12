@@ -57,7 +57,9 @@ func validateQuantiles(t *testing.T, o Options) {
 		if !ok || aggType == policy.Median {
 			continue
 		}
-		require.Equal(t, suffixFn(q), o.SuffixForTimer(aggType))
+		v, err := suffixFn(q)
+		require.NoError(t, err)
+		require.Equal(t, v, o.SuffixForTimer(aggType))
 	}
 }
 
@@ -279,9 +281,11 @@ func TestOptionsSetTimerMedianSuffix(t *testing.T) {
 }
 
 func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
-	fn := func(q float64) []byte { return []byte(fmt.Sprintf("%1.2f", q)) }
+	fn := func(q float64) ([]byte, error) { return []byte(fmt.Sprintf("%1.2f", q)), nil }
 	o := NewOptions().SetTimerQuantileSuffixFn(fn)
-	require.Equal(t, []byte("0.96"), o.TimerQuantileSuffixFn()(0.9582))
+	v, err := o.TimerQuantileSuffixFn()(0.9582)
+	require.NoError(t, err)
+	require.Equal(t, []byte("0.96"), v)
 	validateQuantiles(t, o)
 }
 
@@ -326,17 +330,90 @@ func TestOptionsGaugeSuffix(t *testing.T) {
 
 func TestOptionTimerQuantileSuffix(t *testing.T) {
 	o := NewOptions()
-	require.Equal(t, []byte(".p1"), o.TimerQuantileSuffixFn()(0.01))
-	require.Equal(t, []byte(".p10"), o.TimerQuantileSuffixFn()(0.1))
-	require.Equal(t, []byte(".p50"), o.TimerQuantileSuffixFn()(0.5))
-	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.9))
-	require.Equal(t, []byte(".p90"), o.TimerQuantileSuffixFn()(0.90))
-	require.Equal(t, []byte(".p90.9"), o.TimerQuantileSuffixFn()(0.909))
-	require.Equal(t, []byte(".p99.9"), o.TimerQuantileSuffixFn()(0.999))
-	require.Equal(t, []byte(".p99.9"), o.TimerQuantileSuffixFn()(0.9990))
-	require.Equal(t, []byte(".p99.99"), o.TimerQuantileSuffixFn()(0.9999))
-	require.Equal(t, []byte(".p0.001"), o.TimerQuantileSuffixFn()(0.00001))
-	require.Equal(t, []byte(".p12.3456789"), o.TimerQuantileSuffixFn()(0.123456789))
+	cases := []struct {
+		quantile    float64
+		b           []byte
+		expectedErr bool
+	}{
+		{
+			quantile:    0.01,
+			b:           []byte(".p1"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.1,
+			b:           []byte(".p10"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.5,
+			b:           []byte(".p50"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.9,
+			b:           []byte(".p90"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.90,
+			b:           []byte(".p90"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.90,
+			b:           []byte(".p90"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.909,
+			b:           nil,
+			expectedErr: true,
+		},
+		{
+			quantile:    0.999,
+			b:           []byte(".p999"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.9990,
+			b:           []byte(".p999"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.9999,
+			b:           []byte(".p9999"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.99995,
+			b:           []byte(".p99995"),
+			expectedErr: false,
+		},
+		{
+			quantile:    0.001,
+			b:           nil,
+			expectedErr: true,
+		},
+		{
+			quantile:    0.123,
+			b:           nil,
+			expectedErr: true,
+		},
+		{
+			quantile:    1.23,
+			b:           nil,
+			expectedErr: true,
+		},
+	}
+
+	for _, c := range cases {
+		suffix, err := o.TimerQuantileSuffixFn()(c.quantile)
+		if c.expectedErr {
+			require.Error(t, err)
+		}
+		require.Equal(t, c.b, suffix)
+	}
 }
 
 func TestOptionsSetGaugePrefix(t *testing.T) {
