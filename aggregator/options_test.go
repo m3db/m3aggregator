@@ -119,7 +119,7 @@ func TestOptionsSetDefaultTimerAggregationTypes(t *testing.T) {
 	o := NewOptions().SetDefaultTimerAggregationTypes(aggTypes)
 	require.Equal(t, aggTypes, o.DefaultTimerAggregationTypes())
 	require.Equal(t, []float64{0.99, 0.9999}, o.TimerQuantiles())
-	require.Equal(t, [][]byte{[]byte(".mean"), []byte(".sum_sq"), []byte(".p99"), []byte(".p99.99")}, o.DefaultTimerAggregationSuffixes())
+	require.Equal(t, [][]byte{[]byte(".mean"), []byte(".sum_sq"), []byte(".p99"), []byte(".p9999")}, o.DefaultTimerAggregationSuffixes())
 }
 
 func TestOptionsSetDefaultGaugeAggregationTypes(t *testing.T) {
