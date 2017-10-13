@@ -871,7 +871,6 @@ func (o *options) computeFullGaugePrefix() {
 // By default we use e.g. ".p50", ".p95", ".p99" for the 50th/95th/99th percentile.
 func defaultTimerQuantileSuffixFn(quantile float64) []byte {
 	str := strconv.FormatFloat(quantile*100, 'f', -1, 64)
-
 	idx := strings.Index(str, ".")
 	if idx != -1 {
 		str = str[:idx] + str[idx+1:]
