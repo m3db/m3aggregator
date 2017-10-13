@@ -57,9 +57,7 @@ func validateQuantiles(t *testing.T, o Options) {
 		if !ok || aggType == policy.Median {
 			continue
 		}
-		v, err := suffixFn(q)
-		require.NoError(t, err)
-		require.Equal(t, v, o.SuffixForTimer(aggType))
+		require.Equal(t, suffixFn(q), o.SuffixForTimer(aggType))
 	}
 }
 
@@ -281,11 +279,9 @@ func TestOptionsSetTimerMedianSuffix(t *testing.T) {
 }
 
 func TestOptionsSetTimerQuantileSuffixFn(t *testing.T) {
-	fn := func(q float64) ([]byte, error) { return []byte(fmt.Sprintf("%1.2f", q)), nil }
+	fn := func(q float64) []byte { return []byte(fmt.Sprintf("%1.2f", q)) }
 	o := NewOptions().SetTimerQuantileSuffixFn(fn)
-	v, err := o.TimerQuantileSuffixFn()(0.9582)
-	require.NoError(t, err)
-	require.Equal(t, []byte("0.96"), v)
+	require.Equal(t, []byte("0.96"), o.TimerQuantileSuffixFn()(0.9582))
 	validateQuantiles(t, o)
 }
 
@@ -331,88 +327,61 @@ func TestOptionsGaugeSuffix(t *testing.T) {
 func TestOptionTimerQuantileSuffix(t *testing.T) {
 	o := NewOptions()
 	cases := []struct {
-		quantile    float64
-		b           []byte
-		expectedErr bool
+		quantile float64
+		b        []byte
 	}{
 		{
-			quantile:    0.01,
-			b:           []byte(".p1"),
-			expectedErr: false,
+			quantile: 0.01,
+			b:        []byte(".p1"),
 		},
 		{
-			quantile:    0.1,
-			b:           []byte(".p10"),
-			expectedErr: false,
+			quantile: 0.1,
+			b:        []byte(".p10"),
 		},
 		{
-			quantile:    0.5,
-			b:           []byte(".p50"),
-			expectedErr: false,
+			quantile: 0.5,
+			b:        []byte(".p50"),
 		},
 		{
-			quantile:    0.9,
-			b:           []byte(".p90"),
-			expectedErr: false,
+			quantile: 0.9,
+			b:        []byte(".p90"),
 		},
 		{
-			quantile:    0.90,
-			b:           []byte(".p90"),
-			expectedErr: false,
+			quantile: 0.90,
+			b:        []byte(".p90"),
 		},
 		{
-			quantile:    0.90,
-			b:           []byte(".p90"),
-			expectedErr: false,
+			quantile: 0.90,
+			b:        []byte(".p90"),
 		},
 		{
-			quantile:    0.909,
-			b:           nil,
-			expectedErr: true,
+			quantile: 0.909,
+			b:        []byte(".p909"),
 		},
 		{
-			quantile:    0.999,
-			b:           []byte(".p999"),
-			expectedErr: false,
+			quantile: 0.999,
+			b:        []byte(".p999"),
 		},
 		{
-			quantile:    0.9990,
-			b:           []byte(".p999"),
-			expectedErr: false,
+			quantile: 0.9990,
+			b:        []byte(".p999"),
 		},
 		{
-			quantile:    0.9999,
-			b:           []byte(".p9999"),
-			expectedErr: false,
+			quantile: 0.9999,
+			b:        []byte(".p9999"),
 		},
 		{
-			quantile:    0.99995,
-			b:           []byte(".p99995"),
-			expectedErr: false,
+			quantile: 0.99995,
+			b:        []byte(".p99995"),
 		},
 		{
-			quantile:    0.001,
-			b:           nil,
-			expectedErr: true,
-		},
-		{
-			quantile:    0.123,
-			b:           nil,
-			expectedErr: true,
-		},
-		{
-			quantile:    1.23,
-			b:           nil,
-			expectedErr: true,
+			quantile: 0.123,
+			b:        []byte(".p123"),
 		},
 	}
 
 	for _, c := range cases {
-		suffix, err := o.TimerQuantileSuffixFn()(c.quantile)
-		if c.expectedErr {
-			require.Error(t, err)
-		}
-		require.Equal(t, c.b, suffix)
+		require.Equal(t, c.b, o.TimerQuantileSuffixFn()(c.quantile))
 	}
 }
 

@@ -96,7 +96,7 @@ type EntryPool interface {
 }
 
 // QuantileSuffixFn returns the byte-slice suffix for a quantile value
-type QuantileSuffixFn func(quantile float64) ([]byte, error)
+type QuantileSuffixFn func(quantile float64) []byte
 
 // Handler handles aggregated metrics alongside their policies.
 type Handler interface {

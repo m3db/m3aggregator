@@ -21,7 +21,6 @@
 package aggregator
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -797,11 +796,7 @@ func (o *options) computeDefaultSuffixes() {
 		default:
 			q, ok := aggType.Quantile()
 			if ok {
-				b, err := o.timerQuantileSuffixFn(q)
-				if err != nil {
-					panic(fmt.Sprintf("could not generate default suffix for %f: %v", q, err))
-				}
-				o.defaultSuffixes[aggType.ID()] = b
+				o.defaultSuffixes[aggType.ID()] = o.timerQuantileSuffixFn(q)
 			}
 		}
 	}
@@ -874,20 +869,14 @@ func (o *options) computeFullGaugePrefix() {
 }
 
 // By default we use e.g. ".p50", ".p95", ".p99" for the 50th/95th/99th percentile.
-func defaultTimerQuantileSuffixFn(quantile float64) ([]byte, error) {
-	if quantile < 0 || quantile > 1 {
-		return nil, fmt.Errorf("invalid quantile %f", quantile)
-	}
+func defaultTimerQuantileSuffixFn(quantile float64) []byte {
 	str := strconv.FormatFloat(quantile*100, 'f', -1, 64)
 
-	if strings.Contains(str, ".") {
-		if quantile <= 0.99 {
-			return nil, fmt.Errorf("invalid quantile %f", quantile)
-		}
-		idx := strings.Index(str, ".")
+	idx := strings.Index(str, ".")
+	if idx != -1 {
 		str = str[:idx] + str[idx+1:]
 	}
-	return []byte(".p" + str), nil
+	return []byte(".p" + str)
 }
 
 func defaultShardFn(id []byte, numShards int) uint32 {
