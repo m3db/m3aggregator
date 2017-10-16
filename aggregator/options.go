@@ -131,16 +131,6 @@ func NewOptions() Options {
 	return o
 }
 
-func (o *options) SetAggregationTypesOptions(value policy.AggregationTypesOptions) Options {
-	opts := *o
-	opts.aggTypesOptions = value
-	return &opts
-}
-
-func (o *options) AggregationTypesOptions() policy.AggregationTypesOptions {
-	return o.aggTypesOptions
-}
-
 func (o *options) SetMetricPrefix(value []byte) Options {
 	opts := *o
 	opts.metricPrefix = value
@@ -193,6 +183,16 @@ func (o *options) SetTimeLock(value *sync.RWMutex) Options {
 
 func (o *options) TimeLock() *sync.RWMutex {
 	return o.timeLock
+}
+
+func (o *options) SetAggregationTypesOptions(value policy.AggregationTypesOptions) Options {
+	opts := *o
+	opts.aggTypesOptions = value
+	return &opts
+}
+
+func (o *options) AggregationTypesOptions() policy.AggregationTypesOptions {
+	return o.aggTypesOptions
 }
 
 func (o *options) SetClockOptions(value clock.Options) Options {
