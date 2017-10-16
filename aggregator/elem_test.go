@@ -64,7 +64,7 @@ var (
 		ID:       testGaugeID,
 		GaugeVal: 123.456,
 	}
-	defaultOpts = NewOptions()
+	testOpts = NewOptions()
 )
 
 func TestElemBaseID(t *testing.T) {
@@ -789,15 +789,15 @@ func testGaugeElem(aggTypes policy.AggregationTypes) *GaugeElem {
 }
 
 func expectCounterSuffix(aggType policy.AggregationType) []byte {
-	return defaultOpts.AggregationTypesOptions().SuffixForCounter(aggType)
+	return testOpts.AggregationTypesOptions().SuffixForCounter(aggType)
 }
 
 func expectTimerSuffix(aggType policy.AggregationType) []byte {
-	return defaultOpts.AggregationTypesOptions().SuffixForTimer(aggType)
+	return testOpts.AggregationTypesOptions().SuffixForTimer(aggType)
 }
 
 func expectGaugeSuffix(aggType policy.AggregationType) []byte {
-	return defaultOpts.AggregationTypesOptions().SuffixForGauge(aggType)
+	return testOpts.AggregationTypesOptions().SuffixForGauge(aggType)
 }
 
 func expectedAggMetricsForCounter(
