@@ -119,12 +119,6 @@ type Writer interface {
 type Options interface {
 	/// Read-write base options
 
-	// SetAggregationTypesOptions sets the aggregation types options.
-	SetAggregationTypesOptions(value policy.AggregationTypesOptions) Options
-
-	// AggregationTypesOptions returns the aggregation types options.
-	AggregationTypesOptions() policy.AggregationTypesOptions
-
 	// SetMetricPrefix sets the common prefix for all metric types
 	SetMetricPrefix(value []byte) Options
 
@@ -154,6 +148,12 @@ type Options interface {
 
 	// TimeLock returns the time lock
 	TimeLock() *sync.RWMutex
+
+	// SetAggregationTypesOptions sets the aggregation types options.
+	SetAggregationTypesOptions(value policy.AggregationTypesOptions) Options
+
+	// AggregationTypesOptions returns the aggregation types options.
+	AggregationTypesOptions() policy.AggregationTypesOptions
 
 	// SetClockOptions sets the clock options
 	SetClockOptions(value clock.Options) Options
