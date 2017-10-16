@@ -53,20 +53,22 @@ func main() {
 
 	var cfg config.Configuration
 	if err := xconfig.LoadFile(&cfg, *configFile); err != nil {
-		fmt.Printf("error loading config file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error loading config file: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Create logger and metrics scope.
 	logger, err := cfg.Logging.BuildLogger()
 	if err != nil {
-		fmt.Printf("error creating logger: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error creating logger: %v\n", err)
 		os.Exit(1)
 	}
+
 	scope, closer, err := cfg.Metrics.NewRootScope()
 	if err != nil {
 		logger.Fatalf("error creating metrics root scope: %v", err)
 	}
+
 	defer closer.Close()
 	instrumentOpts := instrument.NewOptions().
 		SetLogger(logger).
