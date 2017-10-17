@@ -6,7 +6,7 @@ import:
 - package: github.com/m3db/m3cluster
   version: b9650bbb69955b5daf276cd840bd36cc986e9dc9
 - package: github.com/m3db/m3metrics
-  version: ea5058159ee78908a856b7ed3aba6ce7e15b723a
+  version: 95be7614d5abbd275693aa57ad0d9c76534eb06c
 - package: google.golang.org/appengine
   version: 2e4a801b39fc199db615bfca7d0b9f8cd9580599
 - package: github.com/m3db/m3x

@@ -138,8 +138,8 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 ) (aggregator.Options, error) {
 	scope := instrumentOpts.MetricsScope()
 	opts := aggregator.NewOptions().SetInstrumentOptions(instrumentOpts)
-	aggTypesOpts := c.AggregationTypes.NewOptions(instrumentOpts)
-	if err := aggTypesOpts.Validate(); err != nil {
+	aggTypesOpts, err := c.AggregationTypes.NewOptions(instrumentOpts)
+	if err != nil {
 		return nil, err
 	}
 	opts = opts.SetAggregationTypesOptions(aggTypesOpts)
