@@ -75,7 +75,8 @@ type followerFlushManager struct {
 	scope                 tally.Scope
 
 	doneCh          <-chan struct{}
-	proto           *schema.ShardSetFlushTimes
+	received        *schema.ShardSetFlushTimes
+	processed       *schema.ShardSetFlushTimes
 	flushTimesState flushTimesState
 	flushMode       followerFlushMode
 	lastFlushed     time.Time
@@ -140,6 +141,7 @@ func (mgr *followerFlushManager) Prepare(buckets []*flushBucket) (flushTask, tim
 	)
 	if mgr.flushTimesState == flushTimesUpdated {
 		mgr.flushTimesState = flushTimesProcessed
+		mgr.processed = mgr.received
 		mgr.flushMode = kvUpdateFollowerFlush
 		flushersByInterval = mgr.flushersFromKVUpdateWithLock(buckets)
 		needsFlush = true
@@ -181,10 +183,10 @@ func (mgr *followerFlushManager) CanLead() bool {
 		mgr.metrics.notCampaigning.Inc(1)
 		return false
 	}
-	if mgr.proto == nil {
+	if mgr.processed == nil {
 		return false
 	}
-	for _, shardFlushTimes := range mgr.proto.ByShard {
+	for _, shardFlushTimes := range mgr.processed.ByShard {
 		for windowNanos, lastFlushedNanos := range shardFlushTimes.ByResolution {
 			windowSize := time.Duration(windowNanos)
 			windowEndAt := mgr.openedAt.Truncate(windowSize)
@@ -210,7 +212,7 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 		flushersByInterval[i].flushers = make([]flusherWithTime, 0, defaultInitialFlushTimesCapacity)
 		for _, flusher := range bucket.flushers {
 			shard := flusher.Shard()
-			shardFlushTimes, exists := mgr.proto.ByShard[shard]
+			shardFlushTimes, exists := mgr.received.ByShard[shard]
 			if !exists {
 				mgr.metrics.shardNotFound.Inc(1)
 				mgr.logger.WithFields(
@@ -280,7 +282,7 @@ func (mgr *followerFlushManager) watchFlushTimes() {
 		select {
 		case <-flushTimesWatch.C():
 			mgr.Lock()
-			mgr.proto = flushTimesWatch.Get().(*schema.ShardSetFlushTimes)
+			mgr.received = flushTimesWatch.Get().(*schema.ShardSetFlushTimes)
 			mgr.flushTimesState = flushTimesUpdated
 			mgr.Unlock()
 		case <-mgr.doneCh:
