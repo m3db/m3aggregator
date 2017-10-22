@@ -33,10 +33,6 @@ import (
 	"github.com/uber-go/tally"
 )
 
-const (
-	defaultInitialFlushTimesCapacity = 16
-)
-
 type followerFlushManagerMetrics struct {
 	watchCreateErrors    tally.Counter
 	shardNotFound        tally.Counter
