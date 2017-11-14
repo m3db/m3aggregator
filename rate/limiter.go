@@ -60,6 +60,10 @@ func (l *Limiter) Limit() int64 {
 }
 
 // IsAllowed returns whether n events may happen now.
+// NB(xichen): If a large request comes in, this could potentially block following
+// requests in the same second from going through. This is a non-issue if the limit
+// is much bigger than the typical batch size, which is indeed the case in the aggregation
+// layer as each batch size is usually fairly small.
 func (l *Limiter) IsAllowed(n int64) bool {
 	alignedNow := l.nowFn().Truncate(time.Second)
 	l.RLock()

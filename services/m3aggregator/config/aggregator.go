@@ -36,8 +36,8 @@ import (
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3cluster/client"
 	etcdclient "github.com/m3db/m3cluster/client/etcd"
-	"github.com/m3db/m3cluster/generated/proto/commonpb"
 	"github.com/m3db/m3cluster/kv"
+	kvutil "github.com/m3db/m3cluster/kv/util"
 	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3metrics/policy"
@@ -179,7 +179,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 
 	// Set runtime options manager.
 	logger := instrumentOpts.Logger()
-	initRuntimeOpts, runtimeOptsManager, err := c.RuntimeOptions.NewRuntimeOptionsManager(client, logger)
+	runtimeOptsManager, err := c.RuntimeOptions.NewRuntimeOptionsManager(client, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -316,8 +316,9 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("entry-pool"))
 	entryPoolOpts := c.EntryPool.NewObjectPoolOptions(iOpts)
 	entryPool := aggregator.NewEntryPool(entryPoolOpts)
+	runtimeOpts := runtimeOptsManager.RuntimeOptions()
 	opts = opts.SetEntryPool(entryPool)
-	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, initRuntimeOpts, opts) })
+	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, runtimeOpts, opts) })
 
 	return opts, nil
 }
@@ -409,18 +410,18 @@ type runtimeOptionsConfiguration struct {
 func (c runtimeOptionsConfiguration) NewRuntimeOptionsManager(
 	client client.Client,
 	logger log.Logger,
-) (aggruntime.Options, aggruntime.OptionsManager, error) {
+) (aggruntime.OptionsManager, error) {
 	initRuntimeOpts := aggruntime.NewOptions().
 		SetWriteValuesPerMetricLimitPerSecond(c.WriteValuesPerMetricLimitPerSecond)
 	runtimeOptsManager := aggruntime.NewOptionsManager(initRuntimeOpts)
 
 	kvOpts, err := c.KVConfig.NewOptions()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	store, err := client.Store(kvOpts)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	watchRuntimeOptionChanges(
 		store,
@@ -429,7 +430,7 @@ func (c runtimeOptionsConfiguration) NewRuntimeOptionsManager(
 		runtimeOptsManager,
 		logger,
 	)
-	return initRuntimeOpts, runtimeOptsManager, nil
+	return runtimeOptsManager, nil
 }
 
 func watchRuntimeOptionChanges(
@@ -442,10 +443,7 @@ func watchRuntimeOptionChanges(
 	limit := defaultLimit
 	value, err := store.Get(limitKey)
 	if err == nil {
-		var protoValue commonpb.Int64Proto
-		if err = value.Unmarshal(&protoValue); err == nil {
-			limit = protoValue.Value
-		}
+		limit, err = kvutil.Int64FromValue(value, limitKey, defaultLimit, nil)
 	}
 	if err != nil {
 		logger.Warnf("unable to retrieve per-metric write value limit from kv: %v", err)
@@ -462,18 +460,12 @@ func watchRuntimeOptionChanges(
 	go func() {
 		for range watch.C() {
 			value := watch.Get()
-			if value == nil {
-				// Key is deleted from kv, reset limit to default.
-				updateRuntimeOptionsManagerOnChange(runtimeOptsManager, defaultLimit)
-			} else {
-				var protoValue commonpb.Int64Proto
-				if err := value.Unmarshal(&protoValue); err != nil {
-					logger.Errorf("unable to unmarshal per-metric write value limit: %v", err)
-					continue
-				}
-				newLimit := protoValue.Value
-				updateRuntimeOptionsManagerOnChange(runtimeOptsManager, newLimit)
+			newLimit, err := kvutil.Int64FromValue(value, limitKey, defaultLimit, nil)
+			if err != nil {
+				logger.Errorf("unable to determine per-metric write value limit: %v", err)
+				continue
 			}
+			updateRuntimeOptionsManagerOnChange(runtimeOptsManager, newLimit)
 		}
 	}()
 }

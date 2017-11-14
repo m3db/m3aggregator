@@ -97,7 +97,7 @@ aggregator:
       namespace: /m3aggregator
       environment: production
     writeValuesPerMetricLimitPerSecondKey: write-values-per-metric-limit-per-second
-    WriteValuesPerMetricLimitPerSecond: 0
+    writeValuesPerMetricLimitPerSecond: 0
   placementManager:
     kvConfig:
       namespace: /m3aggregator

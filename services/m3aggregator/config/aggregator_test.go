@@ -87,7 +87,7 @@ writeValuesPerMetricLimitPerSecond: 0
 	logger := log.NewLevelLogger(log.SimpleLogger, log.LevelInfo)
 	mockClient := client.NewMockClient(ctrl)
 	mockClient.EXPECT().Store(gomock.Any()).Return(memStore, nil)
-	_, runtimeOptsManager, err := runtimeOptionsCfg.NewRuntimeOptionsManager(mockClient, logger)
+	runtimeOptsManager, err := runtimeOptionsCfg.NewRuntimeOptionsManager(mockClient, logger)
 	require.NoError(t, err)
 	require.Equal(t, initialLimit, runtimeOptsManager.RuntimeOptions().WriteValuesPerMetricLimitPerSecond())
 
@@ -97,6 +97,15 @@ writeValuesPerMetricLimitPerSecond: 0
 	require.NoError(t, err)
 	for {
 		if runtimeOptsManager.RuntimeOptions().WriteValuesPerMetricLimitPerSecond() == newLimit {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	_, err = memStore.Delete("rate-limit-key")
+	require.NoError(t, err)
+	for {
+		if runtimeOptsManager.RuntimeOptions().WriteValuesPerMetricLimitPerSecond() == 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
