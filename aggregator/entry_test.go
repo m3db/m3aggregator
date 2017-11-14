@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m3db/m3aggregator/runtime"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
@@ -57,7 +58,7 @@ var (
 )
 
 func TestEntryIncDecWriter(t *testing.T) {
-	e := NewEntry(nil, testOptions())
+	e := NewEntry(nil, runtime.NewOptions(), testOptions())
 	require.Equal(t, int32(0), e.numWriters)
 
 	var (
@@ -669,7 +670,7 @@ func TestEntryMaybeExpireWithExpiry(t *testing.T) {
 }
 
 func TestShouldUpdatePoliciesWithLock(t *testing.T) {
-	e := NewEntry(nil, testOptions())
+	e := NewEntry(nil, runtime.NewOptions(), testOptions())
 	currTimeNanos := time.Now().UnixNano()
 	inputs := []struct {
 		cutoverNanos int64
@@ -720,8 +721,9 @@ func testEntry() (*Entry, *metricLists, *time.Time) {
 		return newMetricList(testShard, 0, opts)
 	}
 
-	e := NewEntry(nil, opts)
-	e.ResetSetData(lists, opts)
+	runtimeOpts := runtime.NewOptions()
+	e := NewEntry(nil, runtimeOpts, opts)
+	e.ResetSetData(lists, runtimeOpts, opts)
 
 	return e, lists, &now
 }
