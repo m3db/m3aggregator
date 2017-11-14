@@ -496,6 +496,11 @@ func (e *Entry) resetRateLimiterWithLock(runtimeOpts runtime.Options) {
 		e.rateLimiter = nil
 		return
 	}
+	if e.rateLimiter == nil {
+		nowFn := e.opts.ClockOptions().NowFn()
+		e.rateLimiter = rate.NewLimiter(newLimit, nowFn)
+		return
+	}
 	e.rateLimiter.Reset(newLimit)
 }
 

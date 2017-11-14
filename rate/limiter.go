@@ -51,6 +51,14 @@ func NewLimiter(l int64, fn clock.NowFn) *Limiter {
 	}
 }
 
+// Limit returns the current limit.
+func (l *Limiter) Limit() int64 {
+	l.RLock()
+	limit := l.limitPerSecond
+	l.RUnlock()
+	return limit
+}
+
 // IsAllowed returns whether n events may happen now.
 func (l *Limiter) IsAllowed(n int64) bool {
 	alignedNow := l.nowFn().Truncate(time.Second)

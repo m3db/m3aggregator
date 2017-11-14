@@ -51,6 +51,14 @@ var (
 	}
 )
 
+func TestMetricMapAddMetricWithPoliciesListMapClosed(t *testing.T) {
+	opts := testOptions()
+	m := newMetricMap(testShard, opts)
+	m.Close()
+
+	require.Equal(t, errMetricMapClosed, m.AddMetricWithPoliciesList(testCounter, testDefaultPoliciesList))
+}
+
 func TestMetricMapAddMetricWithPoliciesList(t *testing.T) {
 	opts := testOptions()
 	m := newMetricMap(testShard, opts)
@@ -120,6 +128,32 @@ func TestMetricMapAddMetricWithPoliciesList(t *testing.T) {
 	require.Equal(t, 3, len(m.entries))
 	require.Equal(t, 3, m.entryList.Len())
 	require.Equal(t, 3, m.metricLists.Len())
+}
+
+func TestMetricMapSetRuntimeOptions(t *testing.T) {
+	opts := testOptions()
+	m := newMetricMap(testShard, opts)
+
+	// Add three metrics.
+	require.NoError(t, m.AddMetricWithPoliciesList(testCounter, testDefaultPoliciesList))
+	require.NoError(t, m.AddMetricWithPoliciesList(testBatchTimer, testDefaultPoliciesList))
+	require.NoError(t, m.AddMetricWithPoliciesList(testGauge, testDefaultPoliciesList))
+
+	// Assert no entries have rate limiters.
+	runtimeOpts := runtime.NewOptions()
+	require.Equal(t, runtimeOpts, m.runtimeOpts)
+	for elem := m.entryList.Front(); elem != nil; elem = elem.Next() {
+		require.Nil(t, elem.Value.(hashedEntry).entry.rateLimiter)
+	}
+
+	// Update runtime options and assert all entries now have rate limiters.
+	newRateLimit := int64(100)
+	runtimeOpts = runtime.NewOptions().SetWriteValuesPerMetricLimitPerSecond(newRateLimit)
+	m.SetRuntimeOptions(runtimeOpts)
+	require.Equal(t, runtimeOpts, m.runtimeOpts)
+	for elem := m.entryList.Front(); elem != nil; elem = elem.Next() {
+		require.Equal(t, newRateLimit, elem.Value.(hashedEntry).entry.rateLimiter.Limit())
+	}
 }
 
 func TestMetricMapDeleteExpired(t *testing.T) {
