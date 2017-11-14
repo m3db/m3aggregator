@@ -1,5 +1,5 @@
 hash: ac54e6a48785818dc577e5052ad2e0d5de0c67ae6294aeb185319f9af19b81c1
-updated: 2017-11-14T13:01:00.610845883-05:00
+updated: 2017-11-14T16:11:53.226401058-05:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -133,6 +133,7 @@ imports:
   - kv
   - kv/etcd
   - kv/mem
+  - kv/util
   - kv/util/runtime
   - placement
   - placement/algo
@@ -239,6 +240,8 @@ imports:
   version: 988f4f24992fc745de53c42df0da6581e42a6686
 - name: github.com/xiang90/probing
   version: 07dd2e8dfe18522e9c447ba95f2fe95262f63bb2
+- name: go.uber.org/atomic
+  version: 8474b86a5a6f79c443ce4b2992817ff32cf208b8
 - name: golang.org/x/crypto
   version: 1351f936d976c60a0a48d728281922cf63eafb8d
   subpackages:
