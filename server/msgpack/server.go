@@ -103,6 +103,7 @@ func (s *handler) Handle(conn net.Conn) {
 		metric := it.Metric()
 		policiesList := it.PoliciesList()
 		if err := s.aggregator.AddMetricWithPoliciesList(metric, policiesList); err != nil {
+			s.metrics.addMetricErrors.Inc(1)
 			// We rate limit the error log here because the error rate may scale with
 			// the metrics incoming rate and consume lots of cpu cycles.
 			if s.errLogRateLimiter != nil && !s.errLogRateLimiter.IsAllowed(1) {
@@ -115,7 +116,6 @@ func (s *handler) Handle(conn net.Conn) {
 				log.NewField("policies", policiesList),
 				log.NewErrField(err),
 			).Errorf("error adding metric with policies")
-			s.metrics.addMetricErrors.Inc(1)
 		}
 	}
 
