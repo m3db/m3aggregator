@@ -127,11 +127,12 @@ func (c RuntimeOptionsConfiguration) WatchRuntimeOptionChanges(
 					logger.Errorf("unable to determine per-metric write value limit: %v", err)
 					continue
 				}
-				if newValueLimit == valueLimit {
+				currValueLimit := runtimeOpts.WriteValuesPerMetricLimitPerSecond()
+				if newValueLimit == currValueLimit {
 					logger.Infof("per-metric write value limit %d is unchanged, skipping", newValueLimit)
 					continue
 				}
-				logger.Infof("updating per-metric write value limit from %d to %d", valueLimit, newValueLimit)
+				logger.Infof("updating per-metric write value limit from %d to %d", currValueLimit, newValueLimit)
 				runtimeOpts = runtimeOpts.SetWriteValuesPerMetricLimitPerSecond(newValueLimit)
 				runtimeOptsManager.SetRuntimeOptions(runtimeOpts)
 			case <-newMetricLimitCh:
@@ -145,11 +146,12 @@ func (c RuntimeOptionsConfiguration) WatchRuntimeOptionChanges(
 					logger.Errorf("unable to determine per-shard new metric limit: %v", err)
 					continue
 				}
-				if newNewMetricPerShardLimit == newMetricPerShardLimit {
+				currNewMetricPerShardLimit := runtimeOpts.WriteNewMetricLimitPerShardPerSecond()
+				if newNewMetricPerShardLimit == currNewMetricPerShardLimit {
 					logger.Infof("per-shard write new metric limit %d is unchanged, skipping", newNewMetricPerShardLimit)
 					continue
 				}
-				logger.Infof("updating per-shard write new metric limit from %d to %d", newMetricPerShardLimit, newNewMetricPerShardLimit)
+				logger.Infof("updating per-shard write new metric limit from %d to %d", currNewMetricPerShardLimit, newNewMetricPerShardLimit)
 				runtimeOpts = runtimeOpts.SetWriteNewMetricLimitPerShardPerSecond(newNewMetricPerShardLimit)
 				runtimeOptsManager.SetRuntimeOptions(runtimeOpts)
 			}

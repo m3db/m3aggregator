@@ -91,6 +91,7 @@ writeNewMetricNoLimitWarmupDuration: 10m
 		SetWriteNewMetricNoLimitWarmupDuration(10 * time.Minute)
 	require.Equal(t, expectedOpts, runtimeOpts)
 
+	// Set a new value limit.
 	newValueLimit := int64(1000)
 	proto.Value = newValueLimit
 	_, err = memStore.Set("rate-limit-key", proto)
@@ -107,13 +108,48 @@ writeNewMetricNoLimitWarmupDuration: 10m
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	// Revert value limit to initial limit.
+	newValueLimit = 100
+	proto.Value = newValueLimit
+	_, err = memStore.Set("rate-limit-key", proto)
+	require.NoError(t, err)
+	expectedOpts = runtime.NewOptions().
+		SetWriteValuesPerMetricLimitPerSecond(100).
+		SetWriteNewMetricLimitPerShardPerSecond(4).
+		SetWriteNewMetricNoLimitWarmupDuration(10 * time.Minute)
+	for {
+		runtimeOpts = runtimeOptsManager.RuntimeOptions()
+		if compareRuntimeOptions(expectedOpts, runtimeOpts) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Set a new new-metric limit.
 	newNewMetricLimit := int64(128)
 	proto.Value = newNewMetricLimit
 	_, err = memStore.Set("new-metric-limit-key", proto)
 	require.NoError(t, err)
 	expectedOpts = runtime.NewOptions().
-		SetWriteValuesPerMetricLimitPerSecond(1000).
+		SetWriteValuesPerMetricLimitPerSecond(100).
 		SetWriteNewMetricLimitPerShardPerSecond(16).
+		SetWriteNewMetricNoLimitWarmupDuration(10 * time.Minute)
+	for {
+		runtimeOpts = runtimeOptsManager.RuntimeOptions()
+		if compareRuntimeOptions(expectedOpts, runtimeOpts) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Revert to default new-metric limit.
+	newNewMetricLimit = int64(32)
+	proto.Value = newNewMetricLimit
+	_, err = memStore.Set("new-metric-limit-key", proto)
+	require.NoError(t, err)
+	expectedOpts = runtime.NewOptions().
+		SetWriteValuesPerMetricLimitPerSecond(100).
+		SetWriteNewMetricLimitPerShardPerSecond(4).
 		SetWriteNewMetricNoLimitWarmupDuration(10 * time.Minute)
 	for {
 		runtimeOpts = runtimeOptsManager.RuntimeOptions()

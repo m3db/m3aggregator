@@ -61,6 +61,7 @@ type hashedEntry struct {
 
 type metricMapMetrics struct {
 	newEntries                 tally.Counter
+	noRateLimitWarmup          tally.Counter
 	newMetricRateLimitExceeded tally.Counter
 	droppedNewMetrics          tally.Counter
 }
@@ -68,6 +69,7 @@ type metricMapMetrics struct {
 func newMetricMapMetrics(scope tally.Scope) metricMapMetrics {
 	return metricMapMetrics{
 		newEntries:                 scope.Counter("new-entries"),
+		noRateLimitWarmup:          scope.Counter("no-rate-limit-warmup"),
 		newMetricRateLimitExceeded: scope.Counter("new-metric-rate-limit-exceeded"),
 		droppedNewMetrics:          scope.Counter("dropped-new-metrics"),
 	}
@@ -369,6 +371,7 @@ func (m *metricMap) applyNewMetricRateLimitWithLock() error {
 	}
 	noLimitWarmupDuration := m.runtimeOpts.WriteNewMetricNoLimitWarmupDuration()
 	if warmupEnd := m.firstInsertAt.Add(noLimitWarmupDuration); now.Before(warmupEnd) {
+		m.metrics.noRateLimitWarmup.Inc(1)
 		return nil
 	}
 	if m.rateLimiter.IsAllowed(1) {
