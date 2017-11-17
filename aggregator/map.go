@@ -222,7 +222,11 @@ func (m *metricMap) findOrCreate(key entryKey) (*Entry, error) {
 	}
 
 	// Check if we are allowed to insert a new metric.
-	if err := m.applyNewMetricRateLimitWithLock(); err != nil {
+	now := m.nowFn()
+	if m.firstInsertAt.IsZero() {
+		m.firstInsertAt = now
+	}
+	if err := m.applyNewMetricRateLimitWithLock(now); err != nil {
 		m.Unlock()
 		return nil, err
 	}
@@ -361,13 +365,9 @@ func (m *metricMap) resetRateLimiterWithLock(runtimeOpts runtime.Options) {
 	m.rateLimiter.Reset(newLimit)
 }
 
-func (m *metricMap) applyNewMetricRateLimitWithLock() error {
+func (m *metricMap) applyNewMetricRateLimitWithLock(now time.Time) error {
 	if m.rateLimiter == nil {
 		return nil
-	}
-	now := m.nowFn()
-	if m.firstInsertAt.IsZero() {
-		m.firstInsertAt = now
 	}
 	noLimitWarmupDuration := m.runtimeOpts.WriteNewMetricNoLimitWarmupDuration()
 	if warmupEnd := m.firstInsertAt.Add(noLimitWarmupDuration); now.Before(warmupEnd) {
