@@ -63,7 +63,7 @@ runtimeOptions:
     environment: production
   writeValuesPerMetricLimitPerSecondKey: write-values-per-metric-limit-per-second
   writeValuesPerMetricLimitPerSecond: 0
-  writeNewMetricLimitClusterPerSecondKey: write-new-metric-limit-per-second
+  writeNewMetricLimitClusterPerSecondKey: write-new-metric-limit-cluster-per-second
   writeNewMetricLimitClusterPerSecond: 0
   writeNewMetricNoLimitWarmupDuration: 0
 

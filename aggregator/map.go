@@ -369,6 +369,8 @@ func (m *metricMap) applyNewMetricRateLimitWithLock(now time.Time) error {
 	if m.rateLimiter == nil {
 		return nil
 	}
+	// If we are still in the warmup phase and possibly ingesting a large amount
+	// of new metrics, no rate limit is applied.
 	noLimitWarmupDuration := m.runtimeOpts.WriteNewMetricNoLimitWarmupDuration()
 	if warmupEnd := m.firstInsertAt.Add(noLimitWarmupDuration); now.Before(warmupEnd) {
 		m.metrics.noRateLimitWarmup.Inc(1)
