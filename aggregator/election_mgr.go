@@ -710,9 +710,10 @@ func (mgr *electionManager) campaignLoop(campaignStateWatch watch.Watch) {
 			}); err == nil {
 				atomic.StoreInt32(&mgr.campaigning, 1)
 			} else {
-				// If we get here, either the manager is closed or the campaign is disabled.
-				// If the manager is closed, we return immediately. Otherwise we wait for a
-				// change in the campaign enabled status before continuing campaigning.
+				// If we get here, the campaign failed and either the manager is closed or
+				// the campaign is disabled. If the manager is closed, we return immediately.
+				// Otherwise we wait for a change in the campaign enabled status before continuing
+				// campaigning.
 				select {
 				case <-mgr.doneCh:
 					return
