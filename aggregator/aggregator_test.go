@@ -564,6 +564,9 @@ func TestAggregatorAddMetricMetrics(t *testing.T) {
 	s := tally.NewTestScope("testScope", nil)
 	m := newAggregatorAddMetricMetrics(s, 1.0)
 	m.ReportSuccess(time.Second)
+	m.ReportError(errInvalidMetricType)
+	m.ReportError(errShardNotOwned)
+	m.ReportError(errAggregatorShardNotWriteable)
 	m.ReportError(errWriteNewMetricRateLimitExceeded)
 	m.ReportError(errWriteValueRateLimitExceeded)
 	m.ReportError(errors.New("foo"))
@@ -572,9 +575,12 @@ func TestAggregatorAddMetricMetrics(t *testing.T) {
 	counters, timers, gauges := snapshot.Counters(), snapshot.Timers(), snapshot.Gauges()
 
 	// Validate we count successes and errors correctly.
-	require.Equal(t, 4, len(counters))
+	require.Equal(t, 7, len(counters))
 	for _, id := range []string{
 		"testScope.success+",
+		"testScope.errors+reason=invalid-metric-types",
+		"testScope.errors+reason=shard-not-owned",
+		"testScope.errors+reason=shard-not-writeable",
 		"testScope.errors+reason=value-rate-limit-exceeded",
 		"testScope.errors+reason=new-metric-rate-limit-exceeded",
 		"testScope.errors+reason=not-categorized",
