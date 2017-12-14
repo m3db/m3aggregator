@@ -574,7 +574,7 @@ func TestAggregatorAddMetricMetrics(t *testing.T) {
 	// Validate we count successes and errors correctly.
 	require.Equal(t, 4, len(counters))
 	for _, id := range []string{
-		"testScope.success+", // NB: this looks like a bug with tally test scope
+		"testScope.success+",
 		"testScope.errors+reason=value-rate-limit-exceeded",
 		"testScope.errors+reason=new-metric-rate-limit-exceeded",
 		"testScope.errors+reason=not-categorized",
@@ -588,7 +588,7 @@ func TestAggregatorAddMetricMetrics(t *testing.T) {
 	require.Equal(t, 1, len(timers))
 
 	for _, id := range []string{
-		"testScope.success-latency+", // NB: this looks like a bug with tally test scope
+		"testScope.success-latency+",
 	} {
 		ti, exists := timers[id]
 		require.True(t, exists)
