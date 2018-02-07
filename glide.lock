@@ -148,7 +148,7 @@ imports:
   - services/leader/election
   - shard
 - name: github.com/m3db/m3metrics
-  version: de92bc7d4f57cdfc084f3ebd76c9ec599ef8dc11
+  version: 70615bfe9d5c94021e6b4d19810b193b57462f9a
   subpackages:
   - generated/proto/schema
   - metric
