@@ -158,7 +158,7 @@ imports:
   - policy
   - protocol/msgpack
 - name: github.com/m3db/m3x
-  version: f95d1021f5dbac46cf2f6994b4b2d2d194fb0697
+  version: dbdbd564ff2f64388a641ce61f541eceb7d2e416
   subpackages:
   - checked
   - clock
