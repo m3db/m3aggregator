@@ -37,7 +37,7 @@ import (
 	"github.com/uber-go/tally"
 )
 
-func NewMetricList(t *testing.T) {
+func TestNewMetricList(t *testing.T) {
 	inputs := []struct {
 		nowNanos int64
 		dur      time.Duration
