@@ -32,9 +32,9 @@ import (
 	"github.com/m3db/m3cluster/shard"
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3x/watch"
-	"github.com/uber-go/tally"
 
 	"github.com/golang/mock/gomock"
+	"github.com/uber-go/tally"
 )
 
 // Mock of ElectionManager interface
