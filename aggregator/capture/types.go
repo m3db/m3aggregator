@@ -18,16 +18,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package mock
+package capture
 
 import (
-	"github.com/m3db/m3aggregator/aggregator"
+	aggr "github.com/m3db/m3aggregator/aggregator"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 )
 
 // Aggregator provide an aggregator for testing purposes.
 type Aggregator interface {
-	aggregator.Aggregator
+	aggr.Aggregator
 
 	// NumMetricsAdded returns the number of metrics added.
 	NumMetricsAdded() int
