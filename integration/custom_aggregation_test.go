@@ -35,8 +35,8 @@ import (
 
 var (
 	compressor                             = aggregation.NewIDCompressor()
-	compressedMin, _                       = compressor.Compress(aggregation.Types{aggregation.Min})
-	compressedMinAndMax, _                 = compressor.Compress(aggregation.Types{aggregation.Min, aggregation.Max})
+	compressedMin                          = compressor.MustCompress(aggregation.Types{aggregation.Min})
+	compressedMinAndMax                    = compressor.MustCompress(aggregation.Types{aggregation.Min, aggregation.Max})
 	testPoliciesListWithCustomAggregation1 = policy.PoliciesList{
 		policy.NewStagedPolicies(
 			0,
