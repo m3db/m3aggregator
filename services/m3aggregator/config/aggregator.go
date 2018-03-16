@@ -41,7 +41,6 @@ import (
 	"github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/instrument"
-	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/pool"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/sync"
@@ -403,9 +402,6 @@ type flushTimesManagerConfiguration struct {
 	// KV Configuration.
 	KVConfig kv.OverrideConfiguration `yaml:"kvConfig"`
 
-	// Logging configuration.
-	Logging *log.Configuration `yaml:"logging"`
-
 	// Flush times key format.
 	FlushTimesKeyFmt string `yaml:"flushTimesKeyFmt" validate:"nonzero"`
 
@@ -417,13 +413,6 @@ func (c flushTimesManagerConfiguration) NewFlushTimesManager(
 	client client.Client,
 	instrumentOpts instrument.Options,
 ) (aggregator.FlushTimesManager, error) {
-	if c.Logging != nil {
-		logger, err := c.Logging.BuildLogger()
-		if err != nil {
-			return nil, err
-		}
-		instrumentOpts = instrumentOpts.SetLogger(logger)
-	}
 	kvOpts, err := c.KVConfig.NewOverrideOptions()
 	if err != nil {
 		return nil, err
