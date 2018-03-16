@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/policy"
 	xtime "github.com/m3db/m3x/time"
 
@@ -33,9 +34,9 @@ import (
 )
 
 var (
-	compressor                             = policy.NewAggregationIDCompressor()
-	compressedMin, _                       = compressor.Compress(policy.AggregationTypes{policy.Min})
-	compressedMinAndMax, _                 = compressor.Compress(policy.AggregationTypes{policy.Min, policy.Max})
+	compressor                             = aggregation.NewIDCompressor()
+	compressedMin, _                       = compressor.Compress(aggregation.Types{aggregation.Min})
+	compressedMinAndMax, _                 = compressor.Compress(aggregation.Types{aggregation.Min, aggregation.Max})
 	testPoliciesListWithCustomAggregation1 = policy.PoliciesList{
 		policy.NewStagedPolicies(
 			0,

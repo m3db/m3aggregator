@@ -34,12 +34,12 @@ import (
 
 // RuntimeOptionsConfiguration configures runtime options.
 type RuntimeOptionsConfiguration struct {
-	KVConfig                               kv.Configuration `yaml:"kvConfig"`
-	WriteValuesPerMetricLimitPerSecondKey  string           `yaml:"writeValuesPerMetricLimitPerSecondKey" validate:"nonzero"`
-	WriteValuesPerMetricLimitPerSecond     int64            `yaml:"writeValuesPerMetricLimitPerSecond"`
-	WriteNewMetricLimitClusterPerSecondKey string           `yaml:"writeNewMetricLimitClusterPerSecondKey" validate:"nonzero"`
-	WriteNewMetricLimitClusterPerSecond    int64            `yaml:"writeNewMetricLimitClusterPerSecond"`
-	WriteNewMetricNoLimitWarmupDuration    time.Duration    `yaml:"writeNewMetricNoLimitWarmupDuration"`
+	KVConfig                               kv.OverrideConfiguration `yaml:"kvConfig"`
+	WriteValuesPerMetricLimitPerSecondKey  string                   `yaml:"writeValuesPerMetricLimitPerSecondKey" validate:"nonzero"`
+	WriteValuesPerMetricLimitPerSecond     int64                    `yaml:"writeValuesPerMetricLimitPerSecond"`
+	WriteNewMetricLimitClusterPerSecondKey string                   `yaml:"writeNewMetricLimitClusterPerSecondKey" validate:"nonzero"`
+	WriteNewMetricLimitClusterPerSecond    int64                    `yaml:"writeNewMetricLimitClusterPerSecond"`
+	WriteNewMetricNoLimitWarmupDuration    time.Duration            `yaml:"writeNewMetricNoLimitWarmupDuration"`
 }
 
 // NewRuntimeOptionsManager creates a new runtime options manager.
@@ -57,7 +57,7 @@ func (c RuntimeOptionsConfiguration) WatchRuntimeOptionChanges(
 	placementManager aggregator.PlacementManager,
 	logger log.Logger,
 ) {
-	kvOpts, err := c.KVConfig.NewOptions()
+	kvOpts, err := c.KVConfig.NewOverrideOptions()
 	if err != nil {
 		logger.Errorf("unable to create kv config options: %v", err)
 		return
