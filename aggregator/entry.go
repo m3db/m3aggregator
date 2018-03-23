@@ -82,7 +82,7 @@ func newEntryMetrics(scope tally.Scope) entryMetrics {
 	}
 }
 
-// Entry keeps track of all aggregations of a metric alongside their aggregation
+// Entry keeps track of a metric's aggregations alongside the aggregation
 // metadatas including storage policies, aggregation types, and remaining pipeline
 // steps if any.
 type Entry struct {

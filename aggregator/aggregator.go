@@ -63,8 +63,8 @@ type Aggregator interface {
 
 // metricsAggregator contains private aggregator APIs.
 type metricsAggregator interface {
-	// addForwarded adds a forwarded metric with metadata.
-	addForwarded(metric aggregated.Metric, metadata metadata.ForwardMetadata) error
+	// AddForwarded adds a forwarded metric with metadata.
+	AddForwarded(metric aggregated.Metric, metadata metadata.ForwardMetadata) error
 }
 
 const (
