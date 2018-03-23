@@ -29,6 +29,7 @@ import (
 	maggregation "github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
+	"github.com/m3db/m3metrics/op/applied"
 	"github.com/m3db/m3metrics/policy"
 )
 
@@ -61,7 +62,12 @@ type metricElem interface {
 	ID() id.RawID
 
 	// ResetSetData resets the element and sets data.
-	ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types)
+	ResetSetData(
+		id id.RawID,
+		sp policy.StoragePolicy,
+		aggTypes maggregation.Types,
+		pipeline applied.Pipeline,
+	)
 
 	// AddMetric adds a new metric value.
 	// TODO(xichen): a value union would suffice here.
@@ -145,7 +151,12 @@ func newElemBase(opts Options) elemBase {
 }
 
 // resetSetData resets the element base and sets data.
-func (e *elemBase) resetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types, useDefaultAggregation bool) {
+func (e *elemBase) resetSetData(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	useDefaultAggregation bool,
+) {
 	e.id = id
 	e.sp = sp
 	e.aggTypes = aggTypes
@@ -176,17 +187,30 @@ func (e *elemBase) MarkAsTombstoned() {
 }
 
 // NewCounterElem creates a new counter element.
-func NewCounterElem(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types, opts Options) *CounterElem {
+// TODO(xichen): handle pipeline properly here.
+func NewCounterElem(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+	opts Options,
+) *CounterElem {
 	e := &CounterElem{
 		elemBase: newElemBase(opts),
 		values:   make([]timedCounter, 0, defaultNumValues), // in most cases values will have two entries
 	}
-	e.ResetSetData(id, sp, aggTypes)
+	e.ResetSetData(id, sp, aggTypes, pipeline)
 	return e
 }
 
 // ResetSetData resets the counter element and sets data.
-func (e *CounterElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types) {
+// TODO(xichen): handle pipeline properly here.
+func (e *CounterElem) ResetSetData(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+) {
 	useDefaultAggregation := aggTypes.IsDefault()
 	if useDefaultAggregation {
 		aggTypes = e.aggTypesOpts.DefaultCounterAggregationTypes()
@@ -356,17 +380,30 @@ func (e *CounterElem) processValue(timeNanos int64, agg aggregation.Counter, fn 
 }
 
 // NewTimerElem creates a new timer element.
-func NewTimerElem(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types, opts Options) *TimerElem {
+// TODO(xichen): properly handle pipeline here.
+func NewTimerElem(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+	opts Options,
+) *TimerElem {
 	e := &TimerElem{
 		elemBase: newElemBase(opts),
 		values:   make([]timedTimer, 0, defaultNumValues), // in most cases values will have two entries
 	}
-	e.ResetSetData(id, sp, aggTypes)
+	e.ResetSetData(id, sp, aggTypes, pipeline)
 	return e
 }
 
 // ResetSetData resets the timer element and sets data.
-func (e *TimerElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types) {
+// TODO(xichen): handle pipeline properly here.
+func (e *TimerElem) ResetSetData(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+) {
 	useDefaultAggregation := aggTypes.IsDefault()
 	if useDefaultAggregation {
 		aggTypes = e.aggTypesOpts.DefaultTimerAggregationTypes()
@@ -555,17 +592,30 @@ func (e *TimerElem) processValue(timeNanos int64, agg aggregation.Timer, fn aggM
 }
 
 // NewGaugeElem creates a new gauge element.
-func NewGaugeElem(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types, opts Options) *GaugeElem {
+// TODO(xichen): properly handle pipeline here.
+func NewGaugeElem(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+	opts Options,
+) *GaugeElem {
 	e := &GaugeElem{
 		elemBase: newElemBase(opts),
 		values:   make([]timedGauge, 0, defaultNumValues), // in most cases values will have two entries
 	}
-	e.ResetSetData(id, sp, aggTypes)
+	e.ResetSetData(id, sp, aggTypes, pipeline)
 	return e
 }
 
 // ResetSetData resets the gauge element and sets data.
-func (e *GaugeElem) ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types) {
+// TODO(xichen): handle pipeline properly here.
+func (e *GaugeElem) ResetSetData(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+) {
 	useDefaultAggregation := aggTypes.IsDefault()
 	if useDefaultAggregation {
 		aggTypes = e.aggTypesOpts.DefaultGaugeAggregationTypes()
