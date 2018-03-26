@@ -242,7 +242,7 @@ type aggregatorMetrics struct {
 }
 
 func newAggregatorMetrics(scope tally.Scope, samplingRate float64) aggregatorMetrics {
-	addMetricScope := scope.SubScope("addUntimed")
+	addUntimedScope := scope.SubScope("addUntimed")
 	placementScope := scope.SubScope("placement")
 	shardsScope := scope.SubScope("shards")
 	shardSetIDScope := scope.SubScope("shard-set-id")
@@ -252,7 +252,7 @@ func newAggregatorMetrics(scope tally.Scope, samplingRate float64) aggregatorMet
 		timers:       scope.Counter("timers"),
 		timerBatches: scope.Counter("timer-batches"),
 		gauges:       scope.Counter("gauges"),
-		addUntimed:   newAggregatorAddUntimedMetrics(addMetricScope, samplingRate),
+		addUntimed:   newAggregatorAddUntimedMetrics(addUntimedScope, samplingRate),
 		placement:    newAggregatorPlacementMetrics(placementScope),
 		shards:       newAggregatorShardsMetrics(shardsScope),
 		shardSetID:   newAggregatorShardSetIDMetrics(shardSetIDScope),

@@ -43,6 +43,8 @@ import (
 )
 
 const (
+	// initialAggregationCapacity is the initial number of slots
+	// allocated for aggregation metadata.
 	initialAggregationCapacity = 2
 )
 
@@ -319,6 +321,8 @@ func (e *Entry) TryExpire(now time.Time) bool {
 		return false
 	}
 	e.closed = true
+	// Empty out the aggregation elements so they don't hold references
+	// to other objects after being put back to pool to reduce GC overhead.
 	for i := range e.aggregations {
 		e.aggregations[i].elem.Value.(metricElem).MarkAsTombstoned()
 		e.aggregations[i] = aggregationValue{}
@@ -415,9 +419,7 @@ func (e *Entry) maybeCopyIDWithLock(metric unaggregated.MetricUnion) metricid.Ra
 	// If there are existing elements for this id, try reusing
 	// the id from the elements because those are owned by us.
 	if len(e.aggregations) > 0 {
-		for _, aggVal := range e.aggregations {
-			return aggVal.elem.Value.(metricElem).ID()
-		}
+		return e.aggregations[0].elem.Value.(metricElem).ID()
 	}
 
 	// Otherwise it is necessary to make a copy because it's not owned by us.
