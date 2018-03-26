@@ -1,5 +1,5 @@
-hash: 7de644447e05a04b5b6d3f8d9232790ac65dc70dcadf2185c32641d46e1e8fcc
-updated: 2018-04-19T13:46:10.784417-04:00
+hash: 69a0d848116ddda2e51d14e6930b66c67a2fec05848654591106d3775e795851
+updated: 2018-06-08T08:51:24.137835-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -109,8 +109,6 @@ imports:
   - spew
 - name: github.com/dgrijalva/jwt-go
   version: d2709f9f1f31ebcda9651b03077758c1f3a0018c
-- name: github.com/facebookgo/clock
-  version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
 - name: github.com/ghodss/yaml
   version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
 - name: github.com/go-ole/go-ole
@@ -178,16 +176,20 @@ imports:
   - services/leader/election
   - shard
 - name: github.com/m3db/m3metrics
-  version: 37265d8b277ac730591e5221c48ea96a3201739a
+  version: a6f925555e26cfcbf1923da32c93d0a5ed463bd3
   subpackages:
   - aggregation
   - generated/proto/schema
+  - metadata
   - metric
   - metric/aggregated
   - metric/id
   - metric/unaggregated
+  - op
+  - op/applied
   - policy
   - protocol/msgpack
+  - transformation
 - name: github.com/m3db/m3x
   version: 29bc232d9ad2e6c4a1804ccce095bb730fb1c6bc
   subpackages:
@@ -195,9 +197,7 @@ imports:
   - clock
   - close
   - config
-  - context
   - errors
-  - ident
   - instrument
   - log
   - net
@@ -252,7 +252,7 @@ imports:
 - name: github.com/uber-go/atomic
   version: e682c1008ac17bf26d2e4b5ad6cdd08520ed0b22
 - name: github.com/uber-go/tally
-  version: 522328b48efad0c6034dba92bf39228694e9d31f
+  version: 79f2a33b0e55b1255ffbbaf824dcafb09ff34dda
   subpackages:
   - m3
   - m3/customtransports
@@ -267,11 +267,11 @@ imports:
 - name: github.com/xiang90/probing
   version: 07dd2e8dfe18522e9c447ba95f2fe95262f63bb2
 - name: go.uber.org/atomic
-  version: 8474b86a5a6f79c443ce4b2992817ff32cf208b8
+  version: 1ea20fb1cbb1cc08cbd0d913a96dead89aa18289
 - name: go.uber.org/multierr
   version: 3c4937480c32f4c13a875a1829af76c98ca3d40a
 - name: go.uber.org/zap
-  version: 35aad584952c3e7020db7b839f6b102de6271f89
+  version: eeedf312bc6c57391d84767a4cd413f02a917974
   subpackages:
   - buffer
   - internal/bufferpool
