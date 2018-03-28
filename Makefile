@@ -10,8 +10,7 @@ convert-test-data     := .ci/convert-test-data.sh
 coverfile             := cover.out
 coverage_xml          := coverage.xml
 junit_xml             := junit.xml
-exclude_coverage_file := .excludecoverage
-exclude_coverage      := $(shell cat $(exclude_coverage_file) | tr '\n' ',')
+coverage_exclude      := .excludecoverage
 test_log              := test.log
 lint_check            := .ci/lint.sh
 metalint_check        := .ci/metalint.sh
@@ -76,7 +75,7 @@ metalint: install-metalinter install-linter-badtime
 .PHONY: test-internal
 test-internal:
 	@which go-junit-report > /dev/null || go get -u github.com/sectioneight/go-junit-report
-	$(test) $(coverfile) | tee $(test_log)
+	($(test) $(coverfile) && cat $(coverfile) | egrep -v -f $(coverage_exclude) | sponge $(coverfile)) | tee $(test_log)
 
 .PHONY: test-integration
 test-integration:
@@ -101,7 +100,7 @@ testhtml: test-internal
 .PHONY: test-ci-unit
 test-ci-unit: test-internal
 	@which goveralls > /dev/null || go get -u -f github.com/mattn/goveralls
-	goveralls -coverprofile=$(coverfile) -service=travis-ci -ignore=$(exclude_coverage) || echo -e "\x1b[31mCoveralls failed\x1b[m"
+	goveralls -coverprofile=$(coverfile) -service=travis-ci || echo -e "\x1b[31mCoveralls failed\x1b[m"
 
 .PHONY: test-ci-integration
 test-ci-integration:
