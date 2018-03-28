@@ -3,32 +3,34 @@ include $(SELF_DIR)/.ci/common.mk
 
 SHELL=/bin/bash -o pipefail
 
-html_report          := coverage.html
-test                 := .ci/test-cover.sh
-test_ci_integration  := .ci/test-integration.sh
-convert-test-data    := .ci/convert-test-data.sh
-coverfile            := cover.out
-coverage_xml         := coverage.xml
-junit_xml            := junit.xml
-test_log             := test.log
-lint_check           := .ci/lint.sh
-metalint_check       := .ci/metalint.sh
-metalint_config      := .metalinter.json
-metalint_exclude     := .excludemetalint
-package_root         := github.com/m3db/m3aggregator
-gopath_prefix        := $(GOPATH)/src
-vendor_prefix        := vendor
-mockgen_package      := github.com/golang/mock/mockgen
-mocks_output_dir     := generated/mocks/mocks
-mocks_rules_dir      := generated/mocks
-protoc_go_package    := github.com/golang/protobuf/protoc-gen-go
-proto_output_dir     := generated/proto
-proto_rules_dir      := generated/proto
-generics_output_dir  := generated/generics
-generics_rules_dir   := generated/generics
-auto_gen             := .ci/auto-gen.sh
-license_dir          := .ci/uber-licence
-license_node_modules := $(license_dir)/node_modules
+html_report           := coverage.html
+test                  := .ci/test-cover.sh
+test_ci_integration   := .ci/test-integration.sh
+convert-test-data     := .ci/convert-test-data.sh
+coverfile             := cover.out
+coverage_xml          := coverage.xml
+junit_xml             := junit.xml
+exclude_coverage_file := .excludecoverage
+exclude_coverage      := $(shell cat $(exclude_coverage_file) | tr '\n' ',')
+test_log              := test.log
+lint_check            := .ci/lint.sh
+metalint_check        := .ci/metalint.sh
+metalint_config       := .metalinter.json
+metalint_exclude      := .excludemetalint
+package_root          := github.com/m3db/m3aggregator
+gopath_prefix         := $(GOPATH)/src
+vendor_prefix         := vendor
+mockgen_package       := github.com/golang/mock/mockgen
+mocks_output_dir      := generated/mocks/mocks
+mocks_rules_dir       := generated/mocks
+protoc_go_package     := github.com/golang/protobuf/protoc-gen-go
+proto_output_dir      := generated/proto
+proto_rules_dir       := generated/proto
+generics_output_dir   := generated/generics
+generics_rules_dir    := generated/generics
+auto_gen              := .ci/auto-gen.sh
+license_dir           := .ci/uber-licence
+license_node_modules  := $(license_dir)/node_modules
 
 BUILD           := $(abspath ./bin)
 LINUX_AMD64_ENV := GOOS=linux GOARCH=amd64 CGO_ENABLED=0
@@ -99,7 +101,7 @@ testhtml: test-internal
 .PHONY: test-ci-unit
 test-ci-unit: test-internal
 	@which goveralls > /dev/null || go get -u -f github.com/mattn/goveralls
-	goveralls -coverprofile=$(coverfile) -service=travis-ci || echo -e "\x1b[31mCoveralls failed\x1b[m"
+	goveralls -coverprofile=$(coverfile) -service=travis-ci -ignore=$(exclude_coverage) || echo -e "\x1b[31mCoveralls failed\x1b[m"
 
 .PHONY: test-ci-integration
 test-ci-integration:

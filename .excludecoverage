@@ -1,0 +1,4 @@
+generic_*.go
+*_mock.go
+generated/
+integration/
