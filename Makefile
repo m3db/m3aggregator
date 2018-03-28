@@ -75,7 +75,7 @@ metalint: install-metalinter install-linter-badtime
 .PHONY: test-internal
 test-internal:
 	@which go-junit-report > /dev/null || go get -u github.com/sectioneight/go-junit-report
-	($(test) $(coverfile) && cat $(coverfile) | egrep -v -f $(coverage_exclude) | sponge $(coverfile)) | tee $(test_log)
+	($(test) $(coverfile) && cat $(coverfile) | egrep -v -f $(coverage_exclude) > $(coverfile).tmp && mv $(coverfile).tmp $(coverfile)) | tee $(test_log)
 
 .PHONY: test-integration
 test-integration:
