@@ -29,6 +29,7 @@ import (
 	maggregation "github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
+	"github.com/m3db/m3metrics/op/applied"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/pool"
 )
@@ -57,7 +58,12 @@ type metricElem interface {
 	ID() id.RawID
 
 	// ResetSetData resets the element and sets data.
-	ResetSetData(id id.RawID, sp policy.StoragePolicy, aggTypes maggregation.Types)
+	ResetSetData(
+		id id.RawID,
+		sp policy.StoragePolicy,
+		aggTypes maggregation.Types,
+		pipeline applied.Pipeline,
+	)
 
 	// AddMetric adds a new metric value.
 	// TODO(xichen): a value union would suffice here.

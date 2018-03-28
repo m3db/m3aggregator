@@ -33,6 +33,8 @@ import (
 
 	"github.com/m3db/m3metrics/metric/unaggregated"
 
+	"github.com/m3db/m3metrics/op/applied"
+
 	"github.com/m3db/m3metrics/policy"
 )
 
@@ -60,21 +62,24 @@ func NewCounterElem(
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
 	opts Options,
 ) *CounterElem {
 	e := &CounterElem{
 		elemBase: newElemBase(opts),
 		values:   make([]timedCounter, 0, defaultNumValues), // in most cases values will have two entries
 	}
-	e.ResetSetData(id, sp, aggTypes)
+	e.ResetSetData(id, sp, aggTypes, pipeline)
 	return e
 }
 
 // ResetSetData resets the element and sets data.
+// TODO(xichen): handle pipelines properly.
 func (e *CounterElem) ResetSetData(
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
 ) {
 	useDefaultAggregation := aggTypes.IsDefault()
 	if useDefaultAggregation {
