@@ -24,6 +24,8 @@ mocks_rules_dir      := generated/mocks
 protoc_go_package    := github.com/golang/protobuf/protoc-gen-go
 proto_output_dir     := generated/proto
 proto_rules_dir      := generated/proto
+generics_output_dir  := generated/generics
+generics_rules_dir   := generated/generics
 auto_gen             := .ci/auto-gen.sh
 license_dir          := .ci/uber-licence
 license_node_modules := $(license_dir)/node_modules
@@ -133,6 +135,11 @@ mock-gen-no-deps:
 proto-gen: install-proto-bin install-license-bin
 	@echo Generating protobuf files
 	PACKAGE=$(package_root) $(auto_gen) $(proto_output_dir) $(proto_rules_dir)
+
+.PHONY: generics-gen
+generics-gen: install-generics-bin install-license-bin
+	@echo Generating code from generic templates
+	PACKAGE=$(package_root) $(auto_gen) $(generics_output_dir) $(generics_rules_dir)
 
 .PHONY: clean
 clean:
