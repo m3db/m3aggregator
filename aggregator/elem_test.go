@@ -166,18 +166,18 @@ func TestCounterElemAddMetric(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[0], testCounter))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, testCounter.CounterVal, e.values[0].counter.Sum())
-	require.Equal(t, int64(1), e.values[0].counter.Count())
-	require.Equal(t, int64(0), e.values[0].counter.SumSq())
+	require.Equal(t, testCounter.CounterVal, e.values[0].aggregation.Sum())
+	require.Equal(t, int64(1), e.values[0].aggregation.Count())
+	require.Equal(t, int64(0), e.values[0].aggregation.SumSq())
 
 	// Add the counter metric at slightly different time
 	// but still within the same aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[1], testCounter))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, 2*testCounter.CounterVal, e.values[0].counter.Sum())
-	require.Equal(t, int64(2), e.values[0].counter.Count())
-	require.Equal(t, int64(0), e.values[0].counter.SumSq())
+	require.Equal(t, 2*testCounter.CounterVal, e.values[0].aggregation.Sum())
+	require.Equal(t, int64(2), e.values[0].aggregation.Count())
+	require.Equal(t, int64(0), e.values[0].aggregation.SumSq())
 
 	// Add the counter metric in the next aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[2], testCounter))
@@ -185,13 +185,13 @@ func TestCounterElemAddMetric(t *testing.T) {
 	for i := 0; i < len(e.values); i++ {
 		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
-	require.Equal(t, testCounter.CounterVal, e.values[1].counter.Sum())
-	require.Equal(t, int64(2), e.values[0].counter.Count())
-	require.Equal(t, int64(0), e.values[0].counter.SumSq())
+	require.Equal(t, testCounter.CounterVal, e.values[1].aggregation.Sum())
+	require.Equal(t, int64(2), e.values[0].aggregation.Count())
+	require.Equal(t, int64(0), e.values[0].aggregation.SumSq())
 
 	// Adding the counter metric to a closed element results in an error.
 	e.closed = true
-	require.Equal(t, errCounterElemClosed, e.AddMetric(testTimestamps[2], testCounter))
+	require.Equal(t, errElemClosed, e.AddMetric(testTimestamps[2], testCounter))
 }
 
 func TestCounterElemAddMetricWithCustomAggregation(t *testing.T) {
@@ -201,17 +201,17 @@ func TestCounterElemAddMetricWithCustomAggregation(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[0], testCounter))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, testCounter.CounterVal, e.values[0].counter.Sum())
-	require.Equal(t, testCounter.CounterVal, e.values[0].counter.Max())
-	require.Equal(t, int64(testCounter.CounterVal*testCounter.CounterVal), e.values[0].counter.SumSq())
+	require.Equal(t, testCounter.CounterVal, e.values[0].aggregation.Sum())
+	require.Equal(t, testCounter.CounterVal, e.values[0].aggregation.Max())
+	require.Equal(t, int64(testCounter.CounterVal*testCounter.CounterVal), e.values[0].aggregation.SumSq())
 
 	// Add the counter metric at slightly different time
 	// but still within the same aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[1], testCounter))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, 2*testCounter.CounterVal, e.values[0].counter.Sum())
-	require.Equal(t, testCounter.CounterVal, e.values[0].counter.Max())
+	require.Equal(t, 2*testCounter.CounterVal, e.values[0].aggregation.Sum())
+	require.Equal(t, testCounter.CounterVal, e.values[0].aggregation.Max())
 
 	// Add the counter metric in the next aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[2], testCounter))
@@ -219,12 +219,12 @@ func TestCounterElemAddMetricWithCustomAggregation(t *testing.T) {
 	for i := 0; i < len(e.values); i++ {
 		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
-	require.Equal(t, testCounter.CounterVal, e.values[1].counter.Sum())
-	require.Equal(t, testCounter.CounterVal, e.values[0].counter.Max())
+	require.Equal(t, testCounter.CounterVal, e.values[1].aggregation.Sum())
+	require.Equal(t, testCounter.CounterVal, e.values[0].aggregation.Max())
 
 	// Adding the counter metric to a closed element results in an error.
 	e.closed = true
-	require.Equal(t, errCounterElemClosed, e.AddMetric(testTimestamps[2], testCounter))
+	require.Equal(t, errElemClosed, e.AddMetric(testTimestamps[2], testCounter))
 }
 
 func TestCounterElemReadAndDiscard(t *testing.T) {
@@ -330,7 +330,7 @@ func TestCounterFindOrInsert(t *testing.T) {
 		for _, v := range e.values {
 			times = append(times, v.timeNanos)
 		}
-		require.Equal(t, e.values[expected[idx].index].counter, res)
+		require.Equal(t, e.values[expected[idx].index].aggregation, res)
 		require.Equal(t, expected[idx].data, times)
 	}
 }
@@ -342,7 +342,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[0], testBatchTimer))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	timer := e.values[0].timer
+	timer := e.values[0].aggregation
 	require.Equal(t, int64(5), timer.Count())
 	require.Equal(t, 18.0, timer.Sum())
 	require.Equal(t, 3.5, timer.Quantile(0.5))
@@ -354,7 +354,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[1], testBatchTimer))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	timer = e.values[0].timer
+	timer = e.values[0].aggregation
 	require.Equal(t, int64(10), timer.Count())
 	require.Equal(t, 36.0, timer.Sum())
 	require.Equal(t, 3.5, timer.Quantile(0.5))
@@ -367,7 +367,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 	for i := 0; i < len(e.values); i++ {
 		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
-	timer = e.values[1].timer
+	timer = e.values[1].aggregation
 	require.Equal(t, int64(5), timer.Count())
 	require.Equal(t, 18.0, timer.Sum())
 	require.Equal(t, 3.5, timer.Quantile(0.5))
@@ -376,7 +376,7 @@ func TestTimerElemAddMetric(t *testing.T) {
 
 	// Adding the timer metric to a closed element results in an error.
 	e.closed = true
-	require.Equal(t, errTimerElemClosed, e.AddMetric(testTimestamps[2], testBatchTimer))
+	require.Equal(t, errElemClosed, e.AddMetric(testTimestamps[2], testBatchTimer))
 }
 
 func TestTimerElemConsume(t *testing.T) {
@@ -510,7 +510,7 @@ func TestTimerFindOrInsert(t *testing.T) {
 		for _, v := range e.values {
 			times = append(times, v.timeNanos)
 		}
-		require.Equal(t, e.values[expected[idx].index].timer, res)
+		require.Equal(t, e.values[expected[idx].index].aggregation, res)
 		require.Equal(t, expected[idx].data, times)
 	}
 }
@@ -522,18 +522,18 @@ func TestGaugeElemAddMetric(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[0], testGauge))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Last())
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Sum())
-	require.Equal(t, 0.0, e.values[0].gauge.SumSq())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Last())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Sum())
+	require.Equal(t, 0.0, e.values[0].aggregation.SumSq())
 
 	// Add the gauge metric at slightly different time
 	// but still within the same aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[1], testGauge))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Last())
-	require.Equal(t, 2*testGauge.GaugeVal, e.values[0].gauge.Sum())
-	require.Equal(t, 0.0, e.values[0].gauge.SumSq())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Last())
+	require.Equal(t, 2*testGauge.GaugeVal, e.values[0].aggregation.Sum())
+	require.Equal(t, 0.0, e.values[0].aggregation.SumSq())
 
 	// Add the gauge metric in the next aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[2], testGauge))
@@ -541,13 +541,13 @@ func TestGaugeElemAddMetric(t *testing.T) {
 	for i := 0; i < len(e.values); i++ {
 		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
-	require.Equal(t, testGauge.GaugeVal, e.values[1].gauge.Last())
-	require.Equal(t, testGauge.GaugeVal, e.values[1].gauge.Sum())
-	require.Equal(t, 0.0, e.values[1].gauge.SumSq())
+	require.Equal(t, testGauge.GaugeVal, e.values[1].aggregation.Last())
+	require.Equal(t, testGauge.GaugeVal, e.values[1].aggregation.Sum())
+	require.Equal(t, 0.0, e.values[1].aggregation.SumSq())
 
 	// Adding the gauge metric to a closed element results in an error.
 	e.closed = true
-	require.Equal(t, errGaugeElemClosed, e.AddMetric(testTimestamps[2], testGauge))
+	require.Equal(t, errElemClosed, e.AddMetric(testTimestamps[2], testGauge))
 }
 
 func TestGaugeElemAddMetricWithCustomAggregation(t *testing.T) {
@@ -557,21 +557,21 @@ func TestGaugeElemAddMetricWithCustomAggregation(t *testing.T) {
 	require.NoError(t, e.AddMetric(testTimestamps[0], testGauge))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Last())
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Sum())
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Mean())
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Sum())
-	require.Equal(t, testGauge.GaugeVal*testGauge.GaugeVal, e.values[0].gauge.SumSq())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Last())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Sum())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Mean())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Sum())
+	require.Equal(t, testGauge.GaugeVal*testGauge.GaugeVal, e.values[0].aggregation.SumSq())
 
 	// Add the gauge metric at slightly different time
 	// but still within the same aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[1], testGauge))
 	require.Equal(t, 1, len(e.values))
 	require.Equal(t, testAlignedStarts[0], e.values[0].timeNanos)
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Last())
-	require.Equal(t, testGauge.GaugeVal, e.values[0].gauge.Max())
-	require.Equal(t, 2*testGauge.GaugeVal, e.values[0].gauge.Sum())
-	require.Equal(t, 2*testGauge.GaugeVal*testGauge.GaugeVal, e.values[0].gauge.SumSq())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Last())
+	require.Equal(t, testGauge.GaugeVal, e.values[0].aggregation.Max())
+	require.Equal(t, 2*testGauge.GaugeVal, e.values[0].aggregation.Sum())
+	require.Equal(t, 2*testGauge.GaugeVal*testGauge.GaugeVal, e.values[0].aggregation.SumSq())
 
 	// Add the gauge metric in the next aggregation interval.
 	require.NoError(t, e.AddMetric(testTimestamps[2], testGauge))
@@ -579,12 +579,12 @@ func TestGaugeElemAddMetricWithCustomAggregation(t *testing.T) {
 	for i := 0; i < len(e.values); i++ {
 		require.Equal(t, testAlignedStarts[i], e.values[i].timeNanos)
 	}
-	require.Equal(t, testGauge.GaugeVal, e.values[1].gauge.Last())
-	require.Equal(t, testGauge.GaugeVal, e.values[1].gauge.Max())
+	require.Equal(t, testGauge.GaugeVal, e.values[1].aggregation.Last())
+	require.Equal(t, testGauge.GaugeVal, e.values[1].aggregation.Max())
 
 	// Adding the gauge metric to a closed element results in an error.
 	e.closed = true
-	require.Equal(t, errGaugeElemClosed, e.AddMetric(testTimestamps[2], testGauge))
+	require.Equal(t, errElemClosed, e.AddMetric(testTimestamps[2], testGauge))
 }
 
 func TestGaugeElemReadAndDiscard(t *testing.T) {
@@ -692,7 +692,7 @@ func TestGaugeFindOrInsert(t *testing.T) {
 		for _, v := range e.values {
 			times = append(times, v.timeNanos)
 		}
-		require.Equal(t, e.values[expected[idx].index].gauge, res)
+		require.Equal(t, e.values[expected[idx].index].aggregation, res)
 		require.Equal(t, expected[idx].data, times)
 	}
 }
@@ -752,11 +752,11 @@ func testStreamOptions(t *testing.T, size int) (cm.Options, cm.StreamPool, *int)
 func testCounterElem(aggTypes maggregation.Types) *CounterElem {
 	e := NewCounterElem(testCounterID, testStoragePolicy, aggTypes, NewOptions())
 	for _, aligned := range testAlignedStarts[:len(testAlignedStarts)-1] {
-		counter := aggregation.NewLockedCounter(aggregation.NewCounter(e.aggOpts))
+		counter := newLockedCounter(aggregation.NewCounter(e.aggOpts))
 		counter.Update(testCounter.CounterVal)
 		e.values = append(e.values, timedCounter{
-			timeNanos: aligned,
-			counter:   counter,
+			timeNanos:   aligned,
+			aggregation: counter,
 		})
 	}
 	return e
@@ -766,11 +766,11 @@ func testTimerElem(aggTypes maggregation.Types, opts Options) *TimerElem {
 	e := NewTimerElem(testBatchTimerID, testStoragePolicy, aggTypes, opts)
 	for _, aligned := range testAlignedStarts[:len(testAlignedStarts)-1] {
 		newTimer := aggregation.NewTimer(opts.AggregationTypesOptions().TimerQuantiles(), opts.StreamOptions(), e.aggOpts)
-		timer := aggregation.NewLockedTimer(newTimer)
+		timer := newLockedTimer(newTimer)
 		timer.AddBatch(testBatchTimer.BatchTimerVal)
 		e.values = append(e.values, timedTimer{
-			timeNanos: aligned,
-			timer:     timer,
+			timeNanos:   aligned,
+			aggregation: timer,
 		})
 	}
 	return e
@@ -779,11 +779,11 @@ func testTimerElem(aggTypes maggregation.Types, opts Options) *TimerElem {
 func testGaugeElem(aggTypes maggregation.Types) *GaugeElem {
 	e := NewGaugeElem(testGaugeID, testStoragePolicy, aggTypes, NewOptions())
 	for _, aligned := range testAlignedStarts[:len(testAlignedStarts)-1] {
-		gauge := aggregation.NewLockedGauge(aggregation.NewGauge(e.aggOpts))
+		gauge := newLockedGauge(aggregation.NewGauge(e.aggOpts))
 		gauge.Update(testGauge.GaugeVal)
 		e.values = append(e.values, timedGauge{
-			timeNanos: aligned,
-			gauge:     gauge,
+			timeNanos:   aligned,
+			aggregation: gauge,
 		})
 	}
 	return e

@@ -222,7 +222,7 @@ func TestEntryAddBatchTimerWithTimerBatchSizeLimit(t *testing.T) {
 	for _, p := range testDefaultPolicies {
 		elem := e.aggregations[p].Value.(*TimerElem)
 		require.Equal(t, 1, len(elem.values))
-		require.Equal(t, 18.0, elem.values[0].timer.Sum())
+		require.Equal(t, 18.0, elem.values[0].aggregation.Sum())
 	}
 }
 
@@ -955,7 +955,7 @@ func testEntryAddMetricWithPoliciesList(
 				} else {
 					require.Equal(t, 1, len(aggregations))
 					require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNanos)
-					require.Equal(t, int64(1234), aggregations[0].counter.Sum())
+					require.Equal(t, int64(1234), aggregations[0].aggregation.Sum())
 				}
 			},
 		},
@@ -970,7 +970,7 @@ func testEntryAddMetricWithPoliciesList(
 				} else {
 					require.Equal(t, 1, len(aggregations))
 					require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNanos)
-					require.Equal(t, 18.0, aggregations[0].timer.Sum())
+					require.Equal(t, 18.0, aggregations[0].aggregation.Sum())
 				}
 			},
 		},
@@ -985,7 +985,7 @@ func testEntryAddMetricWithPoliciesList(
 				} else {
 					require.Equal(t, 1, len(aggregations))
 					require.Equal(t, alignedStart.UnixNano(), aggregations[0].timeNanos)
-					require.Equal(t, 123.456, aggregations[0].gauge.Last())
+					require.Equal(t, 123.456, aggregations[0].aggregation.Last())
 				}
 			},
 		},
