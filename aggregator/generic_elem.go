@@ -55,7 +55,7 @@ type genericElemPool interface {
 	Put(value *GenericElem)
 }
 
-type genericElemBase interface {
+type typeSpecificElemBase interface {
 	generic.Type
 
 	// FullPrefix returns the full prefix for the given metric type.
@@ -100,7 +100,7 @@ func (ta *timedAggregation) Reset() {
 // GenericElem is an element storing time-bucketed aggregations.
 type GenericElem struct {
 	elemBase
-	genericElemBase
+	typeSpecificElemBase
 
 	values    []timedAggregation // metric aggregations sorted by time in ascending order
 	toConsume []timedAggregation
@@ -135,7 +135,7 @@ func (e *GenericElem) ResetSetData(
 		aggTypes = e.DefaultAggregationTypes(e.aggTypesOpts)
 	}
 
-	e.genericElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation)
+	e.typeSpecificElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation)
 	e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation)
 }
 
@@ -212,7 +212,7 @@ func (e *GenericElem) Close() {
 	}
 	e.values = e.values[:0]
 	e.toConsume = e.toConsume[:0]
-	e.genericElemBase.Close()
+	e.typeSpecificElemBase.Close()
 	aggTypesPool := e.aggTypesOpts.TypesPool()
 	pool := e.ElemPool(e.opts)
 	e.Unlock()
