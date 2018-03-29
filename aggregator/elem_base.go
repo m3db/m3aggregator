@@ -161,9 +161,8 @@ func (e *counterElemBase) ResetSetData(maggregation.TypesOptions, maggregation.T
 func (e *counterElemBase) Close()                                                           {}
 
 type timerElemBase struct {
-	isQuantilesPooled bool
-	quantiles         []float64
-	quantilesPool     pool.FloatsPool
+	quantiles     []float64
+	quantilesPool pool.FloatsPool
 }
 
 func (e timerElemBase) FullPrefix(opts Options) []byte { return opts.FullTimerPrefix() }
@@ -194,16 +193,24 @@ func (e *timerElemBase) ResetSetData(
 ) {
 	if useDefaultAggregation {
 		e.quantiles = aggTypesOpts.TimerQuantiles()
-		e.isQuantilesPooled = false
+		e.quantilesPool = nil
 		return
 	}
 
-	e.quantilesPool = aggTypesOpts.QuantilesPool()
-	e.quantiles, e.isQuantilesPooled = aggTypes.PooledQuantiles(e.quantilesPool)
+	var (
+		quantilesPool     = aggTypesOpts.QuantilesPool()
+		isQuantilesPooled bool
+	)
+	e.quantiles, isQuantilesPooled = aggTypes.PooledQuantiles(quantilesPool)
+	if isQuantilesPooled {
+		e.quantilesPool = quantilesPool
+	} else {
+		e.quantilesPool = nil
+	}
 }
 
 func (e *timerElemBase) Close() {
-	if e.isQuantilesPooled {
+	if e.quantilesPool != nil {
 		e.quantilesPool.Put(e.quantiles)
 	}
 	e.quantiles = nil
