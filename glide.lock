@@ -220,6 +220,10 @@ imports:
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
   - pbutil
+- name: github.com/mauricelam/genny
+  version: 9d8700bcc567cd22ea2ef42ce5835a9c80296c4a
+  subpackages:
+  - generic
 - name: github.com/pmezard/go-difflib
   version: d8ed2627bdf02c080bf22230dbb337003b7aba2d
   subpackages:
