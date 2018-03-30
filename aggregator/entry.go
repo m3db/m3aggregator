@@ -23,7 +23,6 @@ package aggregator
 import (
 	"container/list"
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -461,26 +460,19 @@ func (e *Entry) updateMetadatasWithLock(
 				var newElem metricElem
 				switch metric.Type {
 				case unaggregated.CounterType:
-					if !aggTypes.IsValidForCounter() {
-						return fmt.Errorf("invalid aggregation types %s for Counter", aggTypes.String())
-					}
 					newElem = e.opts.CounterElemPool().Get()
 				case unaggregated.BatchTimerType:
-					if !aggTypes.IsValidForTimer() {
-						return fmt.Errorf("invalid aggregation types %s for Timer", aggTypes.String())
-					}
 					newElem = e.opts.TimerElemPool().Get()
 				case unaggregated.GaugeType:
-					if !aggTypes.IsValidForGauge() {
-						return fmt.Errorf("invalid aggregation types %s for Gauge", aggTypes.String())
-					}
 					newElem = e.opts.GaugeElemPool().Get()
 				default:
 					return errInvalidMetricType
 				}
 				// NB: The pipeline may not be owned by us and as such we need to make a copy here.
 				key.pipeline = key.pipeline.Clone()
-				newElem.ResetSetData(elemID, storagePolicy, aggTypes, key.pipeline)
+				if err = newElem.ResetSetData(elemID, storagePolicy, aggTypes, key.pipeline); err != nil {
+					return err
+				}
 				list, err := e.lists.FindOrCreate(storagePolicy.Resolution().Window)
 				if err != nil {
 					return err
