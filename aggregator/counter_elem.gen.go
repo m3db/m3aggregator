@@ -25,9 +25,13 @@
 package aggregator
 
 import (
+	"fmt"
+
 	"time"
 
 	maggregation "github.com/m3db/m3metrics/aggregation"
+
+	"github.com/m3db/m3metrics/metadata"
 
 	"github.com/m3db/m3metrics/metric/id"
 
@@ -36,6 +40,8 @@ import (
 	"github.com/m3db/m3metrics/op/applied"
 
 	"github.com/m3db/m3metrics/policy"
+
+	"github.com/m3db/m3metrics/transformation"
 )
 
 type timedCounter struct {
@@ -53,8 +59,10 @@ type CounterElem struct {
 	elemBase
 	counterElemBase
 
-	values    []timedCounter // metric aggregations sorted by time in ascending order
-	toConsume []timedCounter
+	values              []timedCounter // metric aggregations sorted by time in ascending order
+	toConsume           []timedCounter // small buffer to avoid memory allocations during consumption
+	lastConsumedAtNanos int64          // last consumed at in Unix nanoseconds
+	lastConsumedValues  []float64      // last consumed values
 }
 
 // NewCounterElem creates a new element for the given metric type.
@@ -64,33 +72,66 @@ func NewCounterElem(
 	aggTypes maggregation.Types,
 	pipeline applied.Pipeline,
 	opts Options,
-) *CounterElem {
+) (*CounterElem, error) {
 	e := &CounterElem{
 		elemBase: newElemBase(opts),
 		values:   make([]timedCounter, 0, defaultNumValues), // in most cases values will have two entries
 	}
-	e.ResetSetData(id, sp, aggTypes, pipeline)
-	return e
+	if err := e.ResetSetData(id, sp, aggTypes, pipeline); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// MustNewCounterElem creates a new element, or panics if the input is invalid.
+func MustNewCounterElem(
+	id id.RawID,
+	sp policy.StoragePolicy,
+	aggTypes maggregation.Types,
+	pipeline applied.Pipeline,
+	opts Options,
+) *CounterElem {
+	elem, err := NewCounterElem(id, sp, aggTypes, pipeline, opts)
+	if err != nil {
+		panic(fmt.Errorf("unable to create element: %v", err))
+	}
+	return elem
 }
 
 // ResetSetData resets the element and sets data.
-// TODO(xichen): handle pipelines properly.
 func (e *CounterElem) ResetSetData(
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
 	pipeline applied.Pipeline,
-) {
+) error {
 	useDefaultAggregation := aggTypes.IsDefault()
 	if useDefaultAggregation {
 		aggTypes = e.DefaultAggregationTypes(e.aggTypesOpts)
 	}
-
-	e.counterElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation)
-	e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation)
+	if err := e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation, pipeline); err != nil {
+		return err
+	}
+	if err := e.counterElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation); err != nil {
+		return err
+	}
+	// If the pipeline contains derivative transformations, we need to store past
+	// values in order to compute the derivatives.
+	if !e.parsedPipeline.HasDerivativeTransform {
+		return nil
+	}
+	numAggTypes := len(e.aggTypes)
+	if cap(e.lastConsumedValues) < numAggTypes {
+		e.lastConsumedValues = make([]float64, numAggTypes)
+	}
+	e.lastConsumedValues = e.lastConsumedValues[:numAggTypes]
+	for i := 0; i < len(e.lastConsumedValues); i++ {
+		e.lastConsumedValues[i] = nan
+	}
+	return nil
 }
 
-// AddMetric adds a new value.
+// AddMetric adds a new metric value.
 func (e *CounterElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion) error {
 	alignedStart := timestamp.Truncate(e.sp.Resolution().Window).UnixNano()
 	agg, err := e.findOrCreate(alignedStart)
@@ -103,10 +144,16 @@ func (e *CounterElem) AddMetric(timestamp time.Time, mu unaggregated.MetricUnion
 	return nil
 }
 
-// Consume processes values before a given time and discards
-// them afterwards, returning whether the element can be collected
-// after consuming the values.
-func (e *CounterElem) Consume(earlierThanNanos int64, fn aggMetricFn) bool {
+// Consume consumes values before a given time and removes them from the element
+// after they are consumed, returning whether the element can be collected after
+// the consumption is completed.
+// NB: Consume is not thread-safe and must be called within a single goroutine
+// to avoid race conditions.
+func (e *CounterElem) Consume(
+	earlierThanNanos int64,
+	flushLocalFn flushLocalMetricFn,
+	flushForwardFn flushForwardMetricFn,
+) bool {
 	e.Lock()
 	if e.closed {
 		e.Unlock()
@@ -138,7 +185,7 @@ func (e *CounterElem) Consume(earlierThanNanos int64, fn aggMetricFn) bool {
 	// Process the aggregations that are ready for consumption.
 	for i := range e.toConsume {
 		endAtNanos := e.toConsume[i].timeNanos + int64(e.sp.Resolution().Window)
-		e.processValue(endAtNanos, e.toConsume[i].aggregation, fn)
+		e.processValue(endAtNanos, e.toConsume[i].aggregation, flushLocalFn, flushForwardFn)
 		// Closes the aggregation object after it's processed.
 		e.toConsume[i].aggregation.Close()
 		e.toConsume[i].Reset()
@@ -156,6 +203,7 @@ func (e *CounterElem) Close() {
 	}
 	e.closed = true
 	e.id = nil
+	e.parsedPipeline = parsedPipeline{}
 	for idx := range e.values {
 		// Close the underlying aggregation objects.
 		e.values[idx].aggregation.Close()
@@ -163,6 +211,7 @@ func (e *CounterElem) Close() {
 	}
 	e.values = e.values[:0]
 	e.toConsume = e.toConsume[:0]
+	e.lastConsumedValues = e.lastConsumedValues[:0]
 	e.counterElemBase.Close()
 	aggTypesPool := e.aggTypesOpts.TypesPool()
 	pool := e.ElemPool(e.opts)
@@ -244,23 +293,50 @@ func (e *CounterElem) indexOfWithLock(alignedStart int64) (int, bool) {
 	return left, false
 }
 
-func (e *CounterElem) processValue(timeNanos int64, agg *lockedCounter, fn aggMetricFn) {
-	var fullPrefix = e.FullPrefix(e.opts)
-	if e.useDefaultAggregation {
-		// NB(cw) Use default suffix slice for faster look up.
-		suffixes := e.DefaultAggregationTypeStrings(e.aggTypesOpts)
-		aggTypes := e.DefaultAggregationTypes(e.aggTypesOpts)
-		agg.Lock()
-		for i, aggType := range aggTypes {
-			fn(fullPrefix, e.id, suffixes[i], timeNanos, agg.ValueOf(aggType), e.sp)
-		}
-		agg.Unlock()
-		return
-	}
-
+func (e *CounterElem) processValue(
+	timeNanos int64,
+	agg *lockedCounter,
+	flushLocalFn flushLocalMetricFn,
+	flushForwardFn flushForwardMetricFn,
+) {
+	var (
+		fullPrefix      = e.FullPrefix(e.opts)
+		transformations = e.parsedPipeline.Transformations
+	)
 	agg.Lock()
-	for _, aggType := range e.aggTypes {
-		fn(fullPrefix, e.id, e.TypeStringFor(e.aggTypesOpts, aggType), timeNanos, agg.ValueOf(aggType), e.sp)
+	for aggTypeIdx, aggType := range e.aggTypes {
+		value := agg.ValueOf(aggType)
+		for i := 0; i < transformations.NumSteps(); i++ {
+			transformType := transformations.At(i).Transformation.Type
+			if transformType.IsUnaryTransform() {
+				fn := transformType.MustUnaryTransform()
+				res := fn(transformation.Datapoint{TimeNanos: timeNanos, Value: value})
+				value = res.Value
+			} else {
+				fn := transformType.MustBinaryTransform()
+				prev := transformation.Datapoint{TimeNanos: e.lastConsumedAtNanos, Value: e.lastConsumedValues[aggTypeIdx]}
+				curr := transformation.Datapoint{TimeNanos: timeNanos, Value: value}
+				res := fn(prev, curr)
+				value = res.Value
+				// NB: we only need to record the value needed for derivative transformations.
+				// We currently only support first-order derivative transformations so we only
+				// need to keep one value. In the future if we need to support higher-order
+				// derivative transformations, we need to store an array of values here.
+				e.lastConsumedValues[aggTypeIdx] = value
+			}
+		}
+		// Do we need to flush or forward NaNs?
+		if !e.parsedPipeline.HasRollup {
+			flushLocalFn(fullPrefix, e.id, e.TypeStringFor(e.aggTypesOpts, aggType), timeNanos, value, e.sp)
+		} else {
+			fm := metadata.ForwardMetadata{
+				AggregationID: e.parsedPipeline.Rollup.AggregationID,
+				StoragePolicy: e.sp,
+				Pipeline:      e.parsedPipeline.Remainder,
+			}
+			flushForwardFn(e.parsedPipeline.Rollup.ID, timeNanos, value, fm)
+		}
 	}
+	e.lastConsumedAtNanos = timeNanos
 	agg.Unlock()
 }
