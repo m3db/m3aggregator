@@ -42,7 +42,10 @@ const (
 	defaultNumValues = 2
 
 	// Maximum transformation derivative order that is supported.
-	maxSupportedTransformationDerivativeOrer = 1
+	// A default value of 1 means we currently only support transformations that
+	// compute first-order derivatives. This applies to the most common usecases
+	// without imposing signficant bookkeeping overhead.
+	maxSupportedTransformationDerivativeOrder = 1
 )
 
 var (
@@ -335,8 +338,14 @@ func newParsedPipeline(pipeline applied.Pipeline) (parsedPipeline, error) {
 	if firstRollupOpIdx == -1 {
 		return parsedPipeline{}, fmt.Errorf("pipeline %v has no rollup operations", pipeline)
 	}
-	if transformationDerivativeOrder > maxSupportedTransformationDerivativeOrer {
-		return parsedPipeline{}, fmt.Errorf("pipeline %v transformation derivative order is %d higher than supported %d", pipeline, transformationDerivativeOrder, maxSupportedTransformationDerivativeOrer)
+	// Pipelines that compute higher order derivatives require keeping more states including
+	// the raw values and lower order derivatives. For example, a pipline such as `aggregate Last |
+	// perSecond | perSecond` requires storing both the raw value and the first-order derivatives.
+	// The maximum supported transformation derivative order determines the maximum number of
+	// states we keep track of per value, which as a result limits the highest order of derivatives
+	// we can compute from transformations.
+	if transformationDerivativeOrder > maxSupportedTransformationDerivativeOrder {
+		return parsedPipeline{}, fmt.Errorf("pipeline %v transformation derivative order is %d higher than supported %d", pipeline, transformationDerivativeOrder, maxSupportedTransformationDerivativeOrder)
 	}
 	return parsedPipeline{
 		HasDerivativeTransform: transformationDerivativeOrder > 0,
