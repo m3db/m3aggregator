@@ -115,7 +115,7 @@ type AggregatorConfiguration struct {
 	MaxTimerBatchSizePerWrite int `yaml:"maxTimerBatchSizePerWrite" validate:"min=0"`
 
 	// Default policies.
-	DefaultPolicies []policy.Policy `yaml:"defaultPolicies" validate:"nonzero"`
+	DefaultPolicies []policy.StoragePolicy `yaml:"defaultPolicies" validate:"nonzero"`
 
 	// Pool of counter elements.
 	CounterElemPool pool.ObjectPoolConfiguration `yaml:"counterElemPool"`
@@ -263,11 +263,12 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		opts = opts.SetMaxTimerBatchSizePerWrite(c.MaxTimerBatchSizePerWrite)
 	}
 
-	// Set default policies.
-	policies := make([]policy.Policy, len(c.DefaultPolicies))
+	// Set default storage policies.
+	// TODO(xichen): sort the storage policies.
+	policies := make([]policy.StoragePolicy, len(c.DefaultPolicies))
 	copy(policies, c.DefaultPolicies)
-	sort.Sort(policy.ByResolutionAscRetentionDesc(policies))
-	opts = opts.SetDefaultPolicies(policies)
+	// sort.Sort(policy.ByResolutionAscRetentionDesc(policies))
+	opts = opts.SetDefaultStoragePolicies(policies)
 
 	// Set counter elem pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("counter-elem-pool"))
@@ -275,7 +276,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	counterElemPool := aggregator.NewCounterElemPool(counterElemPoolOpts)
 	opts = opts.SetCounterElemPool(counterElemPool)
 	counterElemPool.Init(func() *aggregator.CounterElem {
-		return aggregator.NewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, opts)
+		return aggregator.MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, opts)
 	})
 
 	// Set timer elem pool.
@@ -284,7 +285,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	timerElemPool := aggregator.NewTimerElemPool(timerElemPoolOpts)
 	opts = opts.SetTimerElemPool(timerElemPool)
 	timerElemPool.Init(func() *aggregator.TimerElem {
-		return aggregator.NewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, opts)
+		return aggregator.MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, opts)
 	})
 
 	// Set gauge elem pool.
@@ -293,7 +294,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	gaugeElemPool := aggregator.NewGaugeElemPool(gaugeElemPoolOpts)
 	opts = opts.SetGaugeElemPool(gaugeElemPool)
 	gaugeElemPool.Init(func() *aggregator.GaugeElem {
-		return aggregator.NewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, opts)
+		return aggregator.MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, opts)
 	})
 
 	// Set entry pool.
