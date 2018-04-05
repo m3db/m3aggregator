@@ -44,14 +44,13 @@ const (
 	// Maximum transformation derivative order that is supported.
 	// A default value of 1 means we currently only support transformations that
 	// compute first-order derivatives. This applies to the most common usecases
-	// without imposing signficant bookkeeping overhead.
+	// without imposing significant bookkeeping overhead.
 	maxSupportedTransformationDerivativeOrder = 1
 )
 
 var (
-	nan                           = math.NaN()
-	errElemClosed                 = errors.New("element is closed")
-	errNoRollupInNonEmptyPipeline = errors.New("no rollup operation in pipeline")
+	nan           = math.NaN()
+	errElemClosed = errors.New("element is closed")
 )
 
 // metricElem is the common interface for metric elements.
@@ -269,7 +268,7 @@ func (e *gaugeElemBase) ResetSetData(
 	_ bool,
 ) error {
 	if !aggTypes.IsValidForGauge() {
-		return fmt.Errorf("invalid aggregation types %s for Gauge", aggTypes.String())
+		return fmt.Errorf("invalid aggregation types %s for gauge", aggTypes.String())
 	}
 	return nil
 }

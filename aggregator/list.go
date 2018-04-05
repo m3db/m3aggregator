@@ -357,9 +357,7 @@ func (l *metricList) discardLocalMetric(
 // consumeForwardMetric consumes a forward metric.
 // TODO(xichen): implement this.
 func (l *metricList) consumeForwardMetric(
-	id metricid.RawID,
-	timeNanos int64,
-	value float64,
+	metric aggregated.Metric,
 	meta metadata.ForwardMetadata,
 ) {
 
@@ -368,9 +366,7 @@ func (l *metricList) consumeForwardMetric(
 // discardForwardMetric discards a forward metric.
 // TODO(xichen): implement this.
 func (l *metricList) discardForwardMetric(
-	id metricid.RawID,
-	timeNanos int64,
-	value float64,
+	metric aggregated.Metric,
 	meta metadata.ForwardMetadata,
 ) {
 

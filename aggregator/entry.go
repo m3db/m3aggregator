@@ -263,7 +263,7 @@ func (e *Entry) addUntimed(
 		return errNoPipelinesInMetadata
 	}
 
-	if !e.shouldUpdateMetadatasWithLock(currTime, sm) {
+	if !e.shouldUpdateMetadatasWithLock(sm) {
 		err = e.addMetricWithLock(currTime, metric)
 		e.RUnlock()
 		timeLock.RUnlock()
@@ -278,7 +278,7 @@ func (e *Entry) addUntimed(
 		return errEntryClosed
 	}
 
-	if e.shouldUpdateMetadatasWithLock(currTime, sm) {
+	if e.shouldUpdateMetadatasWithLock(sm) {
 		if err = e.updateMetadatasWithLock(metric, hasDefaultMetadatas, sm); err != nil {
 			// NB(xichen): if an error occurred during policy update, the policies
 			// will remain as they are, i.e., there are no half-updated policies.
@@ -364,10 +364,7 @@ func (e *Entry) activeStagedMetadataWithLock(
 }
 
 // NB: The metadata passed in is guaranteed to have cut over based on the current time.
-func (e *Entry) shouldUpdateMetadatasWithLock(
-	currTime time.Time,
-	sm metadata.StagedMetadata,
-) bool {
+func (e *Entry) shouldUpdateMetadatasWithLock(sm metadata.StagedMetadata) bool {
 	// If this is a stale metadata, we don't update the existing metadata.
 	if e.cutoverNanos > sm.CutoverNanos {
 		e.metrics.staleMetadata.Inc(1)
@@ -399,7 +396,7 @@ func (e *Entry) shouldUpdateMetadatasWithLock(
 			bs.Set(uint(idx))
 		}
 	}
-	return bs.All(uint(len(e.aggregations)))
+	return !bs.All(uint(len(e.aggregations)))
 }
 
 func (e *Entry) storagePolicies(policies []policy.StoragePolicy) []policy.StoragePolicy {
