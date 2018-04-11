@@ -33,6 +33,8 @@ import (
 
 	"github.com/m3db/m3metrics/metadata"
 
+	"github.com/m3db/m3metrics/metric/aggregated"
+
 	"github.com/m3db/m3metrics/metric/id"
 
 	"github.com/m3db/m3metrics/metric/unaggregated"
@@ -317,24 +319,29 @@ func (e *TimerElem) processValue(
 				prev := transformation.Datapoint{TimeNanos: e.lastConsumedAtNanos, Value: e.lastConsumedValues[aggTypeIdx]}
 				curr := transformation.Datapoint{TimeNanos: timeNanos, Value: value}
 				res := fn(prev, curr)
-				value = res.Value
 				// NB: we only need to record the value needed for derivative transformations.
 				// We currently only support first-order derivative transformations so we only
 				// need to keep one value. In the future if we need to support higher-order
 				// derivative transformations, we need to store an array of values here.
 				e.lastConsumedValues[aggTypeIdx] = value
+				value = res.Value
 			}
 		}
 		// Do we need to flush or forward NaNs?
 		if !e.parsedPipeline.HasRollup {
 			flushLocalFn(fullPrefix, e.id, e.TypeStringFor(e.aggTypesOpts, aggType), timeNanos, value, e.sp)
 		} else {
-			fm := metadata.ForwardMetadata{
+			fm := aggregated.Metric{
+				ID:        e.parsedPipeline.Rollup.ID,
+				TimeNanos: timeNanos,
+				Value:     value,
+			}
+			meta := metadata.ForwardMetadata{
 				AggregationID: e.parsedPipeline.Rollup.AggregationID,
 				StoragePolicy: e.sp,
 				Pipeline:      e.parsedPipeline.Remainder,
 			}
-			flushForwardFn(e.parsedPipeline.Rollup.ID, timeNanos, value, fm)
+			flushForwardFn(fm, meta)
 		}
 	}
 	e.lastConsumedAtNanos = timeNanos

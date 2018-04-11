@@ -62,6 +62,8 @@ type Aggregator interface {
 }
 
 // metricsAggregator contains private aggregator APIs.
+// TODO(xichen): remove nolint once implemented.
+// nolint: megacheck
 type metricsAggregator interface {
 	// AddForwarded adds a forwarded metric with metadata.
 	AddForwarded(metric aggregated.Metric, metadata metadata.ForwardMetadata) error
