@@ -10,7 +10,7 @@ sudo: required
 dist: trusty
 env:
   global:
-    - TEST_TIMEOUT_SCALE=20 PACKAGE=github.com/m3db/m3metrics
+    - TEST_TIMEOUT_SCALE=20 PACKAGE=github.com/m3db/m3aggregator
   matrix:
     - MAKE_TARGET="test-ci-unit"
     - MAKE_TARGET="test-ci-integration"
