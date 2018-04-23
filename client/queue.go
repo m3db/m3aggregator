@@ -35,6 +35,8 @@ import (
 )
 
 const (
+	// By default we use 6 buckets for the queue size histogram metrics
+	// to achieve a good balance between metric granularity and overhead.
 	defaultQueueSizeNumBuckets = 6
 )
 

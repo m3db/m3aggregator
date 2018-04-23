@@ -55,7 +55,6 @@ type connection struct {
 	multiplier    int
 	maxThreshold  int
 	maxDuration   time.Duration
-	nowFn         clock.NowFn
 
 	conn                    *net.TCPConn
 	numFailures             int
@@ -64,6 +63,7 @@ type connection struct {
 	metrics                 connectionMetrics
 
 	// These are for testing purposes.
+	nowFn             clock.NowFn
 	connectWithLockFn connectWithLockFn
 	writeWithLockFn   writeWithLockFn
 }
