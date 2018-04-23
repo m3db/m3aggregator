@@ -21,15 +21,17 @@
 package aggregator
 
 import (
+	"bytes"
 	"container/list"
 	"errors"
 	"math"
 	"sync"
 	"time"
 
-	"github.com/m3db/m3aggregator/hash"
+	"github.com/cespare/xxhash"
 	"github.com/m3db/m3aggregator/rate"
 	"github.com/m3db/m3aggregator/runtime"
+	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3x/clock"
@@ -51,7 +53,29 @@ var (
 
 type entryKey struct {
 	metricType unaggregated.Type
-	idHash     hash.Hash128
+	metricID   id.RawID
+}
+
+func (k entryKey) Hash() uint64 {
+	// Similar to the standard composite key hashes for Java objects.
+	hash := uint64(7)
+	hash = 31*hash + xxhash.Sum64(k.metricID)
+	hash = 31*hash + uint64(k.metricType)
+	return hash
+}
+
+func (k entryKey) Equal(other entryKey) bool {
+	return k.metricType == other.metricType && bytes.Equal(k.metricID, other.metricID)
+}
+
+func (k entryKey) Clone() entryKey {
+	idLen := len(k.metricID)
+	copiedID := make(id.RawID, idLen)
+	copy(copiedID, k.metricID)
+	return entryKey{
+		metricType: k.metricType,
+		metricID:   copiedID,
+	}
 }
 
 type hashedEntry struct {
@@ -75,6 +99,8 @@ func newMetricMapMetrics(scope tally.Scope) metricMapMetrics {
 	}
 }
 
+type elementPtr *list.Element
+
 // NB(xichen): use a type-specific list for hashedEntry if the conversion
 // overhead between interface{} and hashedEntry becomes a problem.
 type metricMap struct {
@@ -88,7 +114,7 @@ type metricMap struct {
 
 	closed            bool
 	metricLists       *metricLists
-	entries           map[entryKey]*list.Element
+	entries           *entryMap
 	entryList         *list.List
 	entryListDelLock  sync.Mutex // Must be held when deleting elements from the entry list
 	firstInsertAt     time.Time
@@ -109,7 +135,7 @@ func newMetricMap(shard uint32, opts Options) *metricMap {
 		entryPool:    opts.EntryPool(),
 		batchPercent: opts.EntryCheckBatchPercent(),
 		metricLists:  metricLists,
-		entries:      make(map[entryKey]*list.Element),
+		entries:      newEntryMap(),
 		entryList:    list.New(),
 		sleepFn:      time.Sleep,
 		metrics:      newMetricMapMetrics(scope),
@@ -132,11 +158,11 @@ func (m *metricMap) AddMetricWithPoliciesList(
 	mu unaggregated.MetricUnion,
 	pl policy.PoliciesList,
 ) error {
-	entryKey := entryKey{
+	key := entryKey{
 		metricType: mu.Type,
-		idHash:     hash.Murmur3Hash128(mu.ID),
+		metricID:   mu.ID,
 	}
-	entry, err := m.findOrCreate(entryKey)
+	entry, err := m.findOrCreate(key)
 	if err != nil {
 		return err
 	}
@@ -232,9 +258,14 @@ func (m *metricMap) findOrCreate(key entryKey) (*Entry, error) {
 	}
 	entry = m.entryPool.Get()
 	entry.ResetSetData(m.metricLists, m.runtimeOpts, m.opts)
-	m.entries[key] = m.entryList.PushBack(hashedEntry{
-		key:   key,
+	clonedKey := key.Clone()
+	elem := m.entryList.PushBack(hashedEntry{
+		key:   clonedKey,
 		entry: entry,
+	})
+	m.entries.SetUnsafe(clonedKey, elem, entryMapSetUnsafeOptions{
+		NoCopyKey:     true,
+		NoFinalizeKey: true,
 	})
 	entry.IncWriter()
 	m.Unlock()
@@ -244,7 +275,7 @@ func (m *metricMap) findOrCreate(key entryKey) (*Entry, error) {
 }
 
 func (m *metricMap) lookupEntryWithLock(key entryKey) (*Entry, bool) {
-	elem, exists := m.entries[key]
+	elem, exists := m.entries.Get(key)
 	if !exists {
 		return nil, false
 	}
@@ -305,8 +336,9 @@ func (m *metricMap) purgeExpired(now time.Time, entries []hashedEntry) int {
 	m.Lock()
 	for i := range entries {
 		if entries[i].entry.TryExpire(now) {
-			elem := m.entries[entries[i].key]
-			delete(m.entries, entries[i].key)
+			key := entries[i].key
+			elem, _ := m.entries.Get(key)
+			m.entries.Delete(key)
 			elem.Value = nil
 			m.entryList.Remove(elem)
 			numExpired++

@@ -28,6 +28,8 @@ auto_gen             := .ci/auto-gen.sh
 license_dir          := .ci/uber-licence
 license_node_modules := $(license_dir)/node_modules
 
+include $(SELF_DIR)/generated-source-files.mk
+
 BUILD           := $(abspath ./bin)
 LINUX_AMD64_ENV := GOOS=linux GOARCH=amd64 CGO_ENABLED=0
 
@@ -139,7 +141,7 @@ clean:
 	@rm -f *.html *.xml *.out *.test
 
 .PHONY: all
-all: lint metalint test-ci-unit test-ci-integration m3aggregator
+all: lint metalint test-ci-unit test-ci-integration test-genny-all m3aggregator
 	@echo Made all successfully
 
 .DEFAULT_GOAL := all

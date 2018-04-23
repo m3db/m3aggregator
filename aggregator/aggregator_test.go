@@ -283,7 +283,7 @@ func TestAggregatorAddMetricWithPoliciesListSuccessNoPlacementUpdate(t *testing.
 	agg.shardFn = func([]byte, int) uint32 { return 1 }
 	err := agg.AddMetricWithPoliciesList(testValidMetric, testPoliciesList)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(agg.shards[1].metricMap.entries))
+	require.Equal(t, 1, agg.shards[1].metricMap.entries.Len())
 }
 
 func TestAggregatorAddMetricWithPoliciesListSuccessWithPlacementUpdate(t *testing.T) {
@@ -347,7 +347,7 @@ func TestAggregatorAddMetricWithPoliciesListSuccessWithPlacementUpdate(t *testin
 			require.Equal(t, expected.latestNanos, agg.shards[i].latestWriteableNanos)
 		}
 	}
-	require.Equal(t, 1, len(agg.shards[1].metricMap.entries))
+	require.Equal(t, 1, agg.shards[1].metricMap.entries.Len())
 	require.Equal(t, newPlacementCutoverNanos, agg.currPlacement.CutoverNanos())
 
 	for {

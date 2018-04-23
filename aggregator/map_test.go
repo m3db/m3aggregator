@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3aggregator/hash"
 	"github.com/m3db/m3aggregator/runtime"
 	"github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metric/id"
@@ -54,6 +53,143 @@ var (
 	}
 )
 
+func TestEntryKeyHash(t *testing.T) {
+	testEntry := entryKey{
+		metricType: unaggregated.CounterType,
+		metricID:   []byte("testCounter"),
+	}
+	require.Equal(t, uint64(0x6ed72ddde0e10187), testEntry.Hash())
+}
+
+func TestEntryKeyHashEqual(t *testing.T) {
+	inputs := []struct {
+		first  entryKey
+		second entryKey
+	}{
+		{
+			first: entryKey{
+				metricType: unaggregated.CounterType,
+				metricID:   []byte("testCounter"),
+			},
+			second: entryKey{
+				metricType: unaggregated.CounterType,
+				metricID:   []byte("testCounter"),
+			},
+		},
+		{
+			first: entryKey{
+				metricType: unaggregated.BatchTimerType,
+				metricID:   []byte("testBatchTimer"),
+			},
+			second: entryKey{
+				metricType: unaggregated.BatchTimerType,
+				metricID:   []byte("testBatchTimer"),
+			},
+		},
+		{
+			first: entryKey{
+				metricType: unaggregated.GaugeType,
+				metricID:   []byte("testGauge"),
+			},
+			second: entryKey{
+				metricType: unaggregated.GaugeType,
+				metricID:   []byte("testGauge"),
+			},
+		},
+	}
+
+	for _, input := range inputs {
+		require.True(t, input.first.Equal(input.second))
+		require.True(t, input.second.Equal(input.first))
+	}
+}
+
+func TestEntryKeyHashNotEqual(t *testing.T) {
+	inputs := []struct {
+		first  entryKey
+		second entryKey
+	}{
+		{
+			first: entryKey{
+				metricType: unaggregated.CounterType,
+				metricID:   []byte("foo"),
+			},
+			second: entryKey{
+				metricType: unaggregated.BatchTimerType,
+				metricID:   []byte("foo"),
+			},
+		},
+		{
+			first: entryKey{
+				metricType: unaggregated.BatchTimerType,
+				metricID:   []byte("foo"),
+			},
+			second: entryKey{
+				metricType: unaggregated.BatchTimerType,
+				metricID:   []byte("bar"),
+			},
+		},
+	}
+
+	for _, input := range inputs {
+		require.False(t, input.first.Equal(input.second))
+		require.False(t, input.second.Equal(input.first))
+	}
+}
+
+func TestEntryKeyClone(t *testing.T) {
+	testEntry := entryKey{
+		metricType: unaggregated.CounterType,
+		metricID:   []byte("foo"),
+	}
+	clonedEntry := testEntry.Clone()
+	require.Equal(t, testEntry, clonedEntry)
+
+	testEntry.metricType = unaggregated.GaugeType
+	testEntry.metricID[0] = 'b'
+	require.NotEqual(t, testEntry, clonedEntry)
+
+	require.Equal(t, entryKey{
+		metricType: unaggregated.CounterType,
+		metricID:   []byte("foo"),
+	}, clonedEntry)
+}
+
+func TestEntryMapMetricInsertionDeletion(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	testMetric := unaggregated.MetricUnion{
+		Type:       unaggregated.CounterType,
+		ID:         id.RawID("foo"),
+		CounterVal: 1234,
+	}
+	opts := testOptions(ctrl)
+	m := newMetricMap(testShard, opts)
+	require.NoError(t, m.AddMetricWithPoliciesList(testMetric, testPoliciesList))
+
+	// Validate that the key exists in the map.
+	key := entryKey{
+		metricType: unaggregated.CounterType,
+		metricID:   id.RawID("foo"),
+	}
+	val, exists := m.entries.Get(key)
+	require.True(t, exists)
+	require.Equal(t, key, val.Value.(hashedEntry).key)
+
+	// Validate that the metric ID is cloned.
+	testMetric.Type = unaggregated.BatchTimerType
+	testMetric.ID[0] = 'b'
+	val, exists = m.entries.Get(key)
+	require.True(t, exists)
+	require.Equal(t, key, val.Value.(hashedEntry).key)
+
+	// Delete the metric and verify the metric is then removed.
+	m.entries.Delete(key)
+	_, exists = m.entries.Get(key)
+	require.False(t, exists)
+}
+
 func TestMetricMapAddMetricWithPoliciesListMapClosed(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -76,13 +212,13 @@ func TestMetricMapAddMetricWithPoliciesListNoRateLimit(t *testing.T) {
 	// Add a counter metric and assert there is one entry afterwards.
 	key := entryKey{
 		metricType: unaggregated.CounterType,
-		idHash:     hash.Murmur3Hash128(testCounterID),
+		metricID:   testCounterID,
 	}
 	require.NoError(t, m.AddMetricWithPoliciesList(testCounter, policies))
-	require.Equal(t, 1, len(m.entries))
+	require.Equal(t, 1, m.entries.Len())
 	require.Equal(t, 1, m.entryList.Len())
 
-	elem, exists := m.entries[key]
+	elem, exists := m.entries.Get(key)
 	require.True(t, exists)
 	entry := elem.Value.(hashedEntry)
 	require.Equal(t, int32(0), atomic.LoadInt32(&entry.entry.numWriters))
@@ -91,9 +227,9 @@ func TestMetricMapAddMetricWithPoliciesListNoRateLimit(t *testing.T) {
 
 	// Add the same counter and assert there is still one entry.
 	require.NoError(t, m.AddMetricWithPoliciesList(testCounter, policies))
-	require.Equal(t, 1, len(m.entries))
+	require.Equal(t, 1, m.entries.Len())
 	require.Equal(t, 1, m.entryList.Len())
-	elem2, exists := m.entries[key]
+	elem2, exists := m.entries.Get(key)
 	require.True(t, exists)
 	entry2 := elem2.Value.(hashedEntry)
 	require.Equal(t, entry, entry2)
@@ -104,7 +240,7 @@ func TestMetricMapAddMetricWithPoliciesListNoRateLimit(t *testing.T) {
 	// now two entries.
 	key2 := entryKey{
 		metricType: unaggregated.GaugeType,
-		idHash:     hash.Murmur3Hash128(testCounterID),
+		metricID:   testCounterID,
 	}
 	metricWithDifferentType := unaggregated.MetricUnion{
 		Type:     unaggregated.GaugeType,
@@ -115,11 +251,11 @@ func TestMetricMapAddMetricWithPoliciesListNoRateLimit(t *testing.T) {
 		metricWithDifferentType,
 		testCustomPoliciesList,
 	))
-	require.Equal(t, 2, len(m.entries))
+	require.Equal(t, 2, m.entries.Len())
 	require.Equal(t, 2, m.entryList.Len())
 	require.Equal(t, 3, m.metricLists.Len())
-	e1, exists1 := m.entries[key]
-	e2, exists2 := m.entries[key2]
+	e1, exists1 := m.entries.Get(key)
+	e2, exists2 := m.entries.Get(key2)
 	require.True(t, exists1)
 	require.True(t, exists2)
 	require.NotEqual(t, e1, e2)
@@ -134,7 +270,7 @@ func TestMetricMapAddMetricWithPoliciesListNoRateLimit(t *testing.T) {
 		metricWithDifferentID,
 		testCustomPoliciesList,
 	))
-	require.Equal(t, 3, len(m.entries))
+	require.Equal(t, 3, m.entries.Len())
 	require.Equal(t, 3, m.entryList.Len())
 	require.Equal(t, 3, m.metricLists.Len())
 }
@@ -280,18 +416,18 @@ func TestMetricMapDeleteExpired(t *testing.T) {
 	for i := 0; i < numEntries; i++ {
 		key := entryKey{
 			metricType: unaggregated.CounterType,
-			idHash:     hash.Murmur3Hash128([]byte(fmt.Sprintf("%d", i))),
+			metricID:   []byte(fmt.Sprintf("%d", i)),
 		}
 		if i%2 == 0 {
-			m.entries[key] = m.entryList.PushBack(hashedEntry{
+			m.entries.Set(key, m.entryList.PushBack(hashedEntry{
 				key:   key,
 				entry: NewEntry(m.metricLists, runtime.NewOptions(), liveEntryOpts),
-			})
+			}))
 		} else {
-			m.entries[key] = m.entryList.PushBack(hashedEntry{
+			m.entries.Set(key, m.entryList.PushBack(hashedEntry{
 				key:   key,
 				entry: NewEntry(m.metricLists, runtime.NewOptions(), expiredEntryOpts),
-			})
+			}))
 		}
 	}
 
@@ -299,12 +435,13 @@ func TestMetricMapDeleteExpired(t *testing.T) {
 	m.deleteExpired(opts.EntryCheckInterval())
 
 	// Assert there should be only half of the entries left.
-	require.Equal(t, numEntries/2, len(m.entries))
+	require.Equal(t, numEntries/2, m.entries.Len())
 	require.Equal(t, numEntries/2, m.entryList.Len())
 	require.Equal(t, len(sleepIntervals), numEntries/defaultSoftDeadlineCheckEvery)
-	for k, v := range m.entries {
-		e := v.Value.(hashedEntry)
-		require.Equal(t, k, e.key)
+	for _, v := range m.entries.Iter() {
+		elem := v.Value()
+		e := elem.Value.(hashedEntry)
+		require.Equal(t, v.Key(), e.key)
 		require.NotNil(t, e.entry)
 	}
 }
