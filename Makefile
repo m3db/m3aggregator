@@ -12,7 +12,6 @@ coverage_xml          := coverage.xml
 junit_xml             := junit.xml
 coverage_exclude      := .excludecoverage
 test_log              := test.log
-lint_check            := .ci/lint.sh
 metalint_check        := .ci/metalint.sh
 metalint_config       := .metalinter.json
 metalint_exclude      := .excludemetalint
