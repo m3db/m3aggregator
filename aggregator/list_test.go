@@ -40,6 +40,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewMetricList(t *testing.T) {
+	inputs := []struct {
+		nowNanos int64
+		dur      time.Duration
+		expected int64
+	}{
+		{nowNanos: 999999999, dur: time.Second, expected: 0},
+		{nowNanos: 1000000000, dur: time.Second, expected: 1000000000},
+		{nowNanos: 1000000001, dur: time.Second, expected: 1000000000},
+	}
+
+	for _, input := range inputs {
+		nowFn := func() time.Time { return time.Unix(0, input.nowNanos) }
+		opts := testOptions().SetClockOptions(clock.NewOptions().SetNowFn(nowFn))
+		l, err := newMetricList(testShard, input.dur, opts)
+		require.NoError(t, err)
+		require.Equal(t, input.expected, l.LastFlushedNanos())
+	}
+}
+
 func TestMetricListPushBack(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -369,6 +389,22 @@ func TestMetricListFlushBeforeStale(t *testing.T) {
 	l.lastFlushedNanos = 1234
 	l.flushBefore(1000, discardType)
 	require.Equal(t, int64(1234), l.LastFlushedNanos())
+}
+
+func TestTruncatedNanos(t *testing.T) {
+	inputs := []struct {
+		nowNanos int64
+		dur      time.Duration
+		expected int64
+	}{
+		{nowNanos: 999999999, dur: time.Second, expected: 0},
+		{nowNanos: 1000000000, dur: time.Second, expected: 1000000000},
+		{nowNanos: 1000000001, dur: time.Second, expected: 1000000000},
+	}
+
+	for _, input := range inputs {
+		require.Equal(t, input.expected, truncatedNanos(input.nowNanos, input.dur))
+	}
 }
 
 func TestMetricLists(t *testing.T) {

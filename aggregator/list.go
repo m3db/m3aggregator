@@ -128,20 +128,29 @@ func newMetricList(shard uint32, resolution time.Duration, opts Options) (*metri
 	if minFlushInterval := opts.MinFlushInterval(); flushInterval < minFlushInterval {
 		flushInterval = minFlushInterval
 	}
+
+	// All elements in the list will have timestamps no earlier than when the list
+	// is created, so it's safe to assume everything before then has been flushed.
+	// This establishes a lower bound on the timestamps of elements in the list.
+	nowFn := opts.ClockOptions().NowFn()
+	lastFlushedNanos := truncatedNanos(nowFn().UnixNano(), resolution)
+
 	l := &metricList{
-		shard:         shard,
-		opts:          opts,
-		nowFn:         opts.ClockOptions().NowFn(),
-		log:           opts.InstrumentOptions().Logger(),
-		timeLock:      opts.TimeLock(),
-		flushHandler:  flushHandler,
-		flushWriter:   flushWriter,
-		resolution:    resolution,
-		flushInterval: flushInterval,
-		flushMgr:      opts.FlushManager(),
-		aggregations:  list.New(),
-		metrics:       newMetricListMetrics(scope),
+		shard:            shard,
+		opts:             opts,
+		nowFn:            nowFn,
+		log:              opts.InstrumentOptions().Logger(),
+		timeLock:         opts.TimeLock(),
+		flushHandler:     flushHandler,
+		flushWriter:      flushWriter,
+		resolution:       resolution,
+		flushInterval:    flushInterval,
+		flushMgr:         opts.FlushManager(),
+		aggregations:     list.New(),
+		lastFlushedNanos: lastFlushedNanos,
+		metrics:          newMetricListMetrics(scope),
 	}
+
 	l.flushBeforeFn = l.flushBefore
 	l.consumeAggMetricFn = l.consumeAggregatedMetric
 	l.discardAggMetricFn = l.discardAggregatedMetric
@@ -256,7 +265,7 @@ func (l *metricList) DiscardBefore(beforeNanos int64) {
 // flushBefore flushes or discards data before a given time based on the flush type.
 // It is not thread-safe.
 func (l *metricList) flushBefore(beforeNanos int64, flushType flushType) {
-	alignedBeforeNanos := time.Unix(0, beforeNanos).Truncate(l.resolution).UnixNano()
+	alignedBeforeNanos := truncatedNanos(beforeNanos, l.resolution)
 	if l.LastFlushedNanos() >= alignedBeforeNanos {
 		l.metrics.flushBeforeStale.Inc(1)
 		return
@@ -346,6 +355,10 @@ func (l *metricList) discardAggregatedMetric(
 	sp policy.StoragePolicy,
 ) {
 	l.metrics.flushMetricDiscarded.Inc(1)
+}
+
+func truncatedNanos(nowNanos int64, alignedBy time.Duration) int64 {
+	return time.Unix(0, nowNanos).Truncate(alignedBy).UnixNano()
 }
 
 type newMetricListFn func(
