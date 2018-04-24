@@ -147,7 +147,7 @@ clean:
 	@rm -f *.html *.xml *.out *.test
 
 .PHONY: all
-all: lint metalint test-ci-unit test-ci-integration m3aggregator
+all: lint
 	@echo Made all successfully
 
 .DEFAULT_GOAL := all
