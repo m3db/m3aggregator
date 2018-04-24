@@ -65,7 +65,7 @@ $(foreach SERVICE,$(SERVICES),$(eval $(SERVICE_RULES)))
 
 .PHONY: lint
 lint:
-	@which golint > /dev/null || go get -u github.com/golang/lint/golint
+	@which golint > /dev/null || go get -u golang.org/x/lint/golint
 	$(lint_check)
 
 .PHONY: metalint
