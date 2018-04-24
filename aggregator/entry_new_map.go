@@ -18,19 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Package hash is a temporary measure used as in between while m3aggregator
-// is upgraded to use native source generated maps now accessible in m3x,
-// these types are missing from m3x when native source generated maps
-// were added.
-package hash
+package aggregator
 
-import "github.com/spaolacci/murmur3"
-
-// Hash128 is a 128-bit hash of an ID consisting of two unsigned 64-bit ints.
-type Hash128 [2]uint64
-
-// Murmur3Hash128 computes the 128-bit hash of an id.
-func Murmur3Hash128(data []byte) Hash128 {
-	h0, h1 := murmur3.Sum128(data)
-	return Hash128{h0, h1}
+func newEntryMap() *entryMap {
+	return _entryMapAlloc(_entryMapOptions{
+		hash:   func(k entryKey) entryMapHash { return entryMapHash(k.Hash()) },
+		equals: func(x, y entryKey) bool { return x.Equal(y) },
+		copy:   func(k entryKey) entryKey { return k.Clone() },
+	})
 }
