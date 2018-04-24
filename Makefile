@@ -147,7 +147,7 @@ clean:
 	@rm -f *.html *.xml *.out *.test
 
 .PHONY: all
-all: lint
+all: metalint
 	@echo Made all successfully
 
 .DEFAULT_GOAL := all
