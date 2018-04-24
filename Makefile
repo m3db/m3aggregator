@@ -63,11 +63,6 @@ services-linux-amd64:
 
 $(foreach SERVICE,$(SERVICES),$(eval $(SERVICE_RULES)))
 
-.PHONY: lint
-lint:
-	@which golint > /dev/null || go get -u github.com/golang/lint/golint
-	$(lint_check)
-
 .PHONY: metalint
 metalint: install-metalinter install-linter-badtime
 	@($(metalint_check) $(metalint_config) $(metalint_exclude) && echo "metalinted successfully!") || (echo "metalinter failed" && exit 1)
@@ -147,7 +142,7 @@ clean:
 	@rm -f *.html *.xml *.out *.test
 
 .PHONY: all
-all: lint metalint test-ci-unit test-ci-integration m3aggregator
+all: metalint test-ci-unit test-ci-integration m3aggregator
 	@echo Made all successfully
 
 .DEFAULT_GOAL := all
