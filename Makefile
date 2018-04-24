@@ -65,7 +65,7 @@ $(foreach SERVICE,$(SERVICES),$(eval $(SERVICE_RULES)))
 
 .PHONY: lint
 lint:
-	@which golint > /dev/null || go get -u github.com/golang/lint/golint
+	@which golint > /dev/null || go get -u golang.org/x/lint/golint
 	$(lint_check)
 
 .PHONY: metalint
@@ -147,7 +147,7 @@ clean:
 	@rm -f *.html *.xml *.out *.test
 
 .PHONY: all
-all: lint metalint test-ci-unit test-ci-integration m3aggregator
+all: metalint
 	@echo Made all successfully
 
 .DEFAULT_GOAL := all
