@@ -21,6 +21,7 @@
 package capture
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -94,7 +95,7 @@ func (agg *aggregator) AddForwarded(
 	metric aggregated.Metric,
 	metadata metadata.ForwardMetadata,
 ) error {
-	return nil
+	return errors.New("not implemented")
 }
 
 func (agg *aggregator) Resign() error              { return nil }

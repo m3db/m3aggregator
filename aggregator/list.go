@@ -360,7 +360,7 @@ func (l *metricList) consumeForwardedMetric(
 	metric aggregated.Metric,
 	meta metadata.ForwardMetadata,
 ) {
-
+	panic("not implemented")
 }
 
 // discardForwardedMetric discards a forward metric.
@@ -369,7 +369,7 @@ func (l *metricList) discardForwardedMetric(
 	metric aggregated.Metric,
 	meta metadata.ForwardMetadata,
 ) {
-
+	panic("not implemented")
 }
 
 type newMetricListFn func(
