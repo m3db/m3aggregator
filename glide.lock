@@ -1,5 +1,5 @@
 hash: 25e56025cc446e51f29eed01eb64e33452d202dfb12fe9851985d1cc4e094ab8
-updated: 2018-05-01T13:14:31.906581-04:00
+updated: 2018-05-01T13:43:21.709981-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
