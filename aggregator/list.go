@@ -459,11 +459,13 @@ func newStandardMetricList(
 	id standardMetricListID,
 	opts Options,
 ) (*standardMetricList, error) {
-	var (
-		isEarlierThanFn  = isStandardMetricEarlierThan
-		timestampNanosFn = standardMetricTimestampNanos
+	l, err := newBaseMetricList(
+		shard,
+		id.resolution,
+		isStandardMetricEarlierThan,
+		standardMetricTimestampNanos,
+		opts,
 	)
-	l, err := newBaseMetricList(shard, id.resolution, isEarlierThanFn, timestampNanosFn, opts)
 	if err != nil {
 		return nil, err
 	}

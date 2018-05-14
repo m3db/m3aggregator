@@ -658,7 +658,7 @@ func (e *Entry) checkLateness(
 	return errArrivedTooLate
 }
 
-// NB: For forarded metrics, an entry must be associated with one and only one metadata.
+// NB: For forwarded metrics, an entry must be associated with one and only one metadata.
 func (e *Entry) shouldUpdateForwardMetadataWithLock(metadata metadata.ForwardMetadata) bool {
 	key := aggregationKey{
 		aggregationID:     metadata.AggregationID,
