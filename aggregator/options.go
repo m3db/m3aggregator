@@ -35,8 +35,6 @@ import (
 	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/instrument"
 	xtime "github.com/m3db/m3x/time"
-
-	"github.com/spaolacci/murmur3"
 )
 
 var (
@@ -49,7 +47,6 @@ var (
 	defaultEntryCheckBatchPercent    = 0.01
 	defaultMaxTimerBatchSizePerWrite = 0
 	defaultResignTimeout             = 5 * time.Minute
-	defaultInitSourceID              = uint32(0)
 	defaultDefaultStoragePolicies    = []policy.StoragePolicy{
 		policy.NewStoragePolicy(10*time.Second, xtime.Second, 2*24*time.Hour),
 		policy.NewStoragePolicy(time.Minute, xtime.Minute, 40*24*time.Hour),
@@ -272,14 +269,6 @@ type Options interface {
 
 	// FullGaugePrefix returns the full prefix for gauges.
 	FullGaugePrefix() []byte
-
-	// Internal use only.
-
-	// setSourceIDProvider sets the source ID provider.
-	setSourceIDProvider(value sourceIDProvider) Options
-
-	// sourceIDProvider returns the source ID provider.
-	sourceIDProvider() sourceIDProvider
 }
 
 type options struct {
@@ -320,9 +309,6 @@ type options struct {
 	fullTimerPrefix   []byte
 	fullGaugePrefix   []byte
 	timerQuantiles    []float64
-
-	// Internal options.
-	srcIDProvider sourceIDProvider
 }
 
 // NewOptions create a new set of options.
@@ -338,7 +324,7 @@ func NewOptions() Options {
 		instrumentOpts:     instrument.NewOptions(),
 		streamOpts:         cm.NewOptions(),
 		runtimeOptsManager: runtime.NewOptionsManager(runtime.NewOptions()),
-		shardFn:            defaultShardFn,
+		shardFn:            sharding.Murmur32Hash.MustShardFn(),
 		bufferDurationBeforeShardCutover: defaultBufferDurationBeforeShardCutover,
 		bufferDurationAfterShardCutoff:   defaultBufferDurationAfterShardCutoff,
 		entryTTL:                         defaultEntryTTL,
@@ -348,7 +334,6 @@ func NewOptions() Options {
 		defaultStoragePolicies:           defaultDefaultStoragePolicies,
 		resignTimeout:                    defaultResignTimeout,
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
-		srcIDProvider:                    newSourceIDProvider(defaultInitSourceID),
 	}
 
 	// Initialize pools.
@@ -680,16 +665,6 @@ func (o *options) TimerQuantiles() []float64 {
 	return o.timerQuantiles
 }
 
-func (o *options) setSourceIDProvider(value sourceIDProvider) Options {
-	opts := *o
-	opts.srcIDProvider = value
-	return &opts
-}
-
-func (o *options) sourceIDProvider() sourceIDProvider {
-	return o.srcIDProvider
-}
-
 func (o *options) initPools() {
 	defaultRuntimeOpts := runtime.NewOptions()
 	o.entryPool = NewEntryPool(nil)
@@ -742,10 +717,6 @@ func (o *options) computeFullGaugePrefix() {
 	n := copy(fullGaugePrefix, o.metricPrefix)
 	copy(fullGaugePrefix[n:], o.gaugePrefix)
 	o.fullGaugePrefix = fullGaugePrefix
-}
-
-func defaultShardFn(id []byte, numShards int) uint32 {
-	return murmur3.Sum32(id) % uint32(numShards)
 }
 
 func defaultMaxAllowedForwardingDelayFn(

@@ -199,9 +199,3 @@ func TestSetGaugeElemPool(t *testing.T) {
 	o := NewOptions().SetGaugeElemPool(value)
 	require.Equal(t, value, o.GaugeElemPool())
 }
-
-func TestSetSourceIDProvider(t *testing.T) {
-	value := newSourceIDProvider(testSourceID)
-	o := NewOptions().setSourceIDProvider(value)
-	require.True(t, value == o.sourceIDProvider())
-}

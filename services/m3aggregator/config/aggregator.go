@@ -168,6 +168,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	opts = opts.SetStreamOptions(streamOpts)
 
 	// Set administrative client.
+	// TODO(xichen): client retry threshold likely needs to be low for faster retries.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("admin-client"))
 	adminClient, err := c.Client.NewAdminClient(client, iOpts)
 	if err != nil {
