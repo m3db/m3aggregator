@@ -121,6 +121,12 @@ type AggregatorConfiguration struct {
 	// Default storage policies.
 	DefaultStoragePolicies []policy.StoragePolicy `yaml:"defaultStoragePolicies" validate:"nonzero"`
 
+	// Maximum number of cached source sets.
+	MaxNumCachedSourceSets *int `yaml:"maxNumCachedSourceSets"`
+
+	// Maximum size of the cached source set.
+	MaxCachedSourceSetSize *int `yaml:"maxCachedSourceSetSize"`
+
 	// Pool of counter elements.
 	CounterElemPool pool.ObjectPoolConfiguration `yaml:"counterElemPool"`
 
@@ -287,6 +293,14 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	storagePolicies := make([]policy.StoragePolicy, len(c.DefaultStoragePolicies))
 	copy(storagePolicies, c.DefaultStoragePolicies)
 	opts = opts.SetDefaultStoragePolicies(storagePolicies)
+
+	// Set cached source sets options.
+	if c.MaxNumCachedSourceSets != nil {
+		opts = opts.SetMaxNumCachedSourceSets(*c.MaxNumCachedSourceSets)
+	}
+	if c.MaxCachedSourceSetSize != nil {
+		opts = opts.SetMaxCachedSourceSetSize(*c.MaxCachedSourceSetSize)
+	}
 
 	// Set counter elem pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("counter-elem-pool"))

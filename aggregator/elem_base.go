@@ -46,12 +46,6 @@ const (
 	// Default initial number of sources.
 	defaultNumSources = 1024
 
-	// Maximum number of cached source sets.
-	maxNumCachedSourceSets = 2
-
-	// Maximum size of the cache source set (~6MB).
-	maxCachedSourceSetSize = 128 * 1024
-
 	// Maximum transformation derivative order that is supported.
 	// A default value of 1 means we currently only support transformations that
 	// compute first-order derivatives. This applies to the most common usecases

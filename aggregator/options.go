@@ -46,6 +46,8 @@ var (
 	defaultEntryCheckInterval        = time.Hour
 	defaultEntryCheckBatchPercent    = 0.01
 	defaultMaxTimerBatchSizePerWrite = 0
+	defaultMaxNumCachedSourceSets    = 2
+	defaultMaxCachedSourceSetSize    = 128 * 1024
 	defaultResignTimeout             = 5 * time.Minute
 	defaultDefaultStoragePolicies    = []policy.StoragePolicy{
 		policy.NewStoragePolicy(10*time.Second, xtime.Second, 2*24*time.Hour),
@@ -235,6 +237,18 @@ type Options interface {
 	// delay for given metric resolution and number of times the metric has been forwarded.
 	MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn
 
+	// SetMaxNumCachedSourceSets sets the maximum number of cached source sets.
+	SetMaxNumCachedSourceSets(value int) Options
+
+	// MaxNumCachedSourceSets returns the maximum number of cached source sets.
+	MaxNumCachedSourceSets() int
+
+	// SetMaxCachedSourceSetSize sets the maximum size of the cached source set.
+	SetMaxCachedSourceSetSize(value int) Options
+
+	// MaxCachedSourceSetSize returns the maximum size of the cached source set.
+	MaxCachedSourceSetSize() int
+
 	// SetEntryPool sets the entry pool.
 	SetEntryPool(value EntryPool) Options
 
@@ -299,6 +313,8 @@ type options struct {
 	electionManager                  ElectionManager
 	resignTimeout                    time.Duration
 	maxAllowedForwardingDelayFn      MaxAllowedForwardingDelayFn
+	maxNumCachedSourceSets           int
+	maxCachedSourceSetSize           int
 	entryPool                        EntryPool
 	counterElemPool                  CounterElemPool
 	timerElemPool                    TimerElemPool
@@ -334,6 +350,8 @@ func NewOptions() Options {
 		defaultStoragePolicies:           defaultDefaultStoragePolicies,
 		resignTimeout:                    defaultResignTimeout,
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
+		maxNumCachedSourceSets:           defaultMaxNumCachedSourceSets,
+		maxCachedSourceSetSize:           defaultMaxCachedSourceSetSize,
 	}
 
 	// Initialize pools.
@@ -595,6 +613,10 @@ func (o *options) SetResignTimeout(value time.Duration) Options {
 	return &opts
 }
 
+func (o *options) ResignTimeout() time.Duration {
+	return o.resignTimeout
+}
+
 func (o *options) SetMaxAllowedForwardingDelayFn(value MaxAllowedForwardingDelayFn) Options {
 	opts := *o
 	opts.maxAllowedForwardingDelayFn = value
@@ -605,8 +627,24 @@ func (o *options) MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn {
 	return o.maxAllowedForwardingDelayFn
 }
 
-func (o *options) ResignTimeout() time.Duration {
-	return o.resignTimeout
+func (o *options) SetMaxNumCachedSourceSets(value int) Options {
+	opts := *o
+	opts.maxNumCachedSourceSets = value
+	return &opts
+}
+
+func (o *options) MaxNumCachedSourceSets() int {
+	return o.maxNumCachedSourceSets
+}
+
+func (o *options) SetMaxCachedSourceSetSize(value int) Options {
+	opts := *o
+	opts.maxCachedSourceSetSize = value
+	return &opts
+}
+
+func (o *options) MaxCachedSourceSetSize() int {
+	return o.maxCachedSourceSetSize
 }
 
 func (o *options) SetEntryPool(value EntryPool) Options {

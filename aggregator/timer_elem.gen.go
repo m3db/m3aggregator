@@ -241,9 +241,16 @@ func (e *TimerElem) Consume(
 		e.toConsume[i].lockedAgg.aggregation.Close()
 		if e.toConsume[i].lockedAgg.sourcesSeen != nil {
 			sourceSetSize := len(e.toConsume[i].lockedAgg.sourcesSeen)
-			if sourceSetSize <= maxCachedSourceSetSize {
+			// If the source set we are about to cache is too big (i.e., bigger than the
+			// configured max size), we do not want to retain it and instead simply discard it.
+			// This is useful if say over the course of a month the metric IDs producing
+			// the forward metric ID have changed significantly so there are a lot of stale
+			// IDs in the map so we regenerate the map once in a while to refresh the map.
+			if sourceSetSize <= e.opts.MaxCachedSourceSetSize() {
 				e.cachedSourceSetsLock.Lock()
-				if len(e.cachedSourceSets) < maxNumCachedSourceSets {
+				// This is to make sure there aren't too many cached source sets taking up
+				// too much space.
+				if len(e.cachedSourceSets) < e.opts.MaxNumCachedSourceSets() {
 					e.cachedSourceSets = append(e.cachedSourceSets, e.toConsume[i].lockedAgg.sourcesSeen)
 				}
 				e.cachedSourceSetsLock.Unlock()
