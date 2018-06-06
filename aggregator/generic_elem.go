@@ -32,7 +32,7 @@ import (
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
-	"github.com/m3db/m3metrics/op/applied"
+	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/transformation"
 	xid "github.com/m3db/m3x/ident"
@@ -439,7 +439,7 @@ func (e *GenericElem) processValueWithAggregationLock(
 	)
 	for aggTypeIdx, aggType := range e.aggTypes {
 		value := lockedAgg.aggregation.ValueOf(aggType)
-		for i := 0; i < transformations.NumSteps(); i++ {
+		for i := 0; i < transformations.Len(); i++ {
 			transformType := transformations.At(i).Transformation.Type
 			if transformType.IsUnaryTransform() {
 				fn := transformType.MustUnaryTransform()
