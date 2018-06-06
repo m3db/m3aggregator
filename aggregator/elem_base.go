@@ -32,8 +32,8 @@ import (
 	"github.com/m3db/m3metrics/metric"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
-	"github.com/m3db/m3metrics/op"
-	"github.com/m3db/m3metrics/op/applied"
+	mpipeline "github.com/m3db/m3metrics/pipeline"
+	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
 	xid "github.com/m3db/m3x/ident"
 	"github.com/m3db/m3x/pool"
@@ -332,7 +332,7 @@ type parsedPipeline struct {
 	// Rollup operation that is either at the head of the source pipeline or
 	// immediately following the transformation operations at the head of the
 	// source pipeline if applicable.
-	Rollup applied.Rollup
+	Rollup applied.RollupOp
 
 	// The remainder of the source pipeline after stripping the transformation
 	// and rollup operations from the head of the source pipeline.
@@ -354,14 +354,14 @@ func newParsedPipeline(pipeline applied.Pipeline) (parsedPipeline, error) {
 	var (
 		firstRollupOpIdx              = -1
 		transformationDerivativeOrder int
-		numSteps                      = pipeline.NumSteps()
+		numSteps                      = pipeline.Len()
 	)
 	for i := 0; i < numSteps; i++ {
 		pipelineOp := pipeline.At(i)
-		if pipelineOp.Type != op.TransformationType && pipelineOp.Type != op.RollupType {
+		if pipelineOp.Type != mpipeline.TransformationOpType && pipelineOp.Type != mpipeline.RollupOpType {
 			return parsedPipeline{}, fmt.Errorf("pipeline %v step %d has invalid operation type %v", pipeline, i, pipelineOp.Type)
 		}
-		if pipelineOp.Type == op.RollupType {
+		if pipelineOp.Type == mpipeline.RollupOpType {
 			if firstRollupOpIdx == -1 {
 				firstRollupOpIdx = i
 			}
