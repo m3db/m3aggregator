@@ -33,8 +33,8 @@ import (
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/metric/unaggregated"
-	"github.com/m3db/m3metrics/op"
-	"github.com/m3db/m3metrics/op/applied"
+	"github.com/m3db/m3metrics/pipeline"
+	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/transformation"
 	xid "github.com/m3db/m3x/ident"
@@ -67,25 +67,25 @@ var (
 		ID:       testGaugeID,
 		GaugeVal: 123.456,
 	}
-	testPipeline = applied.NewPipeline([]applied.Union{
+	testPipeline = applied.NewPipeline([]applied.OpUnion{
 		{
-			Type:           op.TransformationType,
-			Transformation: op.Transformation{Type: transformation.Absolute},
+			Type:           pipeline.TransformationOpType,
+			Transformation: pipeline.TransformationOp{Type: transformation.Absolute},
 		},
 		{
-			Type:           op.TransformationType,
-			Transformation: op.Transformation{Type: transformation.PerSecond},
+			Type:           pipeline.TransformationOpType,
+			Transformation: pipeline.TransformationOp{Type: transformation.PerSecond},
 		},
 		{
-			Type: op.RollupType,
-			Rollup: applied.Rollup{
+			Type: pipeline.RollupOpType,
+			Rollup: applied.RollupOp{
 				ID:            []byte("foo.bar"),
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 			},
 		},
 		{
-			Type: op.RollupType,
-			Rollup: applied.Rollup{
+			Type: pipeline.RollupOpType,
+			Rollup: applied.RollupOp{
 				ID:            []byte("foo.baz"),
 				AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 			},
@@ -130,25 +130,25 @@ func TestCounterResetSetData(t *testing.T) {
 	// Reset element with a pipeline containing a derivative transformation.
 	expectedParsedPipeline := parsedPipeline{
 		HasDerivativeTransform: true,
-		Transformations: applied.NewPipeline([]applied.Union{
+		Transformations: applied.NewPipeline([]applied.OpUnion{
 			{
-				Type:           op.TransformationType,
-				Transformation: op.Transformation{Type: transformation.Absolute},
+				Type:           pipeline.TransformationOpType,
+				Transformation: pipeline.TransformationOp{Type: transformation.Absolute},
 			},
 			{
-				Type:           op.TransformationType,
-				Transformation: op.Transformation{Type: transformation.PerSecond},
+				Type:           pipeline.TransformationOpType,
+				Transformation: pipeline.TransformationOp{Type: transformation.PerSecond},
 			},
 		}),
 		HasRollup: true,
-		Rollup: applied.Rollup{
+		Rollup: applied.RollupOp{
 			ID:            []byte("foo.bar"),
 			AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 		},
-		Remainder: applied.NewPipeline([]applied.Union{
+		Remainder: applied.NewPipeline([]applied.OpUnion{
 			{
-				Type: op.RollupType,
-				Rollup: applied.Rollup{
+				Type: pipeline.RollupOpType,
+				Rollup: applied.RollupOp{
 					ID:            []byte("foo.baz"),
 					AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 				},
@@ -175,10 +175,10 @@ func TestCounterResetSetDataInvalidPipeline(t *testing.T) {
 	opts := NewOptions()
 	ce := MustNewCounterElem(nil, policy.EmptyStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
 
-	invalidPipeline := applied.NewPipeline([]applied.Union{
+	invalidPipeline := applied.NewPipeline([]applied.OpUnion{
 		{
-			Type:           op.TransformationType,
-			Transformation: op.Transformation{Type: transformation.Absolute},
+			Type:           pipeline.TransformationOpType,
+			Transformation: pipeline.TransformationOp{Type: transformation.Absolute},
 		},
 	})
 	err := ce.ResetSetData(testCounterID, testStoragePolicy, maggregation.DefaultTypes, invalidPipeline, 0)
@@ -495,10 +495,10 @@ func TestCounterElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -529,10 +529,10 @@ func TestCounterElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -551,10 +551,10 @@ func TestCounterElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -689,25 +689,25 @@ func TestTimerResetSetData(t *testing.T) {
 	// Reset element with a pipeline containing a derivative transformation.
 	expectedParsedPipeline := parsedPipeline{
 		HasDerivativeTransform: true,
-		Transformations: applied.NewPipeline([]applied.Union{
+		Transformations: applied.NewPipeline([]applied.OpUnion{
 			{
-				Type:           op.TransformationType,
-				Transformation: op.Transformation{Type: transformation.Absolute},
+				Type:           pipeline.TransformationOpType,
+				Transformation: pipeline.TransformationOp{Type: transformation.Absolute},
 			},
 			{
-				Type:           op.TransformationType,
-				Transformation: op.Transformation{Type: transformation.PerSecond},
+				Type:           pipeline.TransformationOpType,
+				Transformation: pipeline.TransformationOp{Type: transformation.PerSecond},
 			},
 		}),
 		HasRollup: true,
-		Rollup: applied.Rollup{
+		Rollup: applied.RollupOp{
 			ID:            []byte("foo.bar"),
 			AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 		},
-		Remainder: applied.NewPipeline([]applied.Union{
+		Remainder: applied.NewPipeline([]applied.OpUnion{
 			{
-				Type: op.RollupType,
-				Rollup: applied.Rollup{
+				Type: pipeline.RollupOpType,
+				Rollup: applied.RollupOp{
 					ID:            []byte("foo.baz"),
 					AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 				},
@@ -734,10 +734,10 @@ func TestTimerResetSetDataInvalidPipeline(t *testing.T) {
 	opts := NewOptions()
 	te := MustNewTimerElem(nil, policy.EmptyStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
 
-	invalidPipeline := applied.NewPipeline([]applied.Union{
+	invalidPipeline := applied.NewPipeline([]applied.OpUnion{
 		{
-			Type:           op.TransformationType,
-			Transformation: op.Transformation{Type: transformation.Absolute},
+			Type:           pipeline.TransformationOpType,
+			Transformation: pipeline.TransformationOp{Type: transformation.Absolute},
 		},
 	})
 	err := te.ResetSetData(testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, invalidPipeline, 0)
@@ -992,10 +992,10 @@ func TestTimerElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -1026,10 +1026,10 @@ func TestTimerElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -1048,10 +1048,10 @@ func TestTimerElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -1191,25 +1191,25 @@ func TestGaugeResetSetData(t *testing.T) {
 	// Reset element with a pipeline containing a derivative transformation.
 	expectedParsedPipeline := parsedPipeline{
 		HasDerivativeTransform: true,
-		Transformations: applied.NewPipeline([]applied.Union{
+		Transformations: applied.NewPipeline([]applied.OpUnion{
 			{
-				Type:           op.TransformationType,
-				Transformation: op.Transformation{Type: transformation.Absolute},
+				Type:           pipeline.TransformationOpType,
+				Transformation: pipeline.TransformationOp{Type: transformation.Absolute},
 			},
 			{
-				Type:           op.TransformationType,
-				Transformation: op.Transformation{Type: transformation.PerSecond},
+				Type:           pipeline.TransformationOpType,
+				Transformation: pipeline.TransformationOp{Type: transformation.PerSecond},
 			},
 		}),
 		HasRollup: true,
-		Rollup: applied.Rollup{
+		Rollup: applied.RollupOp{
 			ID:            []byte("foo.bar"),
 			AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 		},
-		Remainder: applied.NewPipeline([]applied.Union{
+		Remainder: applied.NewPipeline([]applied.OpUnion{
 			{
-				Type: op.RollupType,
-				Rollup: applied.Rollup{
+				Type: pipeline.RollupOpType,
+				Rollup: applied.RollupOp{
 					ID:            []byte("foo.baz"),
 					AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 				},
@@ -1541,10 +1541,10 @@ func TestGaugeElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -1575,10 +1575,10 @@ func TestGaugeElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
@@ -1597,10 +1597,10 @@ func TestGaugeElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 			ForwardMetadata: metadata.ForwardMetadata{
 				AggregationID: maggregation.MustCompressTypes(maggregation.Count),
 				StoragePolicy: testStoragePolicy,
-				Pipeline: applied.NewPipeline([]applied.Union{
+				Pipeline: applied.NewPipeline([]applied.OpUnion{
 					{
-						Type: op.RollupType,
-						Rollup: applied.Rollup{
+						Type: pipeline.RollupOpType,
+						Rollup: applied.RollupOp{
 							ID:            []byte("foo.baz"),
 							AggregationID: maggregation.MustCompressTypes(maggregation.Max),
 						},
