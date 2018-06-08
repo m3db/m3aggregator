@@ -133,8 +133,8 @@ func (m *metricMap) AddUntimed(
 	metadatas metadata.StagedMetadatas,
 ) error {
 	key := entryKey{
-		metricType: mu.Type,
-		idHash:     hash.Murmur3Hash128(mu.ID),
+		metricType: metric.Type,
+		idHash:     hash.Murmur3Hash128(metric.ID),
 	}
 	entry, err := m.findOrCreate(key)
 	if err != nil {
