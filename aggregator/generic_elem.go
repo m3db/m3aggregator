@@ -26,6 +26,7 @@ import (
 	"time"
 
 	raggregation "github.com/m3db/m3aggregator/aggregation"
+	"github.com/m3db/m3aggregator/hash"
 	maggregation "github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metadata"
 	"github.com/m3db/m3metrics/metric"
@@ -35,7 +36,6 @@ import (
 	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/transformation"
-	xid "github.com/m3db/m3x/ident"
 
 	"github.com/mauricelam/genny/generic"
 )
@@ -224,7 +224,7 @@ func (e *GenericElem) AddUnique(timestamp time.Time, value float64, sourceID []b
 		lockedAgg.Unlock()
 		return errAggregationClosed
 	}
-	sourceHash := xid.Murmur3Hash128(sourceID)
+	sourceHash := hash.Murmur3Hash128(sourceID)
 	if v, exists := lockedAgg.sourcesSeen[sourceHash]; exists && v == alignedStart {
 		lockedAgg.Unlock()
 		return errDuplicateForwardingSource

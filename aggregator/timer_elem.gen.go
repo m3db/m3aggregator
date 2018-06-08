@@ -31,6 +31,8 @@ import (
 
 	"time"
 
+	"github.com/m3db/m3aggregator/hash"
+
 	maggregation "github.com/m3db/m3metrics/aggregation"
 
 	"github.com/m3db/m3metrics/metadata"
@@ -46,8 +48,6 @@ import (
 	"github.com/m3db/m3metrics/policy"
 
 	"github.com/m3db/m3metrics/transformation"
-
-	xid "github.com/m3db/m3x/ident"
 )
 
 type lockedTimerAggregation struct {
@@ -179,7 +179,7 @@ func (e *TimerElem) AddUnique(timestamp time.Time, value float64, sourceID []byt
 		lockedAgg.Unlock()
 		return errAggregationClosed
 	}
-	sourceHash := xid.Murmur3Hash128(sourceID)
+	sourceHash := hash.Murmur3Hash128(sourceID)
 	if v, exists := lockedAgg.sourcesSeen[sourceHash]; exists && v == alignedStart {
 		lockedAgg.Unlock()
 		return errDuplicateForwardingSource

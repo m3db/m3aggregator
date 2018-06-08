@@ -27,6 +27,7 @@ import (
 
 	raggregation "github.com/m3db/m3aggregator/aggregation"
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
+	"github.com/m3db/m3aggregator/hash"
 	maggregation "github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metadata"
 	"github.com/m3db/m3metrics/metric"
@@ -37,7 +38,6 @@ import (
 	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/transformation"
-	xid "github.com/m3db/m3x/ident"
 	"github.com/m3db/m3x/pool"
 	xtime "github.com/m3db/m3x/time"
 
@@ -267,7 +267,7 @@ func TestCounterElemAddUnique(t *testing.T) {
 	require.Equal(t, int64(345), e.values[0].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[0].lockedAgg.aggregation.Count())
 	require.Equal(t, int64(0), e.values[0].lockedAgg.aggregation.SumSq())
-	_, exists := e.values[0].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists := e.values[0].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Add another metric at slightly different time but still within the
@@ -279,7 +279,7 @@ func TestCounterElemAddUnique(t *testing.T) {
 	require.Equal(t, int64(845), e.values[0].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(2), e.values[0].lockedAgg.aggregation.Count())
 	require.Equal(t, int64(0), e.values[0].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[0].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source2)]
+	_, exists = e.values[0].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source2)]
 	require.True(t, exists)
 
 	// Add the counter metric in the next aggregation interval.
@@ -291,7 +291,7 @@ func TestCounterElemAddUnique(t *testing.T) {
 	require.Equal(t, int64(278), e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
 	require.Equal(t, int64(0), e.values[1].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists = e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Add the counter metric in the same aggregation interval with the same
@@ -304,7 +304,7 @@ func TestCounterElemAddUnique(t *testing.T) {
 	require.Equal(t, int64(278), e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
 	require.Equal(t, int64(0), e.values[1].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists = e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Adding the counter metric to a closed element results in an error.
@@ -324,7 +324,7 @@ func TestCounterElemAddUniqueWithCustomAggregation(t *testing.T) {
 	require.Equal(t, int64(12), e.values[0].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(12), e.values[0].lockedAgg.aggregation.Max())
 	require.Equal(t, int64(144), e.values[0].lockedAgg.aggregation.SumSq())
-	_, exists := e.values[0].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists := e.values[0].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Add the counter metric at slightly different time
@@ -356,7 +356,7 @@ func TestCounterElemAddUniqueWithCustomAggregation(t *testing.T) {
 	require.Equal(t, int64(20), e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
 	require.Equal(t, int64(400), e.values[1].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists = e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Adding the counter metric to a closed element results in an error.
@@ -833,7 +833,7 @@ func TestTimerElemAddUnique(t *testing.T) {
 	require.Equal(t, 20.0, e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
 	require.InEpsilon(t, 400.0, e.values[1].lockedAgg.aggregation.SumSq(), 1e-10)
-	_, exists := e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128([]byte("source1"))]
+	_, exists := e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128([]byte("source1"))]
 	require.True(t, exists)
 
 	// Adding the counter metric to a closed element results in an error.
@@ -1311,7 +1311,7 @@ func TestGaugeElemAddUnique(t *testing.T) {
 	require.Equal(t, 34.5, e.values[0].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[0].lockedAgg.aggregation.Count())
 	require.Equal(t, 0.0, e.values[0].lockedAgg.aggregation.SumSq())
-	_, exists := e.values[0].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists := e.values[0].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Add another metric at slightly different time but still within the
@@ -1323,7 +1323,7 @@ func TestGaugeElemAddUnique(t *testing.T) {
 	require.Equal(t, 84.5, e.values[0].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(2), e.values[0].lockedAgg.aggregation.Count())
 	require.Equal(t, 0.0, e.values[0].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[0].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source2)]
+	_, exists = e.values[0].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source2)]
 	require.True(t, exists)
 
 	// Add the counter metric in the next aggregation interval.
@@ -1335,7 +1335,7 @@ func TestGaugeElemAddUnique(t *testing.T) {
 	require.Equal(t, 27.8, e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
 	require.Equal(t, 0.0, e.values[1].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists = e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Add the counter metric in the same aggregation interval with the same
@@ -1348,7 +1348,7 @@ func TestGaugeElemAddUnique(t *testing.T) {
 	require.Equal(t, 27.8, e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
 	require.Equal(t, 0.0, e.values[1].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists = e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Adding the counter metric to a closed element results in an error.
@@ -1368,7 +1368,7 @@ func TestGaugeElemAddUniqueWithCustomAggregation(t *testing.T) {
 	require.Equal(t, 1.2, e.values[0].lockedAgg.aggregation.Sum())
 	require.Equal(t, 1.2, e.values[0].lockedAgg.aggregation.Max())
 	require.Equal(t, 1.44, e.values[0].lockedAgg.aggregation.SumSq())
-	_, exists := e.values[0].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists := e.values[0].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Add the counter metric at slightly different time
@@ -1400,7 +1400,7 @@ func TestGaugeElemAddUniqueWithCustomAggregation(t *testing.T) {
 	require.Equal(t, 2.0, e.values[1].lockedAgg.aggregation.Sum())
 	require.Equal(t, 2.0, e.values[1].lockedAgg.aggregation.Max())
 	require.Equal(t, 4.0, e.values[1].lockedAgg.aggregation.SumSq())
-	_, exists = e.values[1].lockedAgg.sourcesSeen[xid.Murmur3Hash128(source1)]
+	_, exists = e.values[1].lockedAgg.sourcesSeen[hash.Murmur3Hash128(source1)]
 	require.True(t, exists)
 
 	// Adding the counter metric to a closed element results in an error.

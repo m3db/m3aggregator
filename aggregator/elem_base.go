@@ -28,6 +28,7 @@ import (
 	"time"
 
 	raggregation "github.com/m3db/m3aggregator/aggregation"
+	"github.com/m3db/m3aggregator/hash"
 	maggregation "github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metric"
 	"github.com/m3db/m3metrics/metric/id"
@@ -35,7 +36,6 @@ import (
 	mpipeline "github.com/m3db/m3metrics/pipeline"
 	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
-	xid "github.com/m3db/m3x/ident"
 	"github.com/m3db/m3x/pool"
 )
 
@@ -69,7 +69,7 @@ type isEarlierThanFn func(windowStartNanos int64, resolution time.Duration, targ
 type timestampNanosFn func(windowStartNanos int64, resolution time.Duration) int64
 
 // sourceSet is a set of sources.
-type sourceSet map[xid.Hash128]int64
+type sourceSet map[hash.Hash128]int64
 
 type createAggregationOptions struct {
 	// initSourceSet determines whether to initialize the source set.
