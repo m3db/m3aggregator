@@ -275,7 +275,7 @@ func TestMetricMapAddForwardedNoRateLimit(t *testing.T) {
 	key := entryKey{
 		metricCategory: forwardedMetric,
 		metricType:     metric.CounterType,
-		idHash:         xid.Murmur3Hash128(am.ID),
+		idHash:         hash.Murmur3Hash128(am.ID),
 	}
 	require.NoError(t, m.AddForwarded(am, testForwardMetadata))
 	require.Equal(t, 1, len(m.entries))
@@ -308,7 +308,7 @@ func TestMetricMapAddForwardedNoRateLimit(t *testing.T) {
 	key2 := entryKey{
 		metricCategory: untimedMetric,
 		metricType:     metric.CounterType,
-		idHash:         xid.Murmur3Hash128(um.ID),
+		idHash:         hash.Murmur3Hash128(um.ID),
 	}
 	require.NoError(t, m.AddUntimed(um, testStagedMetadatas))
 	require.Equal(t, 2, len(m.entries))
@@ -330,7 +330,7 @@ func TestMetricMapAddForwardedNoRateLimit(t *testing.T) {
 	key3 := entryKey{
 		metricCategory: forwardedMetric,
 		metricType:     metric.GaugeType,
-		idHash:         xid.Murmur3Hash128(metricWithDifferentType.ID),
+		idHash:         hash.Murmur3Hash128(metricWithDifferentType.ID),
 	}
 	require.NoError(t, m.AddForwarded(metricWithDifferentType, testForwardMetadata))
 	require.Equal(t, 3, len(m.entries))
@@ -350,7 +350,7 @@ func TestMetricMapAddForwardedNoRateLimit(t *testing.T) {
 	key4 := entryKey{
 		metricCategory: forwardedMetric,
 		metricType:     metric.GaugeType,
-		idHash:         xid.Murmur3Hash128(metricWithDifferentID.ID),
+		idHash:         hash.Murmur3Hash128(metricWithDifferentID.ID),
 	}
 	require.NoError(t, m.AddForwarded(metricWithDifferentID, testForwardMetadata))
 	require.Equal(t, 4, len(m.entries))

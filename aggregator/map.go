@@ -165,7 +165,7 @@ func (m *metricMap) AddForwarded(
 	key := entryKey{
 		metricCategory: forwardedMetric,
 		metricType:     metric.Type,
-		idHash:         xid.Murmur3Hash128(metric.ID),
+		idHash:         hash.Murmur3Hash128(metric.ID),
 	}
 	entry, err := m.findOrCreate(key)
 	if err != nil {
