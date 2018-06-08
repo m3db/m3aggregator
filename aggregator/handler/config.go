@@ -29,7 +29,9 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
+	"github.com/m3db/m3cluster/client"
 	"github.com/m3db/m3metrics/encoding/msgpack"
+	"github.com/m3db/m3msg/producer/config"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
 	"github.com/m3db/m3x/retry"
@@ -55,6 +57,7 @@ type FlushHandlerConfiguration struct {
 
 // NewHandler creates a new flush handler based on the configuration.
 func (c FlushHandlerConfiguration) NewHandler(
+	cs client.Client,
 	instrumentOpts instrument.Options,
 ) (Handler, error) {
 	if len(c.Handlers) == 0 {
@@ -75,6 +78,18 @@ func (c FlushHandlerConfiguration) NewHandler(
 				return nil, errNoBackendConfiguration
 			}
 			sharderRouter, err := hc.Backend.NewSharderRouter(instrumentOpts)
+			if err != nil {
+				return nil, err
+			}
+			sharderRouters = append(sharderRouters, sharderRouter)
+		case m3msgType:
+			if hc.M3msgBackend == nil {
+				return nil, errNoBackendConfiguration
+			}
+			sharderRouter, err := hc.M3msgBackend.NewSharderRouter(
+				cs,
+				instrumentOpts,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -140,6 +155,47 @@ type flushHandlerConfiguration struct {
 
 	// Backend configures the backend.
 	Backend *backendConfiguration `yaml:"backend"`
+
+	// M3msgBackend configures the backend based on m3msg producer.
+	M3msgBackend *m3msgBackendConfiguration `yaml:"m3msgBackend"`
+}
+
+type m3msgBackendConfiguration struct {
+	// Name of the backend.
+	Name string `yaml:"name"`
+
+	// Hashing function type.
+	HashType sharding.HashType `yaml:"hashType"`
+
+	// Total number of shards.
+	TotalShards int `yaml:"totalShards" validate:"nonzero"`
+
+	// Producer configs the m3msg producer.
+	Producer config.ProducerConfiguration `yaml:"producer"`
+
+	// CloseTimeout configs the timeout on closing the producer.
+	CloseTimeout *time.Duration `yaml:"closeTimeout"`
+}
+
+func (c *m3msgBackendConfiguration) NewSharderRouter(
+	cs client.Client,
+	instrumentOpts instrument.Options,
+) (SharderRouter, error) {
+	scope := instrumentOpts.MetricsScope().Tagged(map[string]string{
+		"backend":   c.Name,
+		"component": "producer",
+	})
+	p, err := c.Producer.NewProducer(cs, instrumentOpts.SetMetricsScope(scope))
+	if err != nil {
+		return SharderRouter{}, err
+	}
+	if err := p.Init(); err != nil {
+		return SharderRouter{}, err
+	}
+	return SharderRouter{
+		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
+		Router:    common.NewM3msgRouter(p, c.CloseTimeout),
+	}, nil
 }
 
 type backendConfiguration struct {

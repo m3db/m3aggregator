@@ -263,7 +263,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 
 	// Set flushing handler.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("flush-handler"))
-	flushHandler, err := c.Flush.NewHandler(iOpts)
+	flushHandler, err := c.Flush.NewHandler(client, iOpts)
 	if err != nil {
 		return nil, err
 	}

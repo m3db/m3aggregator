@@ -33,6 +33,7 @@ const (
 	blackholeType Type = "blackhole"
 	loggingType   Type = "logging"
 	forwardType   Type = "forward"
+	m3msgType     Type = "m3msg"
 )
 
 var (
@@ -40,6 +41,7 @@ var (
 		blackholeType,
 		loggingType,
 		forwardType,
+		m3msgType,
 	}
 )
 

@@ -31,7 +31,8 @@ import (
 
 // Router routes data to the corresponding backends.
 type Router interface {
-	// Route routes a buffer for a given shard.
+	// Route routes a buffer for a given shard. It should decrement
+	// the reference count of the buffer before returning.
 	Route(shard uint32, buffer *RefCountedBuffer) error
 
 	// Close closes the router.
