@@ -197,6 +197,7 @@ func testRawTCPServerHandleUnaggregated(
 	require.NoError(t, s.Serve(listener))
 
 	// Now establish multiple connections and send data to the server.
+	var expectedTotalMetrics int
 	for i := 0; i < numClients; i++ {
 		i := i
 		wgClient.Add(1)
@@ -209,6 +210,9 @@ func testRawTCPServerHandleUnaggregated(
 		protocol := protocolSelector(i)
 		if protocol == protobufEncoding {
 			expectedResult.MetricsWithForwardMetadata = append(expectedResult.MetricsWithForwardMetadata, testMetricWithForwardMetadata)
+			expectedTotalMetrics += 4
+		} else {
+			expectedTotalMetrics += 3
 		}
 
 		go func() {
@@ -252,7 +256,8 @@ func testRawTCPServerHandleUnaggregated(
 	}
 
 	// Wait for all metrics to be processed.
-	for agg.NumMetricsAdded() < numClients*3 {
+	wgClient.Wait()
+	for agg.NumMetricsAdded() < expectedTotalMetrics {
 		time.Sleep(50 * time.Millisecond)
 	}
 
