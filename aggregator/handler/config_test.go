@@ -54,7 +54,7 @@ sharded:
 `
 
 	for _, input := range []string{nonSharded, sharded} {
-		var cfg backendConfiguration
+		var cfg staticBackendConfiguration
 		require.NoError(t, yaml.Unmarshal([]byte(input), &cfg))
 		require.NoError(t, cfg.Validate())
 	}
@@ -170,7 +170,7 @@ sharded:
 	}
 
 	for _, test := range tests {
-		var cfg backendConfiguration
+		var cfg staticBackendConfiguration
 		require.NoError(t, yaml.Unmarshal([]byte(test.config), &cfg), "invalid config %s", test.config)
 
 		err := cfg.Validate()

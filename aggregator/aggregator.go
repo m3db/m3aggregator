@@ -23,6 +23,7 @@ package aggregator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -214,6 +215,25 @@ func (agg *aggregator) Status() RuntimeStatus {
 }
 
 func (agg *aggregator) Close() error {
+	var (
+		timeout = agg.opts.CloseTimeout()
+		doneCh  = make(chan struct{})
+		err     error
+	)
+	go func() {
+		err = agg.close()
+		close(doneCh)
+	}()
+
+	select {
+	case <-time.After(timeout):
+		return fmt.Errorf("could not close aggregator in %v", timeout)
+	case <-doneCh:
+		return err
+	}
+}
+
+func (agg *aggregator) close() error {
 	agg.Lock()
 	defer agg.Unlock()
 

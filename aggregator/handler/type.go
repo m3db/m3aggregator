@@ -33,7 +33,7 @@ const (
 	blackholeType Type = "blackhole"
 	loggingType   Type = "logging"
 	forwardType   Type = "forward"
-	m3msgType     Type = "m3msg"
+	dynamicType   Type = "dynamic"
 )
 
 var (
@@ -41,7 +41,7 @@ var (
 		blackholeType,
 		loggingType,
 		forwardType,
-		m3msgType,
+		dynamicType,
 	}
 )
 

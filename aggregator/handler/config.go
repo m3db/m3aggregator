@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3aggregator/aggregator/handler/router"
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3cluster/client"
@@ -82,11 +83,11 @@ func (c FlushHandlerConfiguration) NewHandler(
 				return nil, err
 			}
 			sharderRouters = append(sharderRouters, sharderRouter)
-		case m3msgType:
-			if hc.M3msgBackend == nil {
+		case dynamicType:
+			if hc.DynamicBackend == nil {
 				return nil, errNoBackendConfiguration
 			}
-			sharderRouter, err := hc.M3msgBackend.NewSharderRouter(
+			sharderRouter, err := hc.DynamicBackend.NewSharderRouter(
 				cs,
 				instrumentOpts,
 			)
@@ -154,13 +155,13 @@ type flushHandlerConfiguration struct {
 	Type Type `yaml:"type"`
 
 	// Backend configures the backend.
-	Backend *backendConfiguration `yaml:"backend"`
+	Backend *staticBackendConfiguration `yaml:"backend"`
 
-	// M3msgBackend configures the backend based on m3msg producer.
-	M3msgBackend *m3msgBackendConfiguration `yaml:"m3msgBackend"`
+	// DynamicBackend configures the dynamic backend.
+	DynamicBackend *dynamicBackendConfiguration `yaml:"dynamicBackend"`
 }
 
-type m3msgBackendConfiguration struct {
+type dynamicBackendConfiguration struct {
 	// Name of the backend.
 	Name string `yaml:"name"`
 
@@ -172,12 +173,9 @@ type m3msgBackendConfiguration struct {
 
 	// Producer configs the m3msg producer.
 	Producer config.ProducerConfiguration `yaml:"producer"`
-
-	// CloseTimeout configs the timeout on closing the producer.
-	CloseTimeout *time.Duration `yaml:"closeTimeout"`
 }
 
-func (c *m3msgBackendConfiguration) NewSharderRouter(
+func (c *dynamicBackendConfiguration) NewSharderRouter(
 	cs client.Client,
 	instrumentOpts instrument.Options,
 ) (SharderRouter, error) {
@@ -194,11 +192,11 @@ func (c *m3msgBackendConfiguration) NewSharderRouter(
 	}
 	return SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
-		Router:    common.NewM3msgRouter(p, c.CloseTimeout),
+		Router:    router.NewWithAckRouter(p),
 	}, nil
 }
 
-type backendConfiguration struct {
+type staticBackendConfiguration struct {
 	// Name of the backend.
 	Name string `yaml:"name"`
 
@@ -218,7 +216,7 @@ type backendConfiguration struct {
 	DisableValidation bool `yaml:"disableValidation"`
 }
 
-func (c *backendConfiguration) Validate() error {
+func (c *staticBackendConfiguration) Validate() error {
 	if c.DisableValidation {
 		return nil
 	}
@@ -236,7 +234,7 @@ func (c *backendConfiguration) Validate() error {
 	return c.Sharded.Validate()
 }
 
-func (c *backendConfiguration) validateNonSharded() error {
+func (c *staticBackendConfiguration) validateNonSharded() error {
 	// Make sure we haven't declared the same server more than once.
 	serversAssigned := make(map[string]struct{}, len(c.Servers))
 	for _, server := range c.Servers {
@@ -248,7 +246,7 @@ func (c *backendConfiguration) validateNonSharded() error {
 	return nil
 }
 
-func (c *backendConfiguration) NewSharderRouter(
+func (c *staticBackendConfiguration) NewSharderRouter(
 	instrumentOpts instrument.Options,
 ) (SharderRouter, error) {
 	if err := c.Validate(); err != nil {
@@ -272,7 +270,7 @@ func (c *backendConfiguration) NewSharderRouter(
 		if err != nil {
 			return SharderRouter{}, err
 		}
-		router := common.NewAllowAllRouter(queue)
+		router := router.NewAllowAllRouter(queue)
 		return SharderRouter{SharderID: sharding.NoShardingSharderID, Router: router}, nil
 	}
 
@@ -336,7 +334,7 @@ func (c *shardedConfiguration) NewSharderRouter(
 	shardQueueSize := queueOpts.QueueSize() / len(c.Shards)
 	shardQueueOpts := queueOpts.SetQueueSize(shardQueueSize)
 	sharderID := sharding.NewSharderID(c.HashType, c.TotalShards)
-	shardedQueues := make([]common.ShardedQueue, 0, len(c.Shards))
+	shardedQueues := make([]router.ShardedQueue, 0, len(c.Shards))
 	for _, shard := range c.Shards {
 		sq, err := shard.NewShardedQueue(shardQueueOpts)
 		if err != nil {
@@ -344,7 +342,7 @@ func (c *shardedConfiguration) NewSharderRouter(
 		}
 		shardedQueues = append(shardedQueues, sq)
 	}
-	router := common.NewShardedRouter(shardedQueues, c.TotalShards, routerScope)
+	router := router.NewShardedRouter(shardedQueues, c.TotalShards, routerScope)
 	return SharderRouter{SharderID: sharderID, Router: router}, nil
 }
 
@@ -356,7 +354,7 @@ type backendServerShardSet struct {
 
 func (s *backendServerShardSet) NewShardedQueue(
 	queueOpts common.QueueOptions,
-) (common.ShardedQueue, error) {
+) (router.ShardedQueue, error) {
 	instrumentOpts := queueOpts.InstrumentOptions()
 	connectionOpts := queueOpts.ConnectionOptions()
 	queueScope := instrumentOpts.MetricsScope().Tagged(map[string]string{"shard-set": s.Name})
@@ -366,9 +364,9 @@ func (s *backendServerShardSet) NewShardedQueue(
 		SetConnectionOptions(connectionOpts.SetReconnectRetryOptions(reconnectRetryOpts))
 	queue, err := common.NewQueue(s.Servers, queueOpts)
 	if err != nil {
-		return common.ShardedQueue{}, err
+		return router.ShardedQueue{}, err
 	}
-	return common.ShardedQueue{ShardSet: s.ShardSet, Queue: queue}, nil
+	return router.ShardedQueue{ShardSet: s.ShardSet, Queue: queue}, nil
 }
 
 type connectionConfiguration struct {
