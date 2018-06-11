@@ -47,7 +47,7 @@ const (
 var (
 	errNoHandlerConfiguration                   = errors.New("no handler configuration")
 	errNoWriterConfiguration                    = errors.New("no writer configuration")
-	errNoDynamicNorStaticBackendConfiguration   = errors.New("neither dynamic nor static backend was configured")
+	errNoDynamicOrStaticBackendConfiguration    = errors.New("neither dynamic nor static backend was configured")
 	errBothDynamicAndStaticBackendConfiguration = errors.New("both dynamic and static backend were configured")
 )
 
@@ -160,7 +160,7 @@ type flushHandlerConfiguration struct {
 
 func (c flushHandlerConfiguration) Validate() error {
 	if c.StaticBackend == nil && c.DynamicBackend == nil {
-		return errNoDynamicNorStaticBackendConfiguration
+		return errNoDynamicOrStaticBackendConfiguration
 	}
 	if c.StaticBackend != nil && c.DynamicBackend != nil {
 		return errBothDynamicAndStaticBackendConfiguration

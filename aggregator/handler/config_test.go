@@ -34,7 +34,7 @@ func TestFlushHandlerConfigurationValidate(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal([]byte(neitherConfigured), &cfg))
 	err := cfg.Validate()
 	require.Error(t, err)
-	require.Equal(t, errNoDynamicNorStaticBackendConfiguration, err)
+	require.Equal(t, errNoDynamicOrStaticBackendConfiguration, err)
 
 	bothConfigured := `
 staticBackend:
