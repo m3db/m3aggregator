@@ -69,24 +69,10 @@ func (c FlushHandlerConfiguration) NewHandler(
 		sharderRouters = make([]SharderRouter, 0, len(c.Handlers))
 	)
 	for _, hc := range c.Handlers {
-		switch hc.Type {
-		case blackholeType:
-			handlers = append(handlers, NewBlackholeHandler())
-		case loggingType:
-			handlers = append(handlers, NewLoggingHandler(instrumentOpts.Logger()))
-		case forwardType:
-			if hc.Backend == nil {
-				return nil, errNoBackendConfiguration
-			}
-			sharderRouter, err := hc.Backend.NewSharderRouter(instrumentOpts)
-			if err != nil {
-				return nil, err
-			}
-			sharderRouters = append(sharderRouters, sharderRouter)
-		case dynamicType:
-			if hc.DynamicBackend == nil {
-				return nil, errNoBackendConfiguration
-			}
+		if err := hc.Validate(); err != nil {
+			return nil, err
+		}
+		if hc.DynamicBackend != nil {
 			sharderRouter, err := hc.DynamicBackend.NewSharderRouter(
 				cs,
 				instrumentOpts,
@@ -95,8 +81,24 @@ func (c FlushHandlerConfiguration) NewHandler(
 				return nil, err
 			}
 			sharderRouters = append(sharderRouters, sharderRouter)
+			continue
+		}
+		switch hc.StaticBackend.Type {
+		case blackholeType:
+			handlers = append(handlers, NewBlackholeHandler())
+		case loggingType:
+			handlers = append(handlers, NewLoggingHandler(instrumentOpts.Logger()))
+		case forwardType:
+			if hc.StaticBackend == nil {
+				return nil, errNoBackendConfiguration
+			}
+			sharderRouter, err := hc.StaticBackend.NewSharderRouter(instrumentOpts)
+			if err != nil {
+				return nil, err
+			}
+			sharderRouters = append(sharderRouters, sharderRouter)
 		default:
-			return nil, fmt.Errorf("unknown flush handler type %v", hc.Type)
+			return nil, fmt.Errorf("unknown backend type %v", hc.StaticBackend.Type)
 		}
 	}
 	if len(sharderRouters) > 0 {
@@ -151,14 +153,21 @@ func (c *writerConfiguration) NewWriterOptions(
 }
 
 type flushHandlerConfiguration struct {
-	// Flushing handler type.
-	Type Type `yaml:"type"`
-
-	// Backend configures the backend.
-	Backend *staticBackendConfiguration `yaml:"backend"`
+	// StaticBackend configures the backend.
+	StaticBackend *staticBackendConfiguration `yaml:"staticBackend"`
 
 	// DynamicBackend configures the dynamic backend.
 	DynamicBackend *dynamicBackendConfiguration `yaml:"dynamicBackend"`
+}
+
+func (c flushHandlerConfiguration) Validate() error {
+	if c.StaticBackend == nil && c.DynamicBackend == nil {
+		return errors.New("neither dynamic nor static backend was configured")
+	}
+	if c.StaticBackend == nil && c.DynamicBackend == nil {
+		return errors.New("both static and dynamic backend were configured")
+	}
+	return nil
 }
 
 type dynamicBackendConfiguration struct {
@@ -197,6 +206,9 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 }
 
 type staticBackendConfiguration struct {
+	// Static backend type.
+	Type Type `yaml:"type"`
+
 	// Name of the backend.
 	Name string `yaml:"name"`
 

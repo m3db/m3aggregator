@@ -62,7 +62,6 @@ var (
 	// are issues with the instances taking over the shards and as such we need to switch
 	// the traffic back to the previous owner of the shards immediately.
 	defaultBufferDurationAfterShardCutoff = time.Hour
-	defaultCloseTimeout                   = 5 * time.Second
 )
 
 // MaxAllowedForwardingDelayFn returns the maximum allowed forwarding delay given
@@ -274,12 +273,6 @@ type Options interface {
 	// GaugeElemPool returns the gauge element pool.
 	GaugeElemPool() GaugeElemPool
 
-	// SetCloseTimeout sets the close timeout.
-	SetCloseTimeout(value time.Duration) Options
-
-	// CloseTimeout returns the close timeout.
-	CloseTimeout() time.Duration
-
 	/// Read-only derived options.
 
 	// FullCounterPrefix returns the full prefix for counters.
@@ -326,7 +319,6 @@ type options struct {
 	counterElemPool                  CounterElemPool
 	timerElemPool                    TimerElemPool
 	gaugeElemPool                    GaugeElemPool
-	closeTimeout                     time.Duration
 
 	// Derived options.
 	fullCounterPrefix []byte
@@ -360,7 +352,6 @@ func NewOptions() Options {
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
 		maxNumCachedSourceSets:           defaultMaxNumCachedSourceSets,
 		maxCachedSourceSetSize:           defaultMaxCachedSourceSetSize,
-		closeTimeout:                     defaultCloseTimeout,
 	}
 
 	// Initialize pools.
@@ -694,16 +685,6 @@ func (o *options) SetGaugeElemPool(value GaugeElemPool) Options {
 
 func (o *options) GaugeElemPool() GaugeElemPool {
 	return o.gaugeElemPool
-}
-
-func (o *options) SetCloseTimeout(value time.Duration) Options {
-	opts := *o
-	opts.closeTimeout = value
-	return &opts
-}
-
-func (o *options) CloseTimeout() time.Duration {
-	return o.closeTimeout
 }
 
 func (o *options) FullCounterPrefix() []byte {

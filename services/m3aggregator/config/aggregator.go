@@ -138,9 +138,6 @@ type AggregatorConfiguration struct {
 
 	// Pool of entries.
 	EntryPool pool.ObjectPoolConfiguration `yaml:"entryPool"`
-
-	// CloseTimeout configurates the timeout for closing the aggregator.
-	CloseTimeout *time.Duration `yaml:"closeTimeout"`
 }
 
 // NewAggregatorOptions creates a new set of aggregator options.
@@ -339,10 +336,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	runtimeOpts := runtimeOptsManager.RuntimeOptions()
 	opts = opts.SetEntryPool(entryPool)
 	entryPool.Init(func() *aggregator.Entry { return aggregator.NewEntry(nil, runtimeOpts, opts) })
-
-	if c.CloseTimeout != nil {
-		opts = opts.SetCloseTimeout(*c.CloseTimeout)
-	}
 	return opts, nil
 }
 
