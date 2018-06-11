@@ -47,7 +47,7 @@ type message struct {
 	buffer *common.RefCountedBuffer
 }
 
-// TODO: Pool the messages if needed.
+// TODO(cw): Pool the messages if needed.
 func newMessage(shard uint32, buffer *common.RefCountedBuffer) producer.Message {
 	return message{shard: shard, buffer: buffer}
 }

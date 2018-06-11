@@ -27,6 +27,27 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+func TestFlushHandlerConfigurationValidate(t *testing.T) {
+	var cfg flushHandlerConfiguration
+
+	neitherConfigured := ``
+	require.NoError(t, yaml.Unmarshal([]byte(neitherConfigured), &cfg))
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.Equal(t, errNoDynamicNorStaticBackendConfiguration, err)
+
+	bothConfigured := `
+staticBackend:
+  type: blackhole
+dynamicBackend:
+  name: test
+`
+	require.NoError(t, yaml.Unmarshal([]byte(bothConfigured), &cfg))
+	err = cfg.Validate()
+	require.Error(t, err)
+	require.Equal(t, errBothDynamicAndStaticBackendConfiguration, err)
+}
+
 func TestBackendConfigurationValidate(t *testing.T) {
 	nonSharded := `
 name: backend1

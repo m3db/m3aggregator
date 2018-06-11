@@ -45,9 +45,10 @@ const (
 )
 
 var (
-	errNoHandlerConfiguration = errors.New("no handler configuration")
-	errNoWriterConfiguration  = errors.New("no writer configuration")
-	errNoBackendConfiguration = errors.New("no backend configuration")
+	errNoHandlerConfiguration                   = errors.New("no handler configuration")
+	errNoWriterConfiguration                    = errors.New("no writer configuration")
+	errNoDynamicNorStaticBackendConfiguration   = errors.New("neither dynamic nor static backend was configured")
+	errBothDynamicAndStaticBackendConfiguration = errors.New("both dynamic and static backend were configured")
 )
 
 // FlushHandlerConfiguration configures flush handlers.
@@ -89,9 +90,6 @@ func (c FlushHandlerConfiguration) NewHandler(
 		case loggingType:
 			handlers = append(handlers, NewLoggingHandler(instrumentOpts.Logger()))
 		case forwardType:
-			if hc.StaticBackend == nil {
-				return nil, errNoBackendConfiguration
-			}
 			sharderRouter, err := hc.StaticBackend.NewSharderRouter(instrumentOpts)
 			if err != nil {
 				return nil, err
@@ -162,10 +160,10 @@ type flushHandlerConfiguration struct {
 
 func (c flushHandlerConfiguration) Validate() error {
 	if c.StaticBackend == nil && c.DynamicBackend == nil {
-		return errors.New("neither dynamic nor static backend was configured")
+		return errNoDynamicNorStaticBackendConfiguration
 	}
-	if c.StaticBackend == nil && c.DynamicBackend == nil {
-		return errors.New("both static and dynamic backend were configured")
+	if c.StaticBackend != nil && c.DynamicBackend != nil {
+		return errBothDynamicAndStaticBackendConfiguration
 	}
 	return nil
 }
