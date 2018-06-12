@@ -8,7 +8,7 @@ import:
   version: 829d4ae9ed79c90f32122cb32464312aed39686d
 
 - package: github.com/m3db/m3msg
-  version: 1bf9e44f7d85990ec54802bd9fe209f21f852603
+  version: 388c68faa162cdb655fc8844eecbbdbbf1c577e9
 
 - package: github.com/m3db/m3metrics
   version: d64c74875bfe0337b48242cc80de6e0dcfb7afd1
