@@ -23,10 +23,10 @@ package filter
 import (
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3msg/producer"
 
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 )
 
