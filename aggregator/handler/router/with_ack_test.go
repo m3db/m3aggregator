@@ -23,6 +23,8 @@ package router
 import (
 	"testing"
 
+	"github.com/m3db/m3aggregator/sharding"
+
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3metrics/encoding/msgpack"
 	"github.com/m3db/m3msg/producer"
@@ -39,4 +41,14 @@ func TestM3msgMessageDecRefBuffer(t *testing.T) {
 
 	msg.Finalize(producer.Consumed)
 	require.Panics(t, buf.DecRef)
+}
+
+func TestM3msgShardSetFilter(t *testing.T) {
+	ss := sharding.MustParseShardSet("0..512")
+	f := NewFilterFunc(ss)
+
+	require.True(t, f(newMessage(0, nil)))
+	require.True(t, f(newMessage(10, nil)))
+	require.True(t, f(newMessage(512, nil)))
+	require.False(t, f(newMessage(513, nil)))
 }

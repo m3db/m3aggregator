@@ -22,6 +22,7 @@ package router
 
 import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3msg/producer"
 )
 
@@ -68,4 +69,19 @@ func (d message) Size() int {
 
 func (d message) Finalize(producer.FinalizeReason) {
 	d.buffer.DecRef()
+}
+
+type shardFilter struct {
+	shardSet sharding.ShardSet
+}
+
+// NewFilterFunc creates a filter for message.
+func NewFilterFunc(shardSet sharding.ShardSet) producer.FilterFunc {
+	filter := shardFilter{shardSet: shardSet}
+	return filter.Filter
+}
+
+func (f shardFilter) Filter(m producer.Message) bool {
+	_, ok := f.shardSet[m.Shard()]
+	return ok
 }

@@ -31,7 +31,9 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3cluster/client"
+	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3metrics/encoding/msgpack"
+	"github.com/m3db/m3msg/producer"
 	"github.com/m3db/m3msg/producer/config"
 	"github.com/m3db/m3x/instrument"
 	"github.com/m3db/m3x/pool"
@@ -180,6 +182,9 @@ type dynamicBackendConfiguration struct {
 
 	// Producer configs the m3msg producer.
 	Producer config.ProducerConfiguration `yaml:"producer"`
+
+	// Filters configs the filter for consumer services.
+	Filters []consumerServiceFilterConfiguration `yaml:"filters"`
 }
 
 func (c *dynamicBackendConfiguration) NewSharderRouter(
@@ -197,10 +202,23 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 	if err := p.Init(); err != nil {
 		return SharderRouter{}, err
 	}
+	for _, filter := range c.Filters {
+		sid, filter := filter.NewConsumerServiceFilter()
+		p.RegisterFilter(sid, filter)
+	}
 	return SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
 		Router:    router.NewWithAckRouter(p),
 	}, nil
+}
+
+type consumerServiceFilterConfiguration struct {
+	ServiceID services.ServiceIDConfiguration `yaml:"serviceID" validate:"nonzero"`
+	ShardSet  sharding.ShardSet               `yaml:"shardSet" validate:"nonzero"`
+}
+
+func (c consumerServiceFilterConfiguration) NewConsumerServiceFilter() (services.ServiceID, producer.FilterFunc) {
+	return c.ServiceID.NewServiceID(), router.NewFilterFunc(c.ShardSet)
 }
 
 type staticBackendConfiguration struct {

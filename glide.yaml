@@ -5,10 +5,10 @@ import:
   version: 647a4a05078f018242070cbd71bea6ecba964199
 
 - package: github.com/m3db/m3cluster
-  version: 932643c994584dc8830cdc6434fd5545768d9f29
+  version: 9d4f278c87f229036b76fea62ad65eac47e4e23f
 
 - package: github.com/m3db/m3msg
-  version: 663a689be60a080adecf820a8f4b65aae9b7a572
+  version: d33a2de4e8a419033ab07526787dc9571915b619
 
 - package: github.com/m3db/m3metrics
   version: 3b2957921f0d4167eecd26346a48cf762fbe3d3d
