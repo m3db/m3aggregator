@@ -203,8 +203,9 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 		return SharderRouter{}, err
 	}
 	for _, filter := range c.Filters {
-		sid, filter := filter.NewConsumerServiceFilter()
-		p.RegisterFilter(sid, filter)
+		sid, f := filter.NewConsumerServiceFilter()
+		p.RegisterFilter(sid, f)
+		instrumentOpts.Logger().Infof("registered filter for consumer service: %s", sid.String())
 	}
 	return SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
