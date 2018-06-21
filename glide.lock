@@ -1,5 +1,5 @@
-hash: 851f610d2bca1233f93ba3041d9b66297c1e86ef5c5fbce929aaf3cc12afad9b
-updated: 2018-06-19T14:30:31.019144-04:00
+hash: eca6bbb09c43ea1f527409efe61efe66e341458aab09de50d4cbb79f24930dd4
+updated: 2018-06-20T23:56:39.169722-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -161,7 +161,7 @@ imports:
 - name: github.com/karlseguin/ccache
   version: a2d62155777b39595c825ed3824279e642a5db3c
 - name: github.com/m3db/m3cluster
-  version: 829d4ae9ed79c90f32122cb32464312aed39686d
+  version: 932643c994584dc8830cdc6434fd5545768d9f29
   subpackages:
   - client
   - client/etcd
@@ -209,14 +209,13 @@ imports:
   - transformation
   - x/bytes
 - name: github.com/m3db/m3msg
-  version: 388c68faa162cdb655fc8844eecbbdbbf1c577e9
+  version: 663a689be60a080adecf820a8f4b65aae9b7a572
   subpackages:
   - generated/proto/msgpb
   - generated/proto/topicpb
   - producer
   - producer/buffer
   - producer/config
-  - producer/msg
   - producer/writer
   - protocol/proto
   - topic

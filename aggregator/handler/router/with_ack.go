@@ -60,8 +60,10 @@ func (d message) Bytes() []byte {
 	return d.buffer.Buffer().Bytes()
 }
 
-func (d message) Size() uint32 {
-	return uint32(len(d.Bytes()))
+func (d message) Size() int {
+	// Use the cap of the underlying byte slice in the buffer instead of
+	// the length of the byte encoded.
+	return d.buffer.Buffer().Buffer().Cap()
 }
 
 func (d message) Finalize(producer.FinalizeReason) {

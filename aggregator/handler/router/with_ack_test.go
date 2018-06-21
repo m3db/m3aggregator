@@ -31,10 +31,10 @@ import (
 )
 
 func TestM3msgMessageDecRefBuffer(t *testing.T) {
-	buf := common.NewRefCountedBuffer(msgpack.NewBufferedEncoder())
+	buf := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
 	msg := newMessage(2, buf)
 	require.Equal(t, uint32(2), msg.Shard())
-	require.Equal(t, uint32(0), msg.Size())
+	require.Equal(t, 1024, msg.Size())
 	require.Empty(t, msg.Bytes())
 
 	msg.Finalize(producer.Consumed)
