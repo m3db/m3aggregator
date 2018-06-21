@@ -18,25 +18,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package router
+package filter
 
 import (
 	"testing"
 
-	"github.com/m3db/m3aggregator/aggregator/handler/common"
-	"github.com/m3db/m3metrics/encoding/msgpack"
+	"github.com/golang/mock/gomock"
+	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3msg/producer"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestWithAckRouterDecRefBuffer(t *testing.T) {
-	buf := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
-	msg := newMessage(2, buf)
-	require.Equal(t, uint32(2), msg.Shard())
-	require.Equal(t, 1024, msg.Size())
-	require.Empty(t, msg.Bytes())
+func TestShardSetFilter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	msg.Finalize(producer.Consumed)
-	require.Panics(t, buf.DecRef)
+	ss := sharding.MustParseShardSet("0..511")
+	f := NewFilterFunc(ss)
+
+	mm := producer.NewMockMessage(ctrl)
+	mm.EXPECT().Shard().Return(uint32(0))
+	require.True(t, f(mm))
+	mm.EXPECT().Shard().Return(uint32(10))
+	require.True(t, f(mm))
+	mm.EXPECT().Shard().Return(uint32(511))
+	require.True(t, f(mm))
+	mm.EXPECT().Shard().Return(uint32(512))
+	require.False(t, f(mm))
 }

@@ -22,7 +22,6 @@ package router
 
 import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
-	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3msg/producer"
 )
 
@@ -63,25 +62,13 @@ func (d message) Bytes() []byte {
 
 func (d message) Size() int {
 	// Use the cap of the underlying byte slice in the buffer instead of
-	// the length of the byte encoded.
-	return d.buffer.Buffer().Buffer().Cap()
+	// the length of the byte encoded to avoid "memory leak", for example
+	// when the underlying buffer is 2KB, and it only encoded 300B, if we
+	// use 300 as the size, then a producer with a buffer of 3GB could be
+	// actually buffering 20GB in total for the underlying buffers.
+	return cap(d.Bytes())
 }
 
 func (d message) Finalize(producer.FinalizeReason) {
 	d.buffer.DecRef()
-}
-
-type shardFilter struct {
-	shardSet sharding.ShardSet
-}
-
-// NewFilterFunc creates a filter for message.
-func NewFilterFunc(shardSet sharding.ShardSet) producer.FilterFunc {
-	filter := shardFilter{shardSet: shardSet}
-	return filter.Filter
-}
-
-func (f shardFilter) Filter(m producer.Message) bool {
-	_, ok := f.shardSet[m.Shard()]
-	return ok
 }

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3aggregator/aggregator/handler/filter"
 	"github.com/m3db/m3aggregator/aggregator/handler/router"
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
@@ -202,10 +203,11 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 	if err := p.Init(); err != nil {
 		return SharderRouter{}, err
 	}
+	logger := instrumentOpts.Logger()
 	for _, filter := range c.Filters {
 		sid, f := filter.NewConsumerServiceFilter()
 		p.RegisterFilter(sid, f)
-		instrumentOpts.Logger().Infof("registered filter for consumer service: %s", sid.String())
+		logger.Infof("registered filter for consumer service: %s", sid.String())
 	}
 	return SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
@@ -219,7 +221,7 @@ type consumerServiceFilterConfiguration struct {
 }
 
 func (c consumerServiceFilterConfiguration) NewConsumerServiceFilter() (services.ServiceID, producer.FilterFunc) {
-	return c.ServiceID.NewServiceID(), router.NewFilterFunc(c.ShardSet)
+	return c.ServiceID.NewServiceID(), filter.NewFilterFunc(c.ShardSet)
 }
 
 type staticBackendConfiguration struct {

@@ -18,25 +18,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package router
+package filter
 
 import (
-	"testing"
-
-	"github.com/m3db/m3aggregator/aggregator/handler/common"
-	"github.com/m3db/m3metrics/encoding/msgpack"
+	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3msg/producer"
-
-	"github.com/stretchr/testify/require"
 )
 
-func TestWithAckRouterDecRefBuffer(t *testing.T) {
-	buf := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
-	msg := newMessage(2, buf)
-	require.Equal(t, uint32(2), msg.Shard())
-	require.Equal(t, 1024, msg.Size())
-	require.Empty(t, msg.Bytes())
+type shardFilter struct {
+	shardSet sharding.ShardSet
+}
 
-	msg.Finalize(producer.Consumed)
-	require.Panics(t, buf.DecRef)
+// NewFilterFunc creates a filter for message.
+func NewFilterFunc(shardSet sharding.ShardSet) producer.FilterFunc {
+	filter := shardFilter{shardSet: shardSet}
+	return filter.Filter
+}
+
+func (f shardFilter) Filter(m producer.Message) bool {
+	_, ok := f.shardSet[m.Shard()]
+	return ok
 }
