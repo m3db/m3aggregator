@@ -221,7 +221,7 @@ type consumerServiceFilterConfiguration struct {
 }
 
 func (c consumerServiceFilterConfiguration) NewConsumerServiceFilter() (services.ServiceID, producer.FilterFunc) {
-	return c.ServiceID.NewServiceID(), filter.NewFilterFunc(c.ShardSet)
+	return c.ServiceID.NewServiceID(), filter.NewShardSetFilter(c.ShardSet)
 }
 
 type staticBackendConfiguration struct {

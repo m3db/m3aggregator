@@ -25,17 +25,17 @@ import (
 	"github.com/m3db/m3msg/producer"
 )
 
-type shardFilter struct {
+type shardSetFilter struct {
 	shardSet sharding.ShardSet
 }
 
-// NewFilterFunc creates a filter for message.
-func NewFilterFunc(shardSet sharding.ShardSet) producer.FilterFunc {
-	f := shardFilter{shardSet: shardSet}
+// NewShardSetFilter creates a filter based on ShardSet.
+func NewShardSetFilter(shardSet sharding.ShardSet) producer.FilterFunc {
+	f := shardSetFilter{shardSet: shardSet}
 	return f.Filter
 }
 
-func (f shardFilter) Filter(m producer.Message) bool {
+func (f shardSetFilter) Filter(m producer.Message) bool {
 	_, ok := f.shardSet[m.Shard()]
 	return ok
 }
