@@ -217,7 +217,7 @@ func TestMultiServerForwardingPipeline(t *testing.T) {
 
 	var (
 		idPrefix      = "foo"
-		numIDs        = 2
+		numIDs        = 100
 		start         = getNowFn()
 		stop          = start.Add(10 * time.Second)
 		interval      = time.Second

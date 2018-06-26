@@ -67,7 +67,7 @@ type Aggregator interface {
 	AddUntimed(metric unaggregated.MetricUnion, metas metadata.StagedMetadatas) error
 
 	// AddForwarded adds a forwarded metric with metadata.
-	AddForwarded(metric aggregated.Metric, metadata metadata.ForwardMetadata) error
+	AddForwarded(metric aggregated.ForwardedMetric, metadata metadata.ForwardMetadata) error
 
 	// Resign stops the aggregator from participating in leader election and resigns
 	// from ongoing campaign if any.
@@ -184,7 +184,7 @@ func (agg *aggregator) AddUntimed(
 }
 
 func (agg *aggregator) AddForwarded(
-	metric aggregated.Metric,
+	metric aggregated.ForwardedMetric,
 	metadata metadata.ForwardMetadata,
 ) error {
 	callStart := agg.nowFn()
