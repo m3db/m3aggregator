@@ -597,8 +597,8 @@ func TestCounterElemClose(t *testing.T) {
 	require.True(t, e.closed)
 	require.Nil(t, e.id)
 	require.Equal(t, parsedPipeline{}, e.parsedPipeline)
-	require.Nil(t, e.writeForwardedFn)
-	require.Nil(t, e.onForwardedWrittenFn)
+	require.Nil(t, e.writeForwardedMetricFn)
+	require.Nil(t, e.onForwardedAggregationWrittenFn)
 	require.Nil(t, e.cachedSourceSets)
 	require.Equal(t, 0, len(e.values))
 	require.Equal(t, 0, len(e.toConsume))
@@ -1102,8 +1102,8 @@ func TestTimerElemClose(t *testing.T) {
 	require.True(t, e.closed)
 	require.Nil(t, e.id)
 	require.Equal(t, parsedPipeline{}, e.parsedPipeline)
-	require.Nil(t, e.writeForwardedFn)
-	require.Nil(t, e.onForwardedWrittenFn)
+	require.Nil(t, e.writeForwardedMetricFn)
+	require.Nil(t, e.onForwardedAggregationWrittenFn)
 	require.Nil(t, e.cachedSourceSets)
 	require.Equal(t, 0, len(e.values))
 	require.Equal(t, 0, len(e.toConsume))
@@ -1638,8 +1638,8 @@ func TestGaugeElemClose(t *testing.T) {
 	require.True(t, e.closed)
 	require.Nil(t, e.id)
 	require.Equal(t, parsedPipeline{}, e.parsedPipeline)
-	require.Nil(t, e.writeForwardedFn)
-	require.Nil(t, e.onForwardedWrittenFn)
+	require.Nil(t, e.writeForwardedMetricFn)
+	require.Nil(t, e.onForwardedAggregationWrittenFn)
 	require.Nil(t, e.cachedSourceSets)
 	require.Equal(t, 0, len(e.values))
 	require.Equal(t, 0, len(e.toConsume))
@@ -1773,7 +1773,7 @@ func testOnForwardedFlushedFn() (
 ) {
 	var result []testOnForwardedFlushedData
 	return func(
-		onDoneFn onAggregationKeyDoneFn,
+		onDoneFn onForwardedAggregationDoneFn,
 		aggregationKey aggregationKey,
 	) {
 		result = append(result, testOnForwardedFlushedData{

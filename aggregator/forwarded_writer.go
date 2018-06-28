@@ -35,6 +35,10 @@ import (
 	"github.com/uber-go/tally"
 )
 
+const (
+	initialValueArrayCapacity = 2
+)
+
 var (
 	errMetricNotFound         = errors.New("metric not found")
 	errAggregationKeyNotFound = errors.New("aggregation key not found")
@@ -47,7 +51,7 @@ type writeForwardedMetricFn func(
 	value float64,
 )
 
-type onAggregationKeyDoneFn func(key aggregationKey) error
+type onForwardedAggregationDoneFn func(key aggregationKey) error
 
 // forwardededMetricWriter writes forwarded metrics.
 type forwardedMetricWriter interface {
@@ -59,7 +63,7 @@ type forwardedMetricWriter interface {
 		metricType metric.Type,
 		metricID id.RawID,
 		aggKey aggregationKey,
-	) (writeForwardedMetricFn, onAggregationKeyDoneFn, error)
+	) (writeForwardedMetricFn, onForwardedAggregationDoneFn, error)
 
 	// Unregister unregisters a forwarded metric.
 	Unregister(
@@ -156,7 +160,7 @@ func (w *forwardedWriter) Register(
 	metricType metric.Type,
 	metricID id.RawID,
 	aggKey aggregationKey,
-) (writeForwardedMetricFn, onAggregationKeyDoneFn, error) {
+) (writeForwardedMetricFn, onForwardedAggregationDoneFn, error) {
 	if w.closed {
 		w.metrics.registerWriterClosed.Inc(1)
 		return nil, nil, errForwardedWriterClosed
@@ -252,8 +256,18 @@ type forwardedAggregationBucket struct {
 type forwardedAggregationBuckets []forwardedAggregationBucket
 
 type forwardedAggregationWithKey struct {
-	key               aggregationKey
-	totalRefCnt       int
+	key aggregationKey
+	// totalRefCnt is how many elements will produce this forwarded metric with
+	// this aggregation key. It does not change until a new element producing this
+	// forwarded metric with the same aggregation key is added, or an existing element
+	// meeting this critieria is removed.
+	totalRefCnt int
+	// currRefCnt is the running count of the elements that belong to this aggregation
+	// and have been processed during a flush cycle. It gets reset at the beginning of a
+	// flush, and should never exceed totalRefCnt. Once currRefCnt == totalRefCnt, it means
+	// all elements producing this forwarded metric with this aggregation key has been processed
+	// for this flush cycle and can now be flushed as a batch, at which point the onDone function
+	// is called.
 	currRefCnt        int
 	cachedValueArrays [][]float64
 	buckets           forwardedAggregationBuckets
@@ -282,7 +296,7 @@ func (agg *forwardedAggregationWithKey) add(timeNanos int64, value float64) {
 		values = values[:0]
 		agg.cachedValueArrays = agg.cachedValueArrays[:numCachedValueArrays-1]
 	} else {
-		values = make([]float64, 0, 2)
+		values = make([]float64, 0, initialValueArrayCapacity)
 	}
 	values = append(values, value)
 	bucket := forwardedAggregationBucket{
@@ -323,7 +337,7 @@ type forwardedAggregation struct {
 	byKey    []forwardedAggregationWithKey
 	metrics  *forwardedAggregationMetrics
 	writeFn  writeForwardedMetricFn
-	onDoneFn onAggregationKeyDoneFn
+	onDoneFn onForwardedAggregationDoneFn
 }
 
 func newForwardedAggregation(
@@ -346,9 +360,15 @@ func newForwardedAggregation(
 	return agg
 }
 
-func (agg *forwardedAggregation) writeForwardedMetricFn() writeForwardedMetricFn { return agg.writeFn }
-func (agg *forwardedAggregation) onAggregationKeyDoneFn() onAggregationKeyDoneFn { return agg.onDoneFn }
-func (agg *forwardedAggregation) clear()                                         { *agg = forwardedAggregation{} }
+func (agg *forwardedAggregation) writeForwardedMetricFn() writeForwardedMetricFn {
+	return agg.writeFn
+}
+
+func (agg *forwardedAggregation) onAggregationKeyDoneFn() onForwardedAggregationDoneFn {
+	return agg.onDoneFn
+}
+
+func (agg *forwardedAggregation) clear() { *agg = forwardedAggregation{} }
 
 func (agg *forwardedAggregation) reset() {
 	for i := 0; i < len(agg.byKey); i++ {
@@ -441,7 +461,7 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 	}
 	// If the current ref count is higher than total, this is likely a logical error.
 	agg.metrics.onDoneUnexpectedRefCnt.Inc(1)
-	panic(fmt.Errorf("unexpected refcount: current=%d, total=%d", agg.byKey[idx].currRefCnt, agg.byKey[idx].totalRefCnt))
+	return fmt.Errorf("unexpected refcount: current=%d, total=%d", agg.byKey[idx].currRefCnt, agg.byKey[idx].totalRefCnt)
 }
 
 func (agg *forwardedAggregation) index(key aggregationKey) int {

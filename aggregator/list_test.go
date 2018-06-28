@@ -59,8 +59,8 @@ func TestBaseMetricListPushBackElemWithDefaultPipeline(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, l.aggregations.Len())
 	require.Equal(t, elem, e.Value.(*CounterElem))
-	require.Nil(t, elem.writeForwardedFn)
-	require.Nil(t, elem.onForwardedWrittenFn)
+	require.Nil(t, elem.writeForwardedMetricFn)
+	require.Nil(t, elem.onForwardedAggregationWrittenFn)
 
 	// Push a counter to a closed list should result in an error.
 	l.Lock()
@@ -85,8 +85,8 @@ func TestBaseMetricListPushBackElemWithForwardingPipeline(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, l.aggregations.Len())
 	require.Equal(t, elem, e.Value.(*CounterElem))
-	require.NotNil(t, elem.writeForwardedFn)
-	require.NotNil(t, elem.onForwardedWrittenFn)
+	require.NotNil(t, elem.writeForwardedMetricFn)
+	require.NotNil(t, elem.onForwardedAggregationWrittenFn)
 }
 
 func TestBaseMetricListClose(t *testing.T) {

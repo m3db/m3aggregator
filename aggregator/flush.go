@@ -103,6 +103,6 @@ type flushForwardedMetricFn func(
 // An onForwardingElemFlushedFn is a callback function that should be called
 // when an aggregation element producing forwarded metrics has been flushed.
 type onForwardingElemFlushedFn func(
-	onDoneFn onAggregationKeyDoneFn,
+	onDoneFn onForwardedAggregationDoneFn,
 	aggregationKey aggregationKey,
 )

@@ -491,7 +491,7 @@ func (l *baseMetricList) discardForwardedMetric(
 }
 
 func (l *baseMetricList) onForwardingElemConsumed(
-	onForwardedWrittenFn onAggregationKeyDoneFn,
+	onForwardedWrittenFn onForwardedAggregationDoneFn,
 	aggregationKey aggregationKey,
 ) {
 	if err := onForwardedWrittenFn(aggregationKey); err != nil {
@@ -503,7 +503,7 @@ func (l *baseMetricList) onForwardingElemConsumed(
 
 // nolint: unparam
 func (l *baseMetricList) onForwardingElemDiscarded(
-	onForwardedWrittenFn onAggregationKeyDoneFn,
+	onForwardedWrittenFn onForwardedAggregationDoneFn,
 	aggregationKey aggregationKey,
 ) {
 	l.metrics.flushForwarded.onDiscarded.Inc(1)

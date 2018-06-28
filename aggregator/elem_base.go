@@ -101,8 +101,7 @@ type metricElem interface {
 	// metrics for elements producing such forwarded metrics.
 	SetForwardedCallbacks(
 		writeFn writeForwardedMetricFn,
-		onDoneFn onAggregationKeyDoneFn,
-	)
+		onDoneFn onForwardedAggregationDoneFn)
 
 	// AddUnion adds a metric value union at a given timestamp.
 	AddUnion(timestamp time.Time, mu unaggregated.MetricUnion) error
@@ -136,17 +135,17 @@ type elemBase struct {
 	sync.RWMutex
 
 	// Immutable states.
-	opts                  Options
-	aggTypesOpts          maggregation.TypesOptions
-	id                    id.RawID
-	sp                    policy.StoragePolicy
-	useDefaultAggregation bool
-	aggTypes              maggregation.Types
-	aggOpts               raggregation.Options
-	parsedPipeline        parsedPipeline
-	numForwardedTimes     int
-	writeForwardedFn      writeForwardedMetricFn
-	onForwardedWrittenFn  onAggregationKeyDoneFn
+	opts                            Options
+	aggTypesOpts                    maggregation.TypesOptions
+	id                              id.RawID
+	sp                              policy.StoragePolicy
+	useDefaultAggregation           bool
+	aggTypes                        maggregation.Types
+	aggOpts                         raggregation.Options
+	parsedPipeline                  parsedPipeline
+	numForwardedTimes               int
+	writeForwardedMetricFn          writeForwardedMetricFn
+	onForwardedAggregationWrittenFn onForwardedAggregationDoneFn
 
 	// Mutable states.
 	tombstoned           bool
@@ -190,10 +189,10 @@ func (e *elemBase) resetSetData(
 
 func (e *elemBase) SetForwardedCallbacks(
 	writeFn writeForwardedMetricFn,
-	onDoneFn onAggregationKeyDoneFn,
+	onDoneFn onForwardedAggregationDoneFn,
 ) {
-	e.writeForwardedFn = writeFn
-	e.onForwardedWrittenFn = onDoneFn
+	e.writeForwardedMetricFn = writeFn
+	e.onForwardedAggregationWrittenFn = onDoneFn
 }
 
 func (e *elemBase) ID() id.RawID { return e.id }

@@ -301,7 +301,7 @@ func (e *GenericElem) Consume(
 
 	if e.parsedPipeline.HasRollup {
 		forwardedAggregationKey, _ := e.ForwardedAggregationKey()
-		onForwardedFlushedFn(e.onForwardedWrittenFn, forwardedAggregationKey)
+		onForwardedFlushedFn(e.onForwardedAggregationWrittenFn, forwardedAggregationKey)
 	}
 
 	return canCollect
@@ -317,8 +317,8 @@ func (e *GenericElem) Close() {
 	e.closed = true
 	e.id = nil
 	e.parsedPipeline = parsedPipeline{}
-	e.writeForwardedFn = nil
-	e.onForwardedWrittenFn = nil
+	e.writeForwardedMetricFn = nil
+	e.onForwardedAggregationWrittenFn = nil
 	for idx := range e.cachedSourceSets {
 		e.cachedSourceSets[idx] = nil
 	}
@@ -469,7 +469,7 @@ func (e *GenericElem) processValueWithAggregationLock(
 			flushLocalFn(fullPrefix, e.id, e.TypeStringFor(e.aggTypesOpts, aggType), timeNanos, value, e.sp)
 		} else {
 			forwardedAggregationKey, _ := e.ForwardedAggregationKey()
-			flushForwardedFn(e.writeForwardedFn, forwardedAggregationKey, timeNanos, value)
+			flushForwardedFn(e.writeForwardedMetricFn, forwardedAggregationKey, timeNanos, value)
 		}
 	}
 	e.lastConsumedAtNanos = timeNanos
