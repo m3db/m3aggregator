@@ -1362,13 +1362,15 @@ func TestEntryAddForwarded(t *testing.T) {
 	metric.ID = make(id.RawID, len(testForwardedMetric.ID))
 	copy(metric.ID, testForwardedMetric.ID)
 	require.NoError(t, e.AddForwarded(metric, testForwardMetadata2))
-	require.Equal(t, 1, len(e.aggregations))
+	require.Equal(t, 2, len(e.aggregations))
 	expectedKeyNew := aggregationKey{
 		aggregationID:     testForwardMetadata2.AggregationID,
 		storagePolicy:     testForwardMetadata2.StoragePolicy,
 		pipeline:          testForwardMetadata2.Pipeline,
 		numForwardedTimes: testForwardMetadata2.NumForwardedTimes,
 	}
+	require.True(t, e.aggregations.index(expectedKey) >= 0)
+	checkElemTombstoned(t, expectedElem.Value.(metricElem), nil)
 	idx = e.aggregations.index(expectedKeyNew)
 	require.True(t, idx >= 0)
 	expectedElemNew := e.aggregations[idx].elem
@@ -1384,10 +1386,6 @@ func TestEntryAddForwarded(t *testing.T) {
 	require.Equal(t, expectedListIDNew.forwarded.numForwardedTimes, listNew.numForwardedTimes)
 	require.Equal(t, 1, listNew.Len())
 	require.True(t, expectedElemNew == listNew.aggregations.Front())
-	expectedTombstoned := map[policy.StoragePolicy]struct{}{
-		expectedKey.storagePolicy: struct{}{},
-	}
-	checkElemTombstoned(t, expectedElem.Value.(metricElem), expectedTombstoned)
 	counterElem := expectedElemNew.Value.(*CounterElem)
 	values = counterElem.values
 	require.Equal(t, 1, len(values))

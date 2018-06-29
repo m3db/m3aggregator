@@ -128,6 +128,10 @@ func newEntryMetrics(scope tally.Scope) entryMetrics {
 // Entry keeps track of a metric's aggregations alongside the aggregation
 // metadatas including storage policies, aggregation types, and remaining pipeline
 // steps if any.
+//
+// TODO(xichen): make the access time per aggregation key for entries associated
+// with forwarded metrics so we can reclaim aggregation elements associated with
+// individual aggregation keys even though the entry is still active.
 type Entry struct {
 	sync.RWMutex
 
@@ -673,9 +677,8 @@ func (e *Entry) updateForwardMetadataWithLock(
 	metadata metadata.ForwardMetadata,
 ) error {
 	var (
-		elemID          = e.maybeCopyIDWithLock(metric.ID)
-		newAggregations = make(aggregationValues, 0, 1)
-		err             error
+		elemID = e.maybeCopyIDWithLock(metric.ID)
+		err    error
 	)
 
 	// Update the forward metadata.
@@ -689,13 +692,10 @@ func (e *Entry) updateForwardMetadataWithLock(
 		resolution:        metadata.StoragePolicy.Resolution().Window,
 		numForwardedTimes: metadata.NumForwardedTimes,
 	}.toMetricListID()
-	newAggregations, err = e.addNewAggregationKey(metric.Type, elemID, key, listID, newAggregations)
+	newAggregations, err := e.addNewAggregationKey(metric.Type, elemID, key, listID, e.aggregations)
 	if err != nil {
 		return err
 	}
-
-	// Mark the outdated elements as tombstoned.
-	e.removeOldAggregations(newAggregations)
 
 	e.aggregations = newAggregations
 	e.metrics.forwarded.metadataUpdates.Inc(1)
