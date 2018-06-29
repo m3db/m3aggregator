@@ -187,7 +187,7 @@ var (
 	}
 	testForwardMetadata2 = metadata.ForwardMetadata{
 		AggregationID: aggregation.DefaultID,
-		StoragePolicy: policy.NewStoragePolicy(10*time.Second, xtime.Second, time.Hour),
+		StoragePolicy: policy.NewStoragePolicy(time.Hour, xtime.Second, time.Hour),
 		Pipeline: applied.NewPipeline([]applied.OpUnion{
 			{
 				Type: pipeline.RollupOpType,
@@ -1361,6 +1361,7 @@ func TestEntryAddForwarded(t *testing.T) {
 	// Add the forwarded metric with a different metadata.
 	metric.ID = make(id.RawID, len(testForwardedMetric.ID))
 	copy(metric.ID, testForwardedMetric.ID)
+	metric.TimeNanos += 2 * testForwardMetadata2.StoragePolicy.Resolution().Window.Nanoseconds()
 	require.NoError(t, e.AddForwarded(metric, testForwardMetadata2))
 	require.Equal(t, 2, len(e.aggregations))
 	expectedKeyNew := aggregationKey{
@@ -1369,7 +1370,11 @@ func TestEntryAddForwarded(t *testing.T) {
 		pipeline:          testForwardMetadata2.Pipeline,
 		numForwardedTimes: testForwardMetadata2.NumForwardedTimes,
 	}
-	require.True(t, e.aggregations.index(expectedKey) >= 0)
+	idx = e.aggregations.index(expectedKey)
+	require.True(t, idx >= 0)
+	expectedElem = e.aggregations[idx].elem
+	values = expectedElem.Value.(*CounterElem).values
+	require.Equal(t, 2, len(values))
 	checkElemTombstoned(t, expectedElem.Value.(metricElem), nil)
 	idx = e.aggregations.index(expectedKeyNew)
 	require.True(t, idx >= 0)

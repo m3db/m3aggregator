@@ -616,8 +616,14 @@ func (e *Entry) addForwarded(
 	}
 
 	// Check if we should update metadata, and add metric if not.
-	if !e.shouldUpdateForwardMetadataWithLock(metadata) {
-		err := e.addForwardedWithLock(metric, metadata.SourceID)
+	key := aggregationKey{
+		aggregationID:     metadata.AggregationID,
+		storagePolicy:     metadata.StoragePolicy,
+		pipeline:          metadata.Pipeline,
+		numForwardedTimes: metadata.NumForwardedTimes,
+	}
+	if idx := e.aggregations.index(key); idx >= 0 {
+		err := e.addForwardedWithLock(e.aggregations[idx], metric, metadata.SourceID)
 		e.RUnlock()
 		timeLock.RUnlock()
 		return err
@@ -631,19 +637,23 @@ func (e *Entry) addForwarded(
 		return errEntryClosed
 	}
 
-	// Update metatadata, and add metric.
-	if e.shouldUpdateForwardMetadataWithLock(metadata) {
-		if err := e.updateForwardMetadataWithLock(metric, metadata); err != nil {
-			e.Unlock()
-			timeLock.RUnlock()
-			return err
-		}
+	if idx := e.aggregations.index(key); idx >= 0 {
+		err := e.addForwardedWithLock(e.aggregations[idx], metric, metadata.SourceID)
+		e.Unlock()
+		timeLock.RUnlock()
+		return err
 	}
 
-	err := e.addForwardedWithLock(metric, metadata.SourceID)
+	// Update metatadata if not exists, and add metric.
+	if err := e.updateForwardMetadataWithLock(metric, metadata); err != nil {
+		e.Unlock()
+		timeLock.RUnlock()
+		return err
+	}
+	idx := e.aggregations.index(key)
+	err := e.addForwardedWithLock(e.aggregations[idx], metric, metadata.SourceID)
 	e.Unlock()
 	timeLock.RUnlock()
-
 	return err
 }
 
@@ -659,17 +669,6 @@ func (e *Entry) checkLateness(
 	}
 	e.metrics.forwarded.arrivedTooLate.Inc(1)
 	return errArrivedTooLate
-}
-
-// NB: For forwarded metrics, an entry must be associated with one and only one metadata.
-func (e *Entry) shouldUpdateForwardMetadataWithLock(metadata metadata.ForwardMetadata) bool {
-	key := aggregationKey{
-		aggregationID:     metadata.AggregationID,
-		storagePolicy:     metadata.StoragePolicy,
-		pipeline:          metadata.Pipeline,
-		numForwardedTimes: metadata.NumForwardedTimes,
-	}
-	return e.aggregations.index(key) < 0
 }
 
 func (e *Entry) updateForwardMetadataWithLock(
@@ -702,24 +701,20 @@ func (e *Entry) updateForwardMetadataWithLock(
 	return nil
 }
 
-func (e *Entry) addForwardedWithLock(metric aggregated.ForwardedMetric, sourceID uint32) error {
-	var (
-		timestamp = time.Unix(0, metric.TimeNanos)
-		multiErr  = xerrors.NewMultiError()
-	)
-	for _, val := range e.aggregations {
-		err := val.elem.Value.(metricElem).AddUnique(timestamp, metric.Values, sourceID)
-		if err == errDuplicateForwardingSource {
-			// Duplicate forwarding sources may occur during a leader re-election and is not
-			// considered an external facing error. Hence, we record it and move on.
-			e.metrics.forwarded.duplicateSources.Inc(1)
-			continue
-		}
-		if err != nil {
-			multiErr = multiErr.Add(err)
-		}
+func (e *Entry) addForwardedWithLock(
+	value aggregationValue,
+	metric aggregated.ForwardedMetric,
+	sourceID uint32,
+) error {
+	timestamp := time.Unix(0, metric.TimeNanos)
+	err := value.elem.Value.(metricElem).AddUnique(timestamp, metric.Values, sourceID)
+	if err == errDuplicateForwardingSource {
+		// Duplicate forwarding sources may occur during a leader re-election and is not
+		// considered an external facing error. Hence, we record it and move on.
+		e.metrics.forwarded.duplicateSources.Inc(1)
+		return nil
 	}
-	return multiErr.FinalError()
+	return err
 }
 
 func (e *Entry) writerCount() int        { return int(atomic.LoadInt32(&e.numWriters)) }
