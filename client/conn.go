@@ -131,6 +131,7 @@ func (c *connection) Write(data []byte) error {
 		)); backoffDur > 0 {
 			c.sleepFn(backoffDur)
 		}
+		c.metrics.writeRetries.Inc(1)
 		if err = c.writeAttemptWithLock(data); err == nil {
 			c.Unlock()
 			return nil
@@ -241,6 +242,7 @@ const (
 type connectionMetrics struct {
 	connectError          tally.Counter
 	writeError            tally.Counter
+	writeRetries          tally.Counter
 	setKeepAliveError     tally.Counter
 	setWriteDeadlineError tally.Counter
 }
@@ -251,6 +253,7 @@ func newConnectionMetrics(scope tally.Scope) connectionMetrics {
 			Counter(errorMetric),
 		writeError: scope.Tagged(map[string]string{errorMetricType: "write"}).
 			Counter(errorMetric),
+		writeRetries: scope.Tagged(map[string]string{"action": "write"}).Counter("retries"),
 		setKeepAliveError: scope.Tagged(map[string]string{errorMetricType: "tcp-keep-alive"}).
 			Counter(errorMetric),
 		setWriteDeadlineError: scope.Tagged(map[string]string{errorMetricType: "set-write-deadline"}).
