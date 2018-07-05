@@ -32,6 +32,7 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3cluster/client"
+	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3metrics/encoding/msgpack"
 	"github.com/m3db/m3msg/producer"
@@ -93,7 +94,7 @@ func (c FlushHandlerConfiguration) NewHandler(
 		case loggingType:
 			handlers = append(handlers, NewLoggingHandler(instrumentOpts.Logger()))
 		case forwardType:
-			sharderRouter, err := hc.StaticBackend.NewSharderRouter(instrumentOpts)
+			sharderRouter, err := hc.StaticBackend.NewSharderRouter(cs, instrumentOpts)
 			if err != nil {
 				return nil, err
 			}
@@ -159,6 +160,9 @@ type flushHandlerConfiguration struct {
 
 	// DynamicBackend configures the dynamic backend.
 	DynamicBackend *dynamicBackendConfiguration `yaml:"dynamicBackend"`
+
+	// TrafficControl configures the traffic controller.
+	TrafficControl *trafficControlConfiguration `yaml:"trafficControl"`
 }
 
 func (c flushHandlerConfiguration) Validate() error {
@@ -169,6 +173,41 @@ func (c flushHandlerConfiguration) Validate() error {
 		return errBothDynamicAndStaticBackendConfiguration
 	}
 	return nil
+}
+
+type trafficControlConfiguration struct {
+	DefaultDisabled   bool                     `yaml:"defaultDisabled" validate:"nonzero"`
+	RuntimeDisableKey string                   `yaml:"runtimeDisableKey" validate:"nonzero"`
+	InitTimeout       *time.Duration           `yaml:"initTimeout"`
+	KVOverride        kv.OverrideConfiguration `yaml:"kvOverride"`
+}
+
+func (c *trafficControlConfiguration) NewTrafficControlledSharderRouter(
+	sr SharderRouter,
+	cs client.Client,
+	instrumentOpts instrument.Options,
+) (SharderRouter, error) {
+	kvOpts, err := c.KVOverride.NewOverrideOptions()
+	if err != nil {
+		return SharderRouter{}, err
+	}
+	store, err := cs.Store(kvOpts)
+	if err != nil {
+		return SharderRouter{}, err
+	}
+	opts := common.NewTrafficControlOptions().
+		SetStore(store).
+		SetDefaultDisabled(c.DefaultDisabled).
+		SetRuntimeDisableKey(c.RuntimeDisableKey).
+		SetInstrumentOptions(instrumentOpts)
+	if c.InitTimeout != nil {
+		opts = opts.SetInitTimeout(*c.InitTimeout)
+	}
+	sr.Router = router.NewTrafficControlledRouter(
+		common.NewTrafficController(opts),
+		sr.Router,
+	)
+	return sr, nil
 }
 
 type dynamicBackendConfiguration struct {
@@ -186,6 +225,9 @@ type dynamicBackendConfiguration struct {
 
 	// Filters configs the filter for consumer services.
 	Filters []consumerServiceFilterConfiguration `yaml:"filters"`
+
+	// TrafficControl configs the traffic controller.
+	TrafficControl *trafficControlConfiguration `yaml:"trafficControl"`
 }
 
 func (c *dynamicBackendConfiguration) NewSharderRouter(
@@ -209,10 +251,14 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 		p.RegisterFilter(sid, f)
 		logger.Infof("registered filter for consumer service: %s", sid.String())
 	}
-	return SharderRouter{
+	sr := SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
 		Router:    router.NewWithAckRouter(p),
-	}, nil
+	}
+	if c.TrafficControl == nil {
+		return sr, nil
+	}
+	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, cs, instrumentOpts)
 }
 
 type consumerServiceFilterConfiguration struct {
@@ -245,6 +291,9 @@ type staticBackendConfiguration struct {
 
 	// Disable validation (dangerous but useful for testing and staging environments).
 	DisableValidation bool `yaml:"disableValidation"`
+
+	// TrafficControl configs the traffic controller.
+	TrafficControl *trafficControlConfiguration `yaml:"trafficControl"`
 }
 
 func (c *staticBackendConfiguration) Validate() error {
@@ -278,6 +327,7 @@ func (c *staticBackendConfiguration) validateNonSharded() error {
 }
 
 func (c *staticBackendConfiguration) NewSharderRouter(
+	cs client.Client,
 	instrumentOpts instrument.Options,
 ) (SharderRouter, error) {
 	if err := c.Validate(); err != nil {
@@ -307,7 +357,11 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 
 	// Sharded backend.
 	routerScope := backendScope.SubScope("router")
-	return c.Sharded.NewSharderRouter(routerScope, queueOpts)
+	sr, err := c.Sharded.NewSharderRouter(routerScope, queueOpts)
+	if c.TrafficControl == nil {
+		return sr, err
+	}
+	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, cs, instrumentOpts)
 }
 
 type shardedConfiguration struct {
