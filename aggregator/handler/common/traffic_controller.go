@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Uber Technologies, Inc.
+// Copyright (c) 2018 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,17 +44,19 @@ type TrafficControlOptions interface {
 	// Store returns the kv store.
 	Store() kv.Store
 
-	// SetDefaultDisabled sets the default disabled value.
-	SetDefaultDisabled(value bool) TrafficControlOptions
+	// SetDefaultEnabled sets the default enabled value.
+	SetDefaultEnabled(value bool) TrafficControlOptions
 
-	// DefaultDisabled returns the default disabled value.
-	DefaultDisabled() bool
+	// DefaultEnabled returns the default enabled value.
+	DefaultEnabled() bool
 
-	// SetRuntimeDisableKey sets the runtime disable key.
-	SetRuntimeDisableKey(value string) TrafficControlOptions
+	// SetRuntimeEnableKey sets the runtime enable key,
+	// which will override the default enabled value when present.
+	SetRuntimeEnableKey(value string) TrafficControlOptions
 
-	// RuntimeDisableKey returns the runtime disable key.
-	RuntimeDisableKey() string
+	// RuntimeEnableKey returns the runtime enable key,
+	// which will override the default enabled value when present.
+	RuntimeEnableKey() string
 
 	// SetInitTimeout sets the init timeout.
 	SetInitTimeout(value time.Duration) TrafficControlOptions
@@ -70,19 +72,19 @@ type TrafficControlOptions interface {
 }
 
 type trafficControlOptions struct {
-	store             kv.Store
-	defaultDisabled   bool
-	runtimeDisableKey string
-	initTimeout       time.Duration
-	instrumentOpts    instrument.Options
+	store            kv.Store
+	defaultEnabled   bool
+	runtimeEnableKey string
+	initTimeout      time.Duration
+	instrumentOpts   instrument.Options
 }
 
 // NewTrafficControlOptions creats a new TrafficControlOptions.
 func NewTrafficControlOptions() TrafficControlOptions {
 	return &trafficControlOptions{
-		defaultDisabled: defaultDefaultDisabled,
-		initTimeout:     defaultInitTimeout,
-		instrumentOpts:  instrument.NewOptions(),
+		defaultEnabled: defaultDefaultDisabled,
+		initTimeout:    defaultInitTimeout,
+		instrumentOpts: instrument.NewOptions(),
 	}
 }
 
@@ -96,24 +98,24 @@ func (opts *trafficControlOptions) Store() kv.Store {
 	return opts.store
 }
 
-func (opts *trafficControlOptions) SetDefaultDisabled(value bool) TrafficControlOptions {
+func (opts *trafficControlOptions) SetDefaultEnabled(value bool) TrafficControlOptions {
 	o := *opts
-	o.defaultDisabled = value
+	o.defaultEnabled = value
 	return &o
 }
 
-func (opts *trafficControlOptions) DefaultDisabled() bool {
-	return opts.defaultDisabled
+func (opts *trafficControlOptions) DefaultEnabled() bool {
+	return opts.defaultEnabled
 }
 
-func (opts *trafficControlOptions) SetRuntimeDisableKey(value string) TrafficControlOptions {
+func (opts *trafficControlOptions) SetRuntimeEnableKey(value string) TrafficControlOptions {
 	o := *opts
-	o.runtimeDisableKey = value
+	o.runtimeEnableKey = value
 	return &o
 }
 
-func (opts *trafficControlOptions) RuntimeDisableKey() string {
-	return opts.runtimeDisableKey
+func (opts *trafficControlOptions) RuntimeEnableKey() string {
+	return opts.runtimeEnableKey
 }
 
 func (opts *trafficControlOptions) SetInitTimeout(value time.Duration) TrafficControlOptions {
@@ -138,15 +140,17 @@ func (opts *trafficControlOptions) InstrumentOptions() instrument.Options {
 
 // TrafficController controls if traffic is enabled.
 type TrafficController struct {
-	disabled *atomic.Bool
+	enabled *atomic.Bool
+	value   watch.Value
+	opts    TrafficControlOptions
 }
 
 // NewTrafficController creates a new traffic controller.
 func NewTrafficController(opts TrafficControlOptions) *TrafficController {
-	disabled := atomic.NewBool(opts.DefaultDisabled())
+	enabled := atomic.NewBool(opts.DefaultEnabled())
 	iOpts := opts.InstrumentOptions()
 	newUpdatableFn := func() (watch.Updatable, error) {
-		w, err := opts.Store().Watch(opts.RuntimeDisableKey())
+		w, err := opts.Store().Watch(opts.RuntimeEnableKey())
 		return w, err
 	}
 	getFn := func(updatable watch.Updatable) (interface{}, error) {
@@ -155,14 +159,14 @@ func NewTrafficController(opts TrafficControlOptions) *TrafficController {
 	processFn := func(update interface{}) error {
 		b, err := util.BoolFromValue(
 			update.(kv.Value),
-			opts.RuntimeDisableKey(),
-			opts.DefaultDisabled(),
+			opts.RuntimeEnableKey(),
+			opts.DefaultEnabled(),
 			util.NewOptions().SetLogger(iOpts.Logger()),
 		)
 		if err != nil {
 			return err
 		}
-		disabled.Store(b)
+		enabled.Store(b)
 		return nil
 	}
 	vOptions := watch.NewOptions().
@@ -171,14 +175,30 @@ func NewTrafficController(opts TrafficControlOptions) *TrafficController {
 		SetNewUpdatableFn(newUpdatableFn).
 		SetGetUpdateFn(getFn).
 		SetProcessFn(processFn)
-	value := watch.NewValue(vOptions)
-	value.Watch()
 	return &TrafficController{
-		disabled: disabled,
+		enabled: enabled,
+		value:   watch.NewValue(vOptions),
+		opts:    opts,
 	}
+}
+
+// Init initializes the traffic controller to watch the runtime updates.
+func (c *TrafficController) Init() error {
+	err := c.value.Watch()
+	if err != nil {
+		if _, ok := err.(watch.CreateWatchError); ok {
+			return err
+		}
+	}
+	return nil
+}
+
+// Close closes the traffic controller.
+func (c *TrafficController) Close() {
+	c.value.Unwatch()
 }
 
 // Allow returns true if traffic is allowed.
 func (c *TrafficController) Allow() bool {
-	return !c.disabled.Load()
+	return c.enabled.Load()
 }

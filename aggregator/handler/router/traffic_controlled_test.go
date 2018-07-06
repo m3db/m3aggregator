@@ -22,12 +22,12 @@ package router
 
 import (
 	"testing"
-	"time"
 
-	"github.com/m3db/m3cluster/kv/mem"
+	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3metrics/encoding/msgpack"
+	"github.com/m3db/m3x/instrument"
 
 	"github.com/golang/mock/gomock"
-	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,18 +37,22 @@ func TestTrafficControlledRouter(t *testing.T) {
 
 	m := NewMockRouter(ctrl)
 	r := NewTrafficControlledRouter(common.NewTrafficController(
-		common.NewTrafficControlOptions().SetDefaultDisabled(false).SetStore(mem.NewStore()).SetInitTimeout(100*time.Millisecond)),
+		common.NewTrafficControlOptions().SetDefaultEnabled(true)),
 		m,
+		instrument.NewOptions(),
 	)
-	m.EXPECT().Route(uint32(1), nil)
-	require.NoError(t, r.Route(1, nil))
+	buf1 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
+	m.EXPECT().Route(uint32(1), buf1)
+	require.NoError(t, r.Route(1, buf1))
 
+	buf2 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
 	r = NewTrafficControlledRouter(common.NewTrafficController(
-		common.NewTrafficControlOptions().SetDefaultDisabled(true).SetStore(mem.NewStore()).SetInitTimeout(100*time.Millisecond)),
+		common.NewTrafficControlOptions().SetDefaultEnabled(false)),
 		m,
+		instrument.NewOptions(),
 	)
-	require.NoError(t, r.Route(2, nil))
-
+	require.NoError(t, r.Route(2, buf2))
+	require.Panics(t, buf2.DecRef)
 	m.EXPECT().Close()
 	r.Close()
 }

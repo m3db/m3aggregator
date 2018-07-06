@@ -22,31 +22,51 @@ package router
 
 import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3x/instrument"
+
+	"github.com/uber-go/tally"
 )
+
+type trafficControlledRouterMetrics struct {
+	trafficControlNotAllwed tally.Counter
+}
+
+func newTrafficControlledRouterMetrics(scope tally.Scope) trafficControlledRouterMetrics {
+	return trafficControlledRouterMetrics{
+		trafficControlNotAllwed: scope.Counter("traffic-control-not-allowed"),
+	}
+}
 
 type trafficControlledRouter struct {
 	*common.TrafficController
 	Router
+
+	m trafficControlledRouterMetrics
 }
 
 // NewTrafficControlledRouter creates a traffic controlled router.
 func NewTrafficControlledRouter(
 	trafficController *common.TrafficController,
 	router Router,
+	iOpts instrument.Options,
 ) Router {
 	return &trafficControlledRouter{
 		TrafficController: trafficController,
 		Router:            router,
+		m:                 newTrafficControlledRouterMetrics(iOpts.MetricsScope()),
 	}
 }
 
 func (r *trafficControlledRouter) Route(shard uint32, buffer *common.RefCountedBuffer) error {
 	if !r.TrafficController.Allow() {
+		buffer.DecRef()
+		r.m.trafficControlNotAllwed.Inc(1)
 		return nil
 	}
 	return r.Router.Route(shard, buffer)
 }
 
 func (r *trafficControlledRouter) Close() {
+	r.TrafficController.Close()
 	r.Router.Close()
 }

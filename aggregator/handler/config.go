@@ -57,8 +57,9 @@ var (
 
 // FlushHandlerConfiguration configures flush handlers.
 type FlushHandlerConfiguration struct {
-	Handlers []flushHandlerConfiguration `yaml:"handlers" validate:"nonzero"`
-	Writer   *writerConfiguration        `yaml:"writer"`
+	Handlers                 []flushHandlerConfiguration `yaml:"handlers" validate:"nonzero"`
+	Writer                   *writerConfiguration        `yaml:"writer"`
+	TrafficControlKVOverride *kv.OverrideConfiguration   `yaml:"trafficControlKVOverride"`
 }
 
 // NewHandler creates a new flush handler based on the configuration.
@@ -72,7 +73,18 @@ func (c FlushHandlerConfiguration) NewHandler(
 	var (
 		handlers       = make([]Handler, 0, len(c.Handlers))
 		sharderRouters = make([]SharderRouter, 0, len(c.Handlers))
+		store          kv.Store
 	)
+	if c.TrafficControlKVOverride != nil {
+		kvOpts, err := c.TrafficControlKVOverride.NewOverrideOptions()
+		if err != nil {
+			return nil, err
+		}
+		store, err = cs.Store(kvOpts)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, hc := range c.Handlers {
 		if err := hc.Validate(); err != nil {
 			return nil, err
@@ -80,6 +92,7 @@ func (c FlushHandlerConfiguration) NewHandler(
 		if hc.DynamicBackend != nil {
 			sharderRouter, err := hc.DynamicBackend.NewSharderRouter(
 				cs,
+				store,
 				instrumentOpts,
 			)
 			if err != nil {
@@ -94,7 +107,7 @@ func (c FlushHandlerConfiguration) NewHandler(
 		case loggingType:
 			handlers = append(handlers, NewLoggingHandler(instrumentOpts.Logger()))
 		case forwardType:
-			sharderRouter, err := hc.StaticBackend.NewSharderRouter(cs, instrumentOpts)
+			sharderRouter, err := hc.StaticBackend.NewSharderRouter(store, instrumentOpts)
 			if err != nil {
 				return nil, err
 			}
@@ -175,41 +188,6 @@ func (c flushHandlerConfiguration) Validate() error {
 	return nil
 }
 
-type trafficControlConfiguration struct {
-	DefaultDisabled   bool                     `yaml:"defaultDisabled" validate:"nonzero"`
-	RuntimeDisableKey string                   `yaml:"runtimeDisableKey" validate:"nonzero"`
-	InitTimeout       *time.Duration           `yaml:"initTimeout"`
-	KVOverride        kv.OverrideConfiguration `yaml:"kvOverride"`
-}
-
-func (c *trafficControlConfiguration) NewTrafficControlledSharderRouter(
-	sr SharderRouter,
-	cs client.Client,
-	instrumentOpts instrument.Options,
-) (SharderRouter, error) {
-	kvOpts, err := c.KVOverride.NewOverrideOptions()
-	if err != nil {
-		return SharderRouter{}, err
-	}
-	store, err := cs.Store(kvOpts)
-	if err != nil {
-		return SharderRouter{}, err
-	}
-	opts := common.NewTrafficControlOptions().
-		SetStore(store).
-		SetDefaultDisabled(c.DefaultDisabled).
-		SetRuntimeDisableKey(c.RuntimeDisableKey).
-		SetInstrumentOptions(instrumentOpts)
-	if c.InitTimeout != nil {
-		opts = opts.SetInitTimeout(*c.InitTimeout)
-	}
-	sr.Router = router.NewTrafficControlledRouter(
-		common.NewTrafficController(opts),
-		sr.Router,
-	)
-	return sr, nil
-}
-
 type dynamicBackendConfiguration struct {
 	// Name of the backend.
 	Name string `yaml:"name"`
@@ -232,6 +210,7 @@ type dynamicBackendConfiguration struct {
 
 func (c *dynamicBackendConfiguration) NewSharderRouter(
 	cs client.Client,
+	store kv.Store,
 	instrumentOpts instrument.Options,
 ) (SharderRouter, error) {
 	scope := instrumentOpts.MetricsScope().Tagged(map[string]string{
@@ -258,7 +237,7 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 	if c.TrafficControl == nil {
 		return sr, nil
 	}
-	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, cs, instrumentOpts)
+	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, store, instrumentOpts.SetMetricsScope(scope))
 }
 
 type consumerServiceFilterConfiguration struct {
@@ -327,7 +306,7 @@ func (c *staticBackendConfiguration) validateNonSharded() error {
 }
 
 func (c *staticBackendConfiguration) NewSharderRouter(
-	cs client.Client,
+	store kv.Store,
 	instrumentOpts instrument.Options,
 ) (SharderRouter, error) {
 	if err := c.Validate(); err != nil {
@@ -361,7 +340,7 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 	if c.TrafficControl == nil {
 		return sr, err
 	}
-	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, cs, instrumentOpts)
+	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, store, instrumentOpts.SetMetricsScope(routerScope))
 }
 
 type shardedConfiguration struct {
@@ -452,6 +431,33 @@ func (s *backendServerShardSet) NewShardedQueue(
 		return router.ShardedQueue{}, err
 	}
 	return router.ShardedQueue{ShardSet: s.ShardSet, Queue: queue}, nil
+}
+
+type trafficControlConfiguration struct {
+	DefaultEnabled   bool           `yaml:"defaultEnabled" validate:"nonzero"`
+	RuntimeEnableKey string         `yaml:"runtimeEnableKey" validate:"nonzero"`
+	InitTimeout      *time.Duration `yaml:"initTimeout"`
+}
+
+func (c *trafficControlConfiguration) NewTrafficControlledSharderRouter(
+	sr SharderRouter,
+	store kv.Store,
+	instrumentOpts instrument.Options,
+) (SharderRouter, error) {
+	opts := common.NewTrafficControlOptions().
+		SetStore(store).
+		SetDefaultEnabled(c.DefaultEnabled).
+		SetRuntimeEnableKey(c.RuntimeEnableKey).
+		SetInstrumentOptions(instrumentOpts)
+	if c.InitTimeout != nil {
+		opts = opts.SetInitTimeout(*c.InitTimeout)
+	}
+	sr.Router = router.NewTrafficControlledRouter(
+		common.NewTrafficController(opts),
+		sr.Router,
+		instrumentOpts,
+	)
+	return sr, nil
 }
 
 type connectionConfiguration struct {
