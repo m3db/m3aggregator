@@ -185,10 +185,11 @@ func NewTrafficController(opts TrafficControlOptions) *TrafficController {
 // Init initializes the traffic controller to watch the runtime updates.
 func (c *TrafficController) Init() error {
 	err := c.value.Watch()
-	if err != nil {
-		if _, ok := err.(watch.CreateWatchError); ok {
-			return err
-		}
+	if err == nil {
+		return nil
+	}
+	if _, ok := err.(watch.CreateWatchError); ok {
+		return err
 	}
 	return nil
 }
