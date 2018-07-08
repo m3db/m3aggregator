@@ -36,8 +36,8 @@ func TestTrafficControlledRouter(t *testing.T) {
 	defer ctrl.Finish()
 
 	m := NewMockRouter(ctrl)
-	r := NewTrafficControlledRouter(common.NewTrafficEnabler(
-		common.NewTrafficControlOptions().SetDefaultValue(true)),
+	r := NewTrafficControlledRouter(common.NewTrafficDisabler(
+		common.NewTrafficControlOptions()),
 		m,
 		tally.NoopScope,
 	)
@@ -47,7 +47,7 @@ func TestTrafficControlledRouter(t *testing.T) {
 
 	buf2 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
 	r = NewTrafficControlledRouter(common.NewTrafficEnabler(
-		common.NewTrafficControlOptions().SetDefaultValue(false)),
+		common.NewTrafficControlOptions()),
 		m,
 		tally.NoopScope,
 	)
