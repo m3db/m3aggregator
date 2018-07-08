@@ -482,6 +482,8 @@ func (h flushMetadataHeap) up(i int) {
 	}
 }
 
+// down heapifies the element at index i0 by attempting to shift it downwards, returning
+// true if the element has been successfully moved downwards, and false otherwise.
 func (h flushMetadataHeap) down(i0, n int) bool {
 	i := i0
 	for {
