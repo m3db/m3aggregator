@@ -22,7 +22,6 @@ package router
 
 import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
-	"github.com/m3db/m3x/instrument"
 
 	"github.com/uber-go/tally"
 )
@@ -38,7 +37,7 @@ func newTrafficControlledRouterMetrics(scope tally.Scope) trafficControlledRoute
 }
 
 type trafficControlledRouter struct {
-	*common.TrafficController
+	common.TrafficController
 	Router
 
 	m trafficControlledRouterMetrics
@@ -46,14 +45,14 @@ type trafficControlledRouter struct {
 
 // NewTrafficControlledRouter creates a traffic controlled router.
 func NewTrafficControlledRouter(
-	trafficController *common.TrafficController,
+	trafficController common.TrafficController,
 	router Router,
-	iOpts instrument.Options,
+	scope tally.Scope,
 ) Router {
 	return &trafficControlledRouter{
 		TrafficController: trafficController,
 		Router:            router,
-		m:                 newTrafficControlledRouterMetrics(iOpts.MetricsScope()),
+		m:                 newTrafficControlledRouterMetrics(scope),
 	}
 }
 

@@ -38,31 +38,46 @@ func TestTrafficControllerWithoutInitialKVValue(t *testing.T) {
 	key := "testKey"
 	opts := NewTrafficControlOptions().
 		SetStore(store).
-		SetRuntimeEnableKey(key).
-		SetDefaultEnabled(true).
+		SetRuntimeKey(key).
+		SetDefaultValue(true).
 		SetInitTimeout(200 * time.Millisecond)
-	tc := NewTrafficController(opts)
-	require.True(t, tc.enabled.Load())
-	require.True(t, tc.Allow())
+	enabler := NewTrafficEnabler(opts).(*trafficEnabler)
+	disabler := NewTrafficDisabler(opts)
+	require.True(t, enabler.enabled.Load())
+	require.True(t, enabler.Allow())
+	require.False(t, disabler.Allow())
 
-	require.NoError(t, tc.Init())
-	defer tc.Close()
+	require.NoError(t, enabler.Init())
+	defer enabler.Close()
+
+	require.NoError(t, disabler.Init())
+	defer disabler.Close()
 
 	_, err := store.Set(key, &commonpb.BoolProto{Value: false})
 	require.NoError(t, err)
 
-	for tc.enabled.Load() {
+	for enabler.enabled.Load() {
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.False(t, tc.Allow())
+	require.False(t, enabler.Allow())
+
+	for !disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.True(t, disabler.Allow())
 
 	_, err = store.Set(key, &commonpb.BoolProto{Value: true})
 	require.NoError(t, err)
 
-	for !tc.enabled.Load() {
+	for !enabler.enabled.Load() {
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.True(t, tc.Allow())
+	require.True(t, enabler.Allow())
+
+	for disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.False(t, disabler.Allow())
 }
 
 func TestTrafficControllerWithInitialKVValue(t *testing.T) {
@@ -75,29 +90,42 @@ func TestTrafficControllerWithInitialKVValue(t *testing.T) {
 
 	opts := NewTrafficControlOptions().
 		SetStore(store).
-		SetRuntimeEnableKey(key).
-		SetDefaultEnabled(false).
+		SetRuntimeKey(key).
+		SetDefaultValue(false).
 		SetInitTimeout(200 * time.Millisecond)
-	tc := NewTrafficController(opts)
-	require.NoError(t, tc.Init())
-	defer tc.Close()
+	enabler := NewTrafficEnabler(opts).(*trafficEnabler)
+	require.NoError(t, enabler.Init())
+	defer enabler.Close()
 
-	require.True(t, tc.enabled.Load())
-	require.True(t, tc.Allow())
+	disabler := NewTrafficDisabler(opts)
+	require.NoError(t, disabler.Init())
+	defer disabler.Close()
+
+	require.True(t, enabler.enabled.Load())
+	require.True(t, enabler.Allow())
+	require.False(t, disabler.Allow())
 
 	_, err = store.Set(key, &commonpb.BoolProto{Value: false})
 	require.NoError(t, err)
 
-	for tc.enabled.Load() {
+	for enabler.enabled.Load() {
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.False(t, tc.Allow())
+	require.False(t, enabler.Allow())
+	for !disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.True(t, disabler.Allow())
 
 	_, err = store.Set(key, &commonpb.BoolProto{Value: true})
 	require.NoError(t, err)
 
-	for !tc.enabled.Load() {
+	for !enabler.enabled.Load() {
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.True(t, tc.Allow())
+	require.True(t, enabler.Allow())
+	for disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.False(t, disabler.Allow())
 }

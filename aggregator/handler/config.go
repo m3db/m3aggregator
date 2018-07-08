@@ -173,9 +173,6 @@ type flushHandlerConfiguration struct {
 
 	// DynamicBackend configures the dynamic backend.
 	DynamicBackend *dynamicBackendConfiguration `yaml:"dynamicBackend"`
-
-	// TrafficControl configures the traffic controller.
-	TrafficControl *trafficControlConfiguration `yaml:"trafficControl"`
 }
 
 func (c flushHandlerConfiguration) Validate() error {
@@ -205,7 +202,7 @@ type dynamicBackendConfiguration struct {
 	Filters []consumerServiceFilterConfiguration `yaml:"filters"`
 
 	// TrafficControl configs the traffic controller.
-	TrafficControl *trafficControlConfiguration `yaml:"trafficControl"`
+	TrafficControl *common.TrafficControllerConfiguration `yaml:"trafficControl"`
 }
 
 func (c *dynamicBackendConfiguration) NewSharderRouter(
@@ -230,14 +227,18 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 		p.RegisterFilter(sid, f)
 		logger.Infof("registered filter for consumer service: %s", sid.String())
 	}
-	sr := SharderRouter{
+	r := router.NewWithAckRouter(p)
+	if c.TrafficControl != nil {
+		tc, err := c.TrafficControl.NewTrafficController(store, instrumentOpts)
+		if err != nil {
+			return SharderRouter{}, err
+		}
+		r = router.NewTrafficControlledRouter(tc, r, scope)
+	}
+	return SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
-		Router:    router.NewWithAckRouter(p),
-	}
-	if c.TrafficControl == nil {
-		return sr, nil
-	}
-	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, store, instrumentOpts.SetMetricsScope(scope))
+		Router:    r,
+	}, nil
 }
 
 type consumerServiceFilterConfiguration struct {
@@ -272,7 +273,7 @@ type staticBackendConfiguration struct {
 	DisableValidation bool `yaml:"disableValidation"`
 
 	// TrafficControl configs the traffic controller.
-	TrafficControl *trafficControlConfiguration `yaml:"trafficControl"`
+	TrafficControl *common.TrafficControllerConfiguration `yaml:"trafficControl"`
 }
 
 func (c *staticBackendConfiguration) Validate() error {
@@ -323,24 +324,41 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 	if c.QueueSize > 0 {
 		queueOpts = queueOpts.SetQueueSize(c.QueueSize)
 	}
-
+	var (
+		tc  common.TrafficController
+		err error
+	)
+	if c.TrafficControl != nil {
+		if tc, err = c.TrafficControl.NewTrafficController(
+			store,
+			instrumentOpts.SetMetricsScope(backendScope),
+		); err != nil {
+			return SharderRouter{}, err
+		}
+	}
 	if len(c.Servers) > 0 {
 		// This is a non-sharded backend.
 		queue, err := common.NewQueue(c.Servers, queueOpts)
 		if err != nil {
 			return SharderRouter{}, err
 		}
-		router := router.NewAllowAllRouter(queue)
-		return SharderRouter{SharderID: sharding.NoShardingSharderID, Router: router}, nil
+		r := router.NewAllowAllRouter(queue)
+		if tc != nil {
+			r = router.NewTrafficControlledRouter(tc, r, backendScope)
+		}
+		return SharderRouter{SharderID: sharding.NoShardingSharderID, Router: r}, nil
 	}
 
 	// Sharded backend.
 	routerScope := backendScope.SubScope("router")
 	sr, err := c.Sharded.NewSharderRouter(routerScope, queueOpts)
-	if c.TrafficControl == nil {
-		return sr, err
+	if err != nil {
+		return SharderRouter{}, err
 	}
-	return c.TrafficControl.NewTrafficControlledSharderRouter(sr, store, instrumentOpts.SetMetricsScope(routerScope))
+	if tc != nil {
+		sr.Router = router.NewTrafficControlledRouter(tc, sr.Router, backendScope)
+	}
+	return sr, nil
 }
 
 type shardedConfiguration struct {
@@ -431,33 +449,6 @@ func (s *backendServerShardSet) NewShardedQueue(
 		return router.ShardedQueue{}, err
 	}
 	return router.ShardedQueue{ShardSet: s.ShardSet, Queue: queue}, nil
-}
-
-type trafficControlConfiguration struct {
-	DefaultEnabled   bool           `yaml:"defaultEnabled" validate:"nonzero"`
-	RuntimeEnableKey string         `yaml:"runtimeEnableKey" validate:"nonzero"`
-	InitTimeout      *time.Duration `yaml:"initTimeout"`
-}
-
-func (c *trafficControlConfiguration) NewTrafficControlledSharderRouter(
-	sr SharderRouter,
-	store kv.Store,
-	instrumentOpts instrument.Options,
-) (SharderRouter, error) {
-	opts := common.NewTrafficControlOptions().
-		SetStore(store).
-		SetDefaultEnabled(c.DefaultEnabled).
-		SetRuntimeEnableKey(c.RuntimeEnableKey).
-		SetInstrumentOptions(instrumentOpts)
-	if c.InitTimeout != nil {
-		opts = opts.SetInitTimeout(*c.InitTimeout)
-	}
-	sr.Router = router.NewTrafficControlledRouter(
-		common.NewTrafficController(opts),
-		sr.Router,
-		instrumentOpts,
-	)
-	return sr, nil
 }
 
 type connectionConfiguration struct {

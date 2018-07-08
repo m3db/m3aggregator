@@ -25,10 +25,10 @@ import (
 
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3metrics/encoding/msgpack"
-	"github.com/m3db/m3x/instrument"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 )
 
 func TestTrafficControlledRouter(t *testing.T) {
@@ -36,20 +36,20 @@ func TestTrafficControlledRouter(t *testing.T) {
 	defer ctrl.Finish()
 
 	m := NewMockRouter(ctrl)
-	r := NewTrafficControlledRouter(common.NewTrafficController(
-		common.NewTrafficControlOptions().SetDefaultEnabled(true)),
+	r := NewTrafficControlledRouter(common.NewTrafficEnabler(
+		common.NewTrafficControlOptions().SetDefaultValue(true)),
 		m,
-		instrument.NewOptions(),
+		tally.NoopScope,
 	)
 	buf1 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
 	m.EXPECT().Route(uint32(1), buf1)
 	require.NoError(t, r.Route(1, buf1))
 
 	buf2 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
-	r = NewTrafficControlledRouter(common.NewTrafficController(
-		common.NewTrafficControlOptions().SetDefaultEnabled(false)),
+	r = NewTrafficControlledRouter(common.NewTrafficEnabler(
+		common.NewTrafficControlOptions().SetDefaultValue(false)),
 		m,
-		instrument.NewOptions(),
+		tally.NoopScope,
 	)
 	require.NoError(t, r.Route(2, buf2))
 	require.Panics(t, buf2.DecRef)
