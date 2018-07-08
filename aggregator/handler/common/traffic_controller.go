@@ -84,10 +84,9 @@ func (t *TrafficControllerType) UnmarshalYAML(unmarshal func(interface{}) error)
 
 // TrafficControllerConfiguration configures the traffic controller.
 type TrafficControllerConfiguration struct {
-	Type         TrafficControllerType `yaml:"type"`
-	DefaultValue bool                  `yaml:"defaultValue" validate:"nonzero"`
-	RuntimeKey   string                `yaml:"runtimeKey" validate:"nonzero"`
-	InitTimeout  *time.Duration        `yaml:"initTimeout"`
+	Type        TrafficControllerType `yaml:"type"`
+	RuntimeKey  string                `yaml:"runtimeKey" validate:"nonzero"`
+	InitTimeout *time.Duration        `yaml:"initTimeout"`
 }
 
 // NewTrafficController creates a new traffic controller.
@@ -97,7 +96,6 @@ func (c *TrafficControllerConfiguration) NewTrafficController(
 ) (TrafficController, error) {
 	opts := NewTrafficControlOptions().
 		SetStore(store).
-		SetDefaultValue(c.DefaultValue).
 		SetRuntimeKey(c.RuntimeKey).
 		SetInstrumentOptions(instrumentOpts)
 	if c.InitTimeout != nil {
@@ -122,12 +120,6 @@ type TrafficControlOptions interface {
 
 	// Store returns the kv store.
 	Store() kv.Store
-
-	// SetDefaultValue sets the default value.
-	SetDefaultValue(value bool) TrafficControlOptions
-
-	// DefaultValue returns the default value.
-	DefaultValue() bool
 
 	// SetRuntimeKey sets the runtime enable key,
 	// which will override the default enabled value when present.
@@ -225,7 +217,7 @@ type trafficEnabler struct {
 
 // NewTrafficEnabler creates a new traffic controller.
 func NewTrafficEnabler(opts TrafficControlOptions) TrafficController {
-	enabled := atomic.NewBool(opts.DefaultValue())
+	enabled := atomic.NewBool(false)
 	iOpts := opts.InstrumentOptions()
 	newUpdatableFn := func() (watch.Updatable, error) {
 		w, err := opts.Store().Watch(opts.RuntimeKey())
@@ -238,7 +230,7 @@ func NewTrafficEnabler(opts TrafficControlOptions) TrafficController {
 		b, err := util.BoolFromValue(
 			update.(kv.Value),
 			opts.RuntimeKey(),
-			opts.DefaultValue(),
+			false,
 			util.NewOptions().SetLogger(iOpts.Logger()),
 		)
 		if err != nil {
@@ -261,14 +253,7 @@ func NewTrafficEnabler(opts TrafficControlOptions) TrafficController {
 }
 
 func (c *trafficEnabler) Init() error {
-	err := c.value.Watch()
-	if err == nil {
-		return nil
-	}
-	if _, ok := err.(watch.CreateWatchError); ok {
-		return err
-	}
-	return nil
+	return c.value.Watch()
 }
 
 func (c *trafficEnabler) Close() {

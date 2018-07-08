@@ -39,45 +39,14 @@ func TestTrafficControllerWithoutInitialKVValue(t *testing.T) {
 	opts := NewTrafficControlOptions().
 		SetStore(store).
 		SetRuntimeKey(key).
-		SetDefaultValue(true).
 		SetInitTimeout(200 * time.Millisecond)
 	enabler := NewTrafficEnabler(opts).(*trafficEnabler)
-	disabler := NewTrafficDisabler(opts)
-	require.True(t, enabler.enabled.Load())
-	require.True(t, enabler.Allow())
-	require.False(t, disabler.Allow())
-
-	require.NoError(t, enabler.Init())
+	require.Error(t, enabler.Init())
 	defer enabler.Close()
 
-	require.NoError(t, disabler.Init())
+	disabler := NewTrafficDisabler(opts)
+	require.Error(t, disabler.Init())
 	defer disabler.Close()
-
-	_, err := store.Set(key, &commonpb.BoolProto{Value: false})
-	require.NoError(t, err)
-
-	for enabler.enabled.Load() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	require.False(t, enabler.Allow())
-
-	for !disabler.Allow() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	require.True(t, disabler.Allow())
-
-	_, err = store.Set(key, &commonpb.BoolProto{Value: true})
-	require.NoError(t, err)
-
-	for !enabler.enabled.Load() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	require.True(t, enabler.Allow())
-
-	for disabler.Allow() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	require.False(t, disabler.Allow())
 }
 
 func TestTrafficControllerWithInitialKVValue(t *testing.T) {
@@ -91,7 +60,6 @@ func TestTrafficControllerWithInitialKVValue(t *testing.T) {
 	opts := NewTrafficControlOptions().
 		SetStore(store).
 		SetRuntimeKey(key).
-		SetDefaultValue(false).
 		SetInitTimeout(200 * time.Millisecond)
 	enabler := NewTrafficEnabler(opts).(*trafficEnabler)
 	require.NoError(t, enabler.Init())
