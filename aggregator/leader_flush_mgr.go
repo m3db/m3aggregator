@@ -64,6 +64,73 @@ func newLeaderFlushManagerMetrics(scope tally.Scope) leaderFlushManagerMetrics {
 
 type randFn func(int64) int64
 
+type delayHistograms struct {
+	startDelay tally.Histogram
+	fullDelay  tally.Histogram
+}
+
+func newDelayHistograms(scope tally.Scope) *delayHistograms {
+	latencyBuckets := tally.MustMakeLinearDurationBuckets(0, 500*time.Millisecond, 40)
+	return &delayHistograms{
+		startDelay: scope.Histogram("start-flush-delay", latencyBuckets),
+		fullDelay:  scope.Histogram("full-flush-delay", latencyBuckets),
+	}
+}
+
+func (h *delayHistograms) ReportDelay(
+	startDelay time.Duration,
+	fullDelay time.Duration,
+) {
+	h.startDelay.RecordDuration(startDelay)
+	h.fullDelay.RecordDuration(fullDelay)
+}
+
+type delayMetrics struct {
+	sync.RWMutex
+
+	scope      tally.Scope
+	histograms map[latencyBucketKey]*delayHistograms
+}
+
+func newDelayMetrics(scope tally.Scope) delayMetrics {
+	return delayMetrics{
+		scope:      scope,
+		histograms: make(map[latencyBucketKey]*delayHistograms),
+	}
+}
+
+func (m *delayMetrics) ReportDelay(
+	resolution time.Duration,
+	startDelay time.Duration,
+	fullDelay time.Duration,
+) {
+	key := latencyBucketKey{
+		resolution: resolution,
+	}
+	m.RLock()
+	histogram, exists := m.histograms[key]
+	m.RUnlock()
+	if exists {
+		histogram.ReportDelay(startDelay, fullDelay)
+		return
+	}
+	m.Lock()
+	histogram, exists = m.histograms[key]
+	if exists {
+		m.Unlock()
+		histogram.ReportDelay(startDelay, fullDelay)
+		return
+	}
+	histogramScope := m.scope.Tagged(map[string]string{
+		"bucket-version": "1",
+		"resolution":     resolution.String(),
+	})
+	histogram = newDelayHistograms(histogramScope)
+	m.histograms[key] = histogram
+	m.Unlock()
+	histogram.ReportDelay(startDelay, fullDelay)
+}
+
 type leaderFlushManager struct {
 	sync.RWMutex
 
@@ -84,6 +151,8 @@ type leaderFlushManager struct {
 	flushedSincePersist bool
 	flushTask           *leaderFlushTask
 	metrics             leaderFlushManagerMetrics
+
+	delayMetrics delayMetrics
 }
 
 func newLeaderFlushManager(
@@ -107,6 +176,7 @@ func newLeaderFlushManager(
 		flushedByShard:         make(map[uint32]*schema.ShardFlushTimes, defaultInitialFlushCapacity),
 		lastPersistAtNanos:     nowFn().UnixNano(),
 		metrics:                newLeaderFlushManagerMetrics(scope),
+		delayMetrics:           newDelayMetrics(scope),
 	}
 	mgr.flushTask = &leaderFlushTask{
 		mgr:      mgr,
@@ -158,6 +228,16 @@ func (mgr *leaderFlushManager) Prepare(buckets []*flushBucket) (flushTask, time.
 			mgr.flushTimes.Pop()
 			mgr.flushTimes.Push(nextFlushMetadata)
 			mgr.flushedSincePersist = true
+
+			// Record flush delay.
+			bucket := buckets[bucketIdx]
+			if bucket.bucketID.listType == standardMetricListType {
+				mgr.flushTask.shouldRecordDelay = true
+				mgr.flushTask.scheduledStartNanos = earliestFlush.timeNanos
+				mgr.flushTask.resolution = bucket.interval
+			} else {
+				mgr.flushTask.shouldRecordDelay = false
+			}
 		} else {
 			// NB(xichen): don't oversleep if the next flush is about to happen.
 			timeToNextFlush := time.Duration(earliestFlush.timeNanos - nowNanos)
@@ -376,6 +456,10 @@ type leaderFlushTask struct {
 	mgr      *leaderFlushManager
 	duration tally.Timer
 	flushers []flushingMetricList
+
+	shouldRecordDelay   bool
+	scheduledStartNanos int64
+	resolution          time.Duration
 }
 
 func (t *leaderFlushTask) Run() {
@@ -418,7 +502,17 @@ func (t *leaderFlushTask) Run() {
 		})
 	}
 	wgWorkers.Wait()
-	t.duration.Record(mgr.nowFn().Sub(start))
+	end := mgr.nowFn()
+	t.duration.Record(end.Sub(start))
+
+	// Record delay metric.
+	if !t.shouldRecordDelay {
+		return
+	}
+	alignedStartNanos := time.Unix(0, t.scheduledStartNanos).Truncate(t.resolution).UnixNano()
+	startDelay := time.Duration(start.UnixNano() - alignedStartNanos)
+	fullDelay := time.Duration(end.UnixNano() - alignedStartNanos)
+	t.mgr.delayMetrics.ReportDelay(t.resolution, startDelay, fullDelay)
 }
 
 // flushMetadata contains metadata information for a flush.
