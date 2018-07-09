@@ -172,6 +172,7 @@ func (e *GaugeElem) AddUnique(timestamp time.Time, values []float64, sourceID ui
 	if err != nil {
 		return err
 	}
+	//atomic.StoreInt32(&e.isForwardingElem, 1)
 	lockedAgg.Lock()
 	if lockedAgg.closed {
 		lockedAgg.Unlock()
@@ -398,7 +399,24 @@ func (e *GaugeElem) processValueWithAggregationLock(
 		fullPrefix       = e.FullPrefix(e.opts)
 		transformations  = e.parsedPipeline.Transformations
 		discardNaNValues = e.opts.DiscardNaNAggregatedValues()
+		//nowNanos         = e.opts.ClockOptions().NowFn()().UnixNano()
+		//delay            = time.Duration(nowNanos - timeNanos)
+		//electionMgr      = e.opts.ElectionManager()
 	)
+
+	/*
+		// Emit metrics when large delay happens.
+		if atomic.LoadInt32(&e.isForwardingElem) == 0 && e.sp.Resolution().Window == 10*time.Second && delay >= 10*time.Second {
+			if e.largeFlushDelay == nil {
+				scope := e.opts.InstrumentOptions().MetricsScope()
+				e.largeFlush = scope.Counter("large-flush")
+				e.largeFlushDelay = instrument.MustCreateSampledTimer(scope.Timer("large-flush-delay"), 0.01)
+			}
+			e.largeFlush.Inc(1)
+			e.largeFlushDelay.Record(delay)
+		}
+	*/
+
 	for aggTypeIdx, aggType := range e.aggTypes {
 		value := lockedAgg.aggregation.ValueOf(aggType)
 		for i := 0; i < transformations.Len(); i++ {

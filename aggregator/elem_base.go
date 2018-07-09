@@ -152,6 +152,11 @@ type elemBase struct {
 	closed               bool
 	cachedSourceSetsLock sync.Mutex       // nolint: structcheck
 	cachedSourceSets     []*bitset.BitSet // nolint: structcheck
+
+	// Metric to record large delay.
+	//largeFlush       tally.Counter
+	//largeFlushDelay  tally.Timer
+	//isForwardingElem int32
 }
 
 func newElemBase(opts Options) elemBase {
@@ -184,6 +189,7 @@ func (e *elemBase) resetSetData(
 	e.numForwardedTimes = numForwardedTimes
 	e.tombstoned = false
 	e.closed = false
+	//atomic.StoreInt32(&e.isForwardingElem, 0)
 	return nil
 }
 
