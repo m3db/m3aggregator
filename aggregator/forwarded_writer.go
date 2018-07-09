@@ -477,12 +477,10 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 
 			// Record large onDone forwarding delay.
 			if meta.StoragePolicy.Resolution().Window == 10*time.Second {
-				nowNanos := time.Now().UnixNano()
-				delay := time.Duration(nowNanos - metric.TimeNanos)
-				if delay >= 10*time.Second {
-					agg.metrics.largeOnDoneForwardDelay.Inc(1)
-					agg.logger.Infof("onDone id=%s, storagePolicy=%v, timestamp=%v, now=%v", metric.ID, meta.StoragePolicy, time.Unix(0, metric.TimeNanos), time.Unix(0, nowNanos))
-				}
+				agg.logger.Infof(
+					"onDone id=%s, timestamp=%v, now=%v, values=%v, storagePolicy=%v, sourceID=%v",
+					metric.ID, time.Unix(0, metric.TimeNanos), time.Now(), metric.Values, meta.StoragePolicy, meta.SourceID,
+				)
 			}
 
 			if err := agg.client.WriteForwarded(metric, meta); err != nil {

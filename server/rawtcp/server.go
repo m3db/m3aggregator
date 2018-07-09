@@ -184,6 +184,8 @@ func (s *handler) Handle(conn net.Conn) {
 				log.NewField("id", forwardedMetric.ID.String()),
 				log.NewField("timestamp", time.Unix(0, forwardedMetric.TimeNanos).String()),
 				log.NewField("values", forwardedMetric.Values),
+				log.NewField("storagePolicy", forwardMetadata.StoragePolicy),
+				log.NewField("sourceID", forwardMetadata.SourceID),
 				log.NewErrField(err),
 			).Error("error adding forwarded metric")
 		default:
