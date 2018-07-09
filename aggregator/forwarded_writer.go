@@ -23,6 +23,7 @@ package aggregator
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/m3db/m3aggregator/client"
 	"github.com/m3db/m3aggregator/hash"
@@ -31,6 +32,7 @@ import (
 	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/metric/id"
 	xerrors "github.com/m3db/m3x/errors"
+	"github.com/m3db/m3x/log"
 
 	"github.com/uber-go/tally"
 )
@@ -138,12 +140,14 @@ type forwardedWriter struct {
 	aggregations       map[idKey]*forwardedAggregation // Aggregations for each forward metric id
 	metrics            forwardedWriterMetrics
 	aggregationMetrics *forwardedAggregationMetrics
+	logger             log.Logger
 }
 
 func newForwardedWriter(
 	shard uint32,
 	client client.AdminClient,
 	scope tally.Scope,
+	logger log.Logger,
 ) forwardedMetricWriter {
 	return &forwardedWriter{
 		shard:              shard,
@@ -151,6 +155,7 @@ func newForwardedWriter(
 		aggregations:       make(map[idKey]*forwardedAggregation),
 		metrics:            newForwardedWriterMetrics(scope),
 		aggregationMetrics: newForwardedAggregationMetrics(scope.SubScope("aggregations")),
+		logger:             logger,
 	}
 }
 
@@ -168,7 +173,7 @@ func (w *forwardedWriter) Register(
 	key := newIDKey(metricType, metricID)
 	fa, exists := w.aggregations[key]
 	if !exists {
-		fa = newForwardedAggregation(metricType, metricID, w.shard, w.client, w.aggregationMetrics)
+		fa = newForwardedAggregation(metricType, metricID, w.shard, w.client, w.logger, w.aggregationMetrics)
 		w.aggregations[key] = fa
 	}
 	fa.add(aggKey)
@@ -307,24 +312,28 @@ func (agg *forwardedAggregationWithKey) add(timeNanos int64, value float64) {
 }
 
 type forwardedAggregationMetrics struct {
-	added                  tally.Counter
-	removed                tally.Counter
-	write                  tally.Counter
-	onDoneNoWrite          tally.Counter
-	onDoneWriteSuccess     tally.Counter
-	onDoneWriteErrors      tally.Counter
-	onDoneUnexpectedRefCnt tally.Counter
+	added                   tally.Counter
+	removed                 tally.Counter
+	write                   tally.Counter
+	onDoneNoWrite           tally.Counter
+	onDoneWriteSuccess      tally.Counter
+	onDoneWriteErrors       tally.Counter
+	onDoneUnexpectedRefCnt  tally.Counter
+	largeWriteForwardDelay  tally.Counter
+	largeOnDoneForwardDelay tally.Counter
 }
 
 func newForwardedAggregationMetrics(scope tally.Scope) *forwardedAggregationMetrics {
 	return &forwardedAggregationMetrics{
-		added:                  scope.Counter("added"),
-		removed:                scope.Counter("removed"),
-		write:                  scope.Counter("write"),
-		onDoneNoWrite:          scope.Counter("on-done-not-write"),
-		onDoneWriteSuccess:     scope.Counter("on-done-write-success"),
-		onDoneWriteErrors:      scope.Counter("on-done-write-errors"),
-		onDoneUnexpectedRefCnt: scope.Counter("on-done-unexpected-refcnt"),
+		added:                   scope.Counter("added"),
+		removed:                 scope.Counter("removed"),
+		write:                   scope.Counter("write"),
+		onDoneNoWrite:           scope.Counter("on-done-not-write"),
+		onDoneWriteSuccess:      scope.Counter("on-done-write-success"),
+		onDoneWriteErrors:       scope.Counter("on-done-write-errors"),
+		onDoneUnexpectedRefCnt:  scope.Counter("on-done-unexpected-refcnt"),
+		largeWriteForwardDelay:  scope.Counter("large-write-forward-delay"),
+		largeOnDoneForwardDelay: scope.Counter("large-onDone-forward-delay"),
 	}
 }
 
@@ -333,6 +342,7 @@ type forwardedAggregation struct {
 	metricID   id.RawID
 	shard      uint32
 	client     client.AdminClient
+	logger     log.Logger
 
 	byKey    []forwardedAggregationWithKey
 	metrics  *forwardedAggregationMetrics
@@ -345,6 +355,7 @@ func newForwardedAggregation(
 	metricID id.RawID,
 	shard uint32,
 	client client.AdminClient,
+	logger log.Logger,
 	fm *forwardedAggregationMetrics,
 ) *forwardedAggregation {
 	agg := &forwardedAggregation{
@@ -352,6 +363,7 @@ func newForwardedAggregation(
 		metricID:   metricID,
 		shard:      shard,
 		client:     client,
+		logger:     logger,
 		byKey:      make([]forwardedAggregationWithKey, 0, 2),
 		metrics:    fm,
 	}
@@ -420,6 +432,18 @@ func (agg *forwardedAggregation) write(
 	idx := agg.index(key)
 	agg.byKey[idx].add(timeNanos, value)
 	agg.metrics.write.Inc(1)
+
+	/*
+		// Record large write forwarding delay.
+		if key.storagePolicy.Resolution().Window == 10*time.Second {
+			nowNanos := time.Now().UnixNano()
+			delay := time.Duration(nowNanos - timeNanos)
+			if delay >= 10*time.Second {
+				agg.metrics.largeWriteForwardDelay.Inc(1)
+				agg.logger.Infof("writing id=%s, storagePolicy=%v, timestamp=%v, now=%v", agg.metricID, key.storagePolicy, time.Unix(0, timeNanos), time.Unix(0, nowNanos))
+			}
+		}
+	*/
 }
 
 func (agg *forwardedAggregation) onDone(key aggregationKey) error {
@@ -450,6 +474,17 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 				TimeNanos: b.timeNanos,
 				Values:    b.values,
 			}
+
+			// Record large onDone forwarding delay.
+			if meta.StoragePolicy.Resolution().Window == 10*time.Second {
+				nowNanos := time.Now().UnixNano()
+				delay := time.Duration(nowNanos - metric.TimeNanos)
+				if delay >= 10*time.Second {
+					agg.metrics.largeOnDoneForwardDelay.Inc(1)
+					agg.logger.Infof("onDone id=%s, storagePolicy=%v, timestamp=%v, now=%v", metric.ID, meta.StoragePolicy, time.Unix(0, metric.TimeNanos), time.Unix(0, nowNanos))
+				}
+			}
+
 			if err := agg.client.WriteForwarded(metric, meta); err != nil {
 				multiErr = multiErr.Add(err)
 				agg.metrics.onDoneWriteErrors.Inc(1)

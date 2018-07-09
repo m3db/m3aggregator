@@ -199,7 +199,8 @@ func newBaseMetricList(
 		return nil, err
 	}
 	forwardedWriterScope := scope.Tagged(map[string]string{"writer-type": "forwarded"}).SubScope("writer")
-	forwardedWriter := newForwardedWriter(shard, opts.AdminClient(), forwardedWriterScope)
+	logger := opts.InstrumentOptions().Logger()
+	forwardedWriter := newForwardedWriter(shard, opts.AdminClient(), forwardedWriterScope, logger)
 	l := &baseMetricList{
 		shard:            shard,
 		opts:             opts,
