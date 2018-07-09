@@ -18,17 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package router
+package trafficcontrol
 
 import (
 	"time"
 
-	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3cluster/kv"
 	"github.com/m3db/m3cluster/kv/util"
 	"github.com/m3db/m3x/watch"
 
-	"github.com/uber-go/tally"
 	"go.uber.org/atomic"
 )
 
@@ -36,8 +34,8 @@ const (
 	defaultInitTimeout = 2 * time.Second
 )
 
-// TrafficController controls traffic.
-type TrafficController interface {
+// Controller controls traffic.
+type Controller interface {
 	// Allow returns true if traffic is allowed.
 	Allow() bool
 
@@ -51,11 +49,11 @@ type TrafficController interface {
 type trafficEnabler struct {
 	enabled *atomic.Bool
 	value   watch.Value
-	opts    TrafficControlOptions
+	opts    Options
 }
 
-// NewTrafficEnabler creates a new traffic controller.
-func NewTrafficEnabler(opts TrafficControlOptions) TrafficController {
+// NewTrafficEnabler creates a new traffic enabler.
+func NewTrafficEnabler(opts Options) Controller {
 	enabled := atomic.NewBool(opts.DefaultValue())
 	iOpts := opts.InstrumentOptions()
 	newUpdatableFn := func() (watch.Updatable, error) {
@@ -111,60 +109,16 @@ func (c *trafficEnabler) Allow() bool {
 }
 
 type trafficDisabler struct {
-	TrafficController
+	Controller
 }
 
 // NewTrafficDisabler creates a new traffic disabler.
-func NewTrafficDisabler(opts TrafficControlOptions) TrafficController {
+func NewTrafficDisabler(opts Options) Controller {
 	return &trafficDisabler{
-		TrafficController: NewTrafficEnabler(opts),
+		Controller: NewTrafficEnabler(opts),
 	}
 }
 
 func (c *trafficDisabler) Allow() bool {
-	return !c.TrafficController.Allow()
-}
-
-type trafficControlledRouterMetrics struct {
-	trafficControlNotAllowed tally.Counter
-}
-
-func newTrafficControlledRouterMetrics(scope tally.Scope) trafficControlledRouterMetrics {
-	return trafficControlledRouterMetrics{
-		trafficControlNotAllowed: scope.Counter("traffic-control-not-allowed"),
-	}
-}
-
-type trafficControlledRouter struct {
-	TrafficController
-	Router
-
-	m trafficControlledRouterMetrics
-}
-
-// NewTrafficControlledRouter creates a traffic controlled router.
-func NewTrafficControlledRouter(
-	trafficController TrafficController,
-	router Router,
-	scope tally.Scope,
-) Router {
-	return &trafficControlledRouter{
-		TrafficController: trafficController,
-		Router:            router,
-		m:                 newTrafficControlledRouterMetrics(scope),
-	}
-}
-
-func (r *trafficControlledRouter) Route(shard uint32, buffer *common.RefCountedBuffer) error {
-	if !r.TrafficController.Allow() {
-		buffer.DecRef()
-		r.m.trafficControlNotAllowed.Inc(1)
-		return nil
-	}
-	return r.Router.Route(shard, buffer)
-}
-
-func (r *trafficControlledRouter) Close() {
-	r.TrafficController.Close()
-	r.Router.Close()
+	return !c.Controller.Allow()
 }

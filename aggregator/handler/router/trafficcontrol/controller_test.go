@@ -18,13 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package router
+package trafficcontrol
 
 import (
 	"testing"
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3aggregator/aggregator/handler/router"
 	"github.com/m3db/m3cluster/generated/proto/commonpb"
 	"github.com/m3db/m3cluster/kv/mem"
 	"github.com/m3db/m3metrics/encoding/msgpack"
@@ -40,7 +41,7 @@ func TestTrafficControllerWithoutInitialKVValue(t *testing.T) {
 
 	store := mem.NewStore()
 	key := "testKey"
-	opts := NewTrafficControlOptions().
+	opts := NewOptions().
 		SetStore(store).
 		SetRuntimeKey(key).
 		SetDefaultValue(true).
@@ -92,7 +93,7 @@ func TestTrafficControllerWithInitialKVValue(t *testing.T) {
 	_, err := store.Set(key, &commonpb.BoolProto{Value: true})
 	require.NoError(t, err)
 
-	opts := NewTrafficControlOptions().
+	opts := NewOptions().
 		SetStore(store).
 		SetRuntimeKey(key).
 		SetDefaultValue(false).
@@ -138,9 +139,9 @@ func TestTrafficControlledRouter(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	m := NewMockRouter(ctrl)
-	r := NewTrafficControlledRouter(NewTrafficDisabler(
-		NewTrafficControlOptions()),
+	m := router.NewMockRouter(ctrl)
+	r := NewRouter(NewTrafficDisabler(
+		NewOptions()),
 		m,
 		tally.NoopScope,
 	)
@@ -149,8 +150,8 @@ func TestTrafficControlledRouter(t *testing.T) {
 	require.NoError(t, r.Route(1, buf1))
 
 	buf2 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
-	r = NewTrafficControlledRouter(NewTrafficEnabler(
-		NewTrafficControlOptions()),
+	r = NewRouter(NewTrafficEnabler(
+		NewOptions()),
 		m,
 		tally.NoopScope,
 	)

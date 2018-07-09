@@ -29,6 +29,7 @@ import (
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
 	"github.com/m3db/m3aggregator/aggregator/handler/filter"
 	"github.com/m3db/m3aggregator/aggregator/handler/router"
+	"github.com/m3db/m3aggregator/aggregator/handler/router/trafficcontrol"
 	"github.com/m3db/m3aggregator/aggregator/handler/writer"
 	"github.com/m3db/m3aggregator/sharding"
 	"github.com/m3db/m3cluster/client"
@@ -202,7 +203,7 @@ type dynamicBackendConfiguration struct {
 	Filters []consumerServiceFilterConfiguration `yaml:"filters"`
 
 	// TrafficControl configs the traffic controller.
-	TrafficControl *router.TrafficControllerConfiguration `yaml:"trafficControl"`
+	TrafficControl *trafficcontrol.Configuration `yaml:"trafficControl"`
 }
 
 func (c *dynamicBackendConfiguration) NewSharderRouter(
@@ -233,7 +234,7 @@ func (c *dynamicBackendConfiguration) NewSharderRouter(
 		if err != nil {
 			return SharderRouter{}, err
 		}
-		r = router.NewTrafficControlledRouter(tc, r, scope)
+		r = trafficcontrol.NewRouter(tc, r, scope)
 	}
 	return SharderRouter{
 		SharderID: sharding.NewSharderID(c.HashType, c.TotalShards),
@@ -273,7 +274,7 @@ type staticBackendConfiguration struct {
 	DisableValidation bool `yaml:"disableValidation"`
 
 	// TrafficControl configs the traffic controller.
-	TrafficControl *router.TrafficControllerConfiguration `yaml:"trafficControl"`
+	TrafficControl *trafficcontrol.Configuration `yaml:"trafficControl"`
 }
 
 func (c *staticBackendConfiguration) Validate() error {
@@ -325,7 +326,7 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 		queueOpts = queueOpts.SetQueueSize(c.QueueSize)
 	}
 	var (
-		tc  router.TrafficController
+		tc  trafficcontrol.Controller
 		err error
 	)
 	if c.TrafficControl != nil {
@@ -344,7 +345,7 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 		}
 		r := router.NewAllowAllRouter(queue)
 		if tc != nil {
-			r = router.NewTrafficControlledRouter(tc, r, backendScope)
+			r = trafficcontrol.NewRouter(tc, r, backendScope)
 		}
 		return SharderRouter{SharderID: sharding.NoShardingSharderID, Router: r}, nil
 	}
@@ -356,7 +357,7 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 		return SharderRouter{}, err
 	}
 	if tc != nil {
-		sr.Router = router.NewTrafficControlledRouter(tc, sr.Router, backendScope)
+		sr.Router = trafficcontrol.NewRouter(tc, sr.Router, backendScope)
 	}
 	return sr, nil
 }
