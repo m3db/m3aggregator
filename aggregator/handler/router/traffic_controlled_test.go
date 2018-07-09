@@ -22,22 +22,125 @@ package router
 
 import (
 	"testing"
+	"time"
 
 	"github.com/m3db/m3aggregator/aggregator/handler/common"
+	"github.com/m3db/m3cluster/generated/proto/commonpb"
+	"github.com/m3db/m3cluster/kv/mem"
 	"github.com/m3db/m3metrics/encoding/msgpack"
 
+	"github.com/fortytw2/leaktest"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
 )
+
+func TestTrafficControllerWithoutInitialKVValue(t *testing.T) {
+	defer leaktest.Check(t)()
+
+	store := mem.NewStore()
+	key := "testKey"
+	opts := NewTrafficControlOptions().
+		SetStore(store).
+		SetRuntimeKey(key).
+		SetDefaultValue(true).
+		SetInitTimeout(200 * time.Millisecond)
+	enabler := NewTrafficEnabler(opts).(*trafficEnabler)
+	disabler := NewTrafficDisabler(opts)
+	require.True(t, enabler.enabled.Load())
+	require.True(t, enabler.Allow())
+	require.False(t, disabler.Allow())
+
+	require.NoError(t, enabler.Init())
+	defer enabler.Close()
+
+	require.NoError(t, disabler.Init())
+	defer disabler.Close()
+
+	_, err := store.Set(key, &commonpb.BoolProto{Value: false})
+	require.NoError(t, err)
+
+	for enabler.enabled.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.False(t, enabler.Allow())
+
+	for !disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.True(t, disabler.Allow())
+
+	_, err = store.Set(key, &commonpb.BoolProto{Value: true})
+	require.NoError(t, err)
+
+	for !enabler.enabled.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.True(t, enabler.Allow())
+
+	for disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.False(t, disabler.Allow())
+}
+
+func TestTrafficControllerWithInitialKVValue(t *testing.T) {
+	defer leaktest.Check(t)()
+
+	store := mem.NewStore()
+	key := "testKey"
+	_, err := store.Set(key, &commonpb.BoolProto{Value: true})
+	require.NoError(t, err)
+
+	opts := NewTrafficControlOptions().
+		SetStore(store).
+		SetRuntimeKey(key).
+		SetDefaultValue(false).
+		SetInitTimeout(200 * time.Millisecond)
+	enabler := NewTrafficEnabler(opts).(*trafficEnabler)
+	require.NoError(t, enabler.Init())
+	defer enabler.Close()
+
+	disabler := NewTrafficDisabler(opts)
+	require.NoError(t, disabler.Init())
+	defer disabler.Close()
+
+	require.True(t, enabler.enabled.Load())
+	require.True(t, enabler.Allow())
+	require.False(t, disabler.Allow())
+
+	_, err = store.Set(key, &commonpb.BoolProto{Value: false})
+	require.NoError(t, err)
+
+	for enabler.enabled.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.False(t, enabler.Allow())
+	for !disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.True(t, disabler.Allow())
+
+	_, err = store.Set(key, &commonpb.BoolProto{Value: true})
+	require.NoError(t, err)
+
+	for !enabler.enabled.Load() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.True(t, enabler.Allow())
+	for disabler.Allow() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.False(t, disabler.Allow())
+}
 
 func TestTrafficControlledRouter(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	m := NewMockRouter(ctrl)
-	r := NewTrafficControlledRouter(common.NewTrafficDisabler(
-		common.NewTrafficControlOptions()),
+	r := NewTrafficControlledRouter(NewTrafficDisabler(
+		NewTrafficControlOptions()),
 		m,
 		tally.NoopScope,
 	)
@@ -46,8 +149,8 @@ func TestTrafficControlledRouter(t *testing.T) {
 	require.NoError(t, r.Route(1, buf1))
 
 	buf2 := common.NewRefCountedBuffer(msgpack.NewPooledBufferedEncoderSize(nil, 1024))
-	r = NewTrafficControlledRouter(common.NewTrafficEnabler(
-		common.NewTrafficControlOptions()),
+	r = NewTrafficControlledRouter(NewTrafficEnabler(
+		NewTrafficControlOptions()),
 		m,
 		tally.NoopScope,
 	)

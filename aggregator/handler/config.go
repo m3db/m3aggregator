@@ -202,7 +202,7 @@ type dynamicBackendConfiguration struct {
 	Filters []consumerServiceFilterConfiguration `yaml:"filters"`
 
 	// TrafficControl configs the traffic controller.
-	TrafficControl *common.TrafficControllerConfiguration `yaml:"trafficControl"`
+	TrafficControl *router.TrafficControllerConfiguration `yaml:"trafficControl"`
 }
 
 func (c *dynamicBackendConfiguration) NewSharderRouter(
@@ -273,7 +273,7 @@ type staticBackendConfiguration struct {
 	DisableValidation bool `yaml:"disableValidation"`
 
 	// TrafficControl configs the traffic controller.
-	TrafficControl *common.TrafficControllerConfiguration `yaml:"trafficControl"`
+	TrafficControl *router.TrafficControllerConfiguration `yaml:"trafficControl"`
 }
 
 func (c *staticBackendConfiguration) Validate() error {
@@ -325,7 +325,7 @@ func (c *staticBackendConfiguration) NewSharderRouter(
 		queueOpts = queueOpts.SetQueueSize(c.QueueSize)
 	}
 	var (
-		tc  common.TrafficController
+		tc  router.TrafficController
 		err error
 	)
 	if c.TrafficControl != nil {
