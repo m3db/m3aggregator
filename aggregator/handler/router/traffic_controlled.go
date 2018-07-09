@@ -126,12 +126,12 @@ func (c *trafficDisabler) Allow() bool {
 }
 
 type trafficControlledRouterMetrics struct {
-	trafficControlNotAllwed tally.Counter
+	trafficControlNotAllowed tally.Counter
 }
 
 func newTrafficControlledRouterMetrics(scope tally.Scope) trafficControlledRouterMetrics {
 	return trafficControlledRouterMetrics{
-		trafficControlNotAllwed: scope.Counter("traffic-control-not-allowed"),
+		trafficControlNotAllowed: scope.Counter("traffic-control-not-allowed"),
 	}
 }
 
@@ -158,7 +158,7 @@ func NewTrafficControlledRouter(
 func (r *trafficControlledRouter) Route(shard uint32, buffer *common.RefCountedBuffer) error {
 	if !r.TrafficController.Allow() {
 		buffer.DecRef()
-		r.m.trafficControlNotAllwed.Inc(1)
+		r.m.trafficControlNotAllowed.Inc(1)
 		return nil
 	}
 	return r.Router.Route(shard, buffer)
