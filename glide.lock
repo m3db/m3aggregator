@@ -1,5 +1,5 @@
-hash: 60f1802adc203321e158a5ee22c03bf159770d5e1d28dbf87157573dfdc75845
-updated: 2018-07-06T13:30:25.625789-04:00
+hash: 31aa2af5b9f8cc8ee48eddc74336925ceedb353faddba33c71322bffe06fca51
+updated: 2018-07-09T22:23:03.378455-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -188,7 +188,7 @@ imports:
   - services/leader/election
   - shard
 - name: github.com/m3db/m3metrics
-  version: d92603d5788a2012ecfc3f0161deab37462928f8
+  version: 59bb8ba5c8d657265469ea6052a0b0c0ae5d40cc
   subpackages:
   - aggregation
   - encoding
@@ -351,6 +351,8 @@ imports:
   - trace
 - name: golang.org/x/sys
   version: d4feaf1a7e61e1d9e79e6c4e76c6349e9cab0a03
+  subpackages:
+  - unix
 - name: golang.org/x/text
   version: 4ee4af566555f5fbe026368b75596286a312663a
   subpackages:
