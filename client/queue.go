@@ -129,7 +129,7 @@ func newInstanceQueue(instance placement.Instance, opts Options) instanceQueue {
 		scope              = instrumentOpts.MetricsScope()
 		connInstrumentOpts = instrumentOpts.SetMetricsScope(scope.SubScope("connection"))
 		connOpts           = opts.ConnectionOptions().SetInstrumentOptions(connInstrumentOpts)
-		conn               = newConnection(instance.Endpoint(), connOpts)
+		conn               = newConnection(instance.Endpoint(), connOpts, opts.EncoderOptions())
 		iOpts              = opts.InstrumentOptions()
 		queueSize          = opts.InstanceQueueSize()
 	)

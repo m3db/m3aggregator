@@ -22,6 +22,7 @@ package rawtcp
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"math/rand"
@@ -120,6 +121,14 @@ func (s *handler) Handle(conn net.Conn) {
 	it := migration.NewUnaggregatedIterator(reader, s.msgpackItOpts, s.protobufItOpts)
 	defer it.Close()
 
+	s.handlerWithIterator(it, remoteAddress, 0)
+}
+
+func (s *handler) handlerWithIterator(
+	it migration.UnaggregatedIterator,
+	remoteAddress string,
+	connWriteAtNanos int64,
+) {
 	// Iterate over the incoming metrics stream and queue up metrics.
 	var (
 		untimedMetric   unaggregated.MetricUnion
@@ -147,6 +156,27 @@ func (s *handler) Handle(conn net.Conn) {
 			forwardedMetric = current.ForwardedMetricWithMetadata.ForwardedMetric
 			forwardMetadata = current.ForwardedMetricWithMetadata.ForwardMetadata
 			err = toAddForwardedError(s.aggregator.AddForwarded(forwardedMetric, forwardMetadata))
+
+			s.log.WithFields(
+				log.NewField("remoteAddress", remoteAddress),
+				log.NewField("id", forwardedMetric.ID.String()),
+				log.NewField("timestamp", time.Unix(0, forwardedMetric.TimeNanos).String()),
+				log.NewField("values", forwardedMetric.Values),
+				log.NewField("storagePolicy", forwardMetadata.StoragePolicy),
+				log.NewField("sourceID", forwardMetadata.SourceID),
+				log.NewField("sourceFlushAt", time.Unix(0, forwardMetadata.FlushAtNanos).String()),
+				log.NewField("sourceConnWriteAt", time.Unix(0, connWriteAtNanos).String()),
+				log.NewErrField(err),
+			).Info("adding untimed metric")
+
+		case encoding.RawBytesWithConnWriteTimeType:
+			rawBytesWithConnWriteTime := current.RawBytesWithConnWriteTime
+			connWriteAtNanos := rawBytesWithConnWriteTime.ConnWriteAtNanos
+			buffer := bytes.NewBuffer(rawBytesWithConnWriteTime.Data)
+			tmpIt := migration.NewUnaggregatedIterator(buffer, s.msgpackItOpts, s.protobufItOpts)
+			s.handlerWithIterator(tmpIt, remoteAddress, connWriteAtNanos)
+			tmpIt.Close()
+			err = nil
 		default:
 			err = newUnknownMessageTypeError(current.Type)
 		}

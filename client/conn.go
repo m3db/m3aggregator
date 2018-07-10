@@ -27,7 +27,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/m3db/m3metrics/metric/aggregated"
+
+	"github.com/m3db/m3metrics/encoding"
+	"github.com/m3db/m3metrics/encoding/protobuf"
 	"github.com/m3db/m3x/clock"
+	"github.com/m3db/m3x/log"
 	"github.com/m3db/m3x/retry"
 
 	"github.com/uber-go/tally"
@@ -60,6 +65,8 @@ type connection struct {
 	maxDuration    time.Duration
 	writeRetryOpts retry.Options
 	rngFn          retry.RngFn
+	encoder        *lockedEncoder
+	logger         log.Logger
 
 	conn                    *net.TCPConn
 	numFailures             int
@@ -75,7 +82,7 @@ type connection struct {
 }
 
 // newConnection creates a new connection.
-func newConnection(addr string, opts ConnectionOptions) *connection {
+func newConnection(addr string, opts ConnectionOptions, encoderOpts protobuf.UnaggregatedOptions) *connection {
 	c := &connection{
 		addr:           addr,
 		connTimeout:    opts.ConnectionTimeout(),
@@ -91,6 +98,8 @@ func newConnection(addr string, opts ConnectionOptions) *connection {
 		sleepFn:        time.Sleep,
 		threshold:      opts.InitReconnectThreshold(),
 		metrics:        newConnectionMetrics(opts.InstrumentOptions().MetricsScope()),
+		encoder:        newLockedEncoder(encoderOpts),
+		logger:         opts.InstrumentOptions().Logger(),
 	}
 	c.connectWithLockFn = c.connectWithLock
 	c.writeWithLockFn = c.writeWithLock
@@ -215,7 +224,20 @@ func (c *connection) writeWithLock(data []byte) error {
 	if err := c.conn.SetWriteDeadline(c.nowFn().Add(c.writeTimeout)); err != nil {
 		c.metrics.setWriteDeadlineError.Inc(1)
 	}
-	if _, err := c.conn.Write(data); err != nil {
+	connWriteAtNanos := c.nowFn().UnixNano()
+	msg := encoding.UnaggregatedMessageUnion{
+		Type: encoding.RawBytesWithConnWriteTimeType,
+		RawBytesWithConnWriteTime: aggregated.RawBytesWithConnWriteTime{
+			Data:             data,
+			ConnWriteAtNanos: connWriteAtNanos,
+		},
+	}
+	if err := c.encoder.EncodeMessage(msg); err != nil {
+		c.logger.Errorf("unable to encode message %v at %v: %v", msg, time.Unix(0, connWriteAtNanos), err)
+		return err
+	}
+	buf := c.encoder.Relinquish()
+	if _, err := c.conn.Write(buf.Bytes()); err != nil {
 		c.metrics.writeError.Inc(1)
 		return err
 	}

@@ -23,6 +23,7 @@ package aggregator
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/m3db/m3aggregator/client"
 	"github.com/m3db/m3aggregator/hash"
@@ -483,7 +484,8 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 					)
 				}
 			*/
-
+			flushAtNanos := time.Now().UnixNano()
+			meta.FlushAtNanos = flushAtNanos
 			if err := agg.client.WriteForwarded(metric, meta); err != nil {
 				multiErr = multiErr.Add(err)
 				agg.metrics.onDoneWriteErrors.Inc(1)
