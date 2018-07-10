@@ -23,7 +23,6 @@ package aggregator
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/m3db/m3aggregator/client"
 	"github.com/m3db/m3aggregator/hash"
@@ -475,13 +474,15 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 				Values:    b.values,
 			}
 
-			// Record large onDone forwarding delay.
-			if meta.StoragePolicy.Resolution().Window == 10*time.Second {
-				agg.logger.Infof(
-					"onDone id=%s, timestamp=%v, now=%v, values=%v, storagePolicy=%v, sourceID=%v",
-					metric.ID, time.Unix(0, metric.TimeNanos), time.Now(), metric.Values, meta.StoragePolicy, meta.SourceID,
-				)
-			}
+			/*
+				// Record large onDone forwarding delay.
+				if meta.StoragePolicy.Resolution().Window == 10*time.Second {
+					agg.logger.Infof(
+						"onDone id=%s, timestamp=%v, now=%v, values=%v, storagePolicy=%v, sourceID=%v",
+						metric.ID, time.Unix(0, metric.TimeNanos), time.Now(), metric.Values, meta.StoragePolicy, meta.SourceID,
+					)
+				}
+			*/
 
 			if err := agg.client.WriteForwarded(metric, meta); err != nil {
 				multiErr = multiErr.Add(err)
