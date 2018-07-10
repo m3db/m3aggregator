@@ -121,13 +121,14 @@ func (s *handler) Handle(conn net.Conn) {
 	it := migration.NewUnaggregatedIterator(reader, s.msgpackItOpts, s.protobufItOpts)
 	defer it.Close()
 
-	s.handlerWithIterator(it, remoteAddress, 0)
+	s.handlerWithIterator(it, remoteAddress, 0, 0)
 }
 
 func (s *handler) handlerWithIterator(
 	it migration.UnaggregatedIterator,
 	remoteAddress string,
 	connWriteAtNanos int64,
+	readAtNanos int64,
 ) {
 	// Iterate over the incoming metrics stream and queue up metrics.
 	var (
@@ -160,7 +161,7 @@ func (s *handler) handlerWithIterator(
 			rawBytesWithConnWriteTime := current.RawBytesWithConnWriteTime
 			buffer := bytes.NewBuffer(rawBytesWithConnWriteTime.Data)
 			tmpIt := migration.NewUnaggregatedIterator(buffer, s.msgpackItOpts, s.protobufItOpts)
-			s.handlerWithIterator(tmpIt, remoteAddress, rawBytesWithConnWriteTime.ConnWriteAtNanos)
+			s.handlerWithIterator(tmpIt, remoteAddress, rawBytesWithConnWriteTime.ConnWriteAtNanos, time.Now().UnixNano())
 			tmpIt.Close()
 			err = nil
 		default:
@@ -204,6 +205,7 @@ func (s *handler) handlerWithIterator(
 				log.NewField("sourceID", forwardMetadata.SourceID),
 				log.NewField("sourceFlushAt", time.Unix(0, forwardMetadata.FlushAtNanos).String()),
 				log.NewField("sourceConnWriteAt", time.Unix(0, connWriteAtNanos).String()),
+				log.NewField("readAt", time.Unix(0, readAtNanos).String()),
 				log.NewErrField(err),
 			).Error("error adding forwarded metric")
 		default:
