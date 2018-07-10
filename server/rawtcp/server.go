@@ -166,7 +166,6 @@ func (s *handler) handlerWithIterator(
 				log.NewField("sourceID", forwardMetadata.SourceID),
 				log.NewField("sourceFlushAt", time.Unix(0, forwardMetadata.FlushAtNanos).String()),
 				log.NewField("sourceConnWriteAt", time.Unix(0, connWriteAtNanos).String()),
-				log.NewErrField(err),
 			).Info("adding untimed metric")
 
 		case encoding.RawBytesWithConnWriteTimeType:
