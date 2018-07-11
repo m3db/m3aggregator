@@ -802,13 +802,15 @@ func TestAggregatorAddMetricMetrics(t *testing.T) {
 	m.ReportError(errAggregatorShardNotWriteable)
 	m.ReportError(errWriteNewMetricRateLimitExceeded)
 	m.ReportError(errWriteValueRateLimitExceeded)
+	m.ReportError(errNoApplicableMetadata)
+	m.ReportError(errEmptyMetadatas)
 	m.ReportError(errors.New("foo"))
 
 	snapshot := s.Snapshot()
 	counters, timers, gauges := snapshot.Counters(), snapshot.Timers(), snapshot.Gauges()
 
 	// Validate we count successes and errors correctly.
-	require.Equal(t, 7, len(counters))
+	require.Equal(t, 9, len(counters))
 	for _, id := range []string{
 		"testScope.success+",
 		"testScope.errors+reason=invalid-metric-types",
@@ -816,6 +818,8 @@ func TestAggregatorAddMetricMetrics(t *testing.T) {
 		"testScope.errors+reason=shard-not-writeable",
 		"testScope.errors+reason=value-rate-limit-exceeded",
 		"testScope.errors+reason=new-metric-rate-limit-exceeded",
+		"testScope.errors+reason=no-applicable-metadata",
+		"testScope.errors+reason=empty-metadatas",
 		"testScope.errors+reason=not-categorized",
 	} {
 		c, exists := counters[id]
