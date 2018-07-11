@@ -38,18 +38,20 @@ import (
 )
 
 var (
-	defaultMetricPrefix               = []byte("stats.")
-	defaultCounterPrefix              = []byte("counts.")
-	defaultTimerPrefix                = []byte("timers.")
-	defaultGaugePrefix                = []byte("gauges.")
-	defaultEntryTTL                   = 24 * time.Hour
-	defaultEntryCheckInterval         = time.Hour
-	defaultEntryCheckBatchPercent     = 0.01
-	defaultMaxTimerBatchSizePerWrite  = 0
-	defaultMaxNumCachedSourceSets     = 2
-	defaultDiscardNaNAggregatedValues = true
-	defaultResignTimeout              = 5 * time.Minute
-	defaultDefaultStoragePolicies     = []policy.StoragePolicy{
+	defaultMetricPrefix                                = []byte("stats.")
+	defaultCounterPrefix                               = []byte("counts.")
+	defaultTimerPrefix                                 = []byte("timers.")
+	defaultGaugePrefix                                 = []byte("gauges.")
+	defaultEntryTTL                                    = 24 * time.Hour
+	defaultEntryCheckInterval                          = time.Hour
+	defaultEntryCheckBatchPercent                      = 0.01
+	defaultMaxTimerBatchSizePerWrite                   = 0
+	defaultMaxForwardingWindows                        = 10
+	defaultForwardingSourcesTTLInMultiplesOfResolution = 10
+	defaultForwardingSourcesTTLInDuration              = 5 * time.Minute
+	defaultDiscardNaNAggregatedValues                  = true
+	defaultResignTimeout                               = 5 * time.Minute
+	defaultDefaultStoragePolicies                      = []policy.StoragePolicy{
 		policy.NewStoragePolicy(10*time.Second, xtime.Second, 2*24*time.Hour),
 		policy.NewStoragePolicy(time.Minute, xtime.Minute, 40*24*time.Hour),
 	}
@@ -74,6 +76,9 @@ var (
 // if any, flushing delay, queuing delay, encoding delay, network delay, decoding delay at
 // destination server, and ingestion delay at the destination server.
 type MaxAllowedForwardingDelayFn func(resolution time.Duration, numForwardedTimes int) time.Duration
+
+// ForwardingSourcesTTLFn returns the ttl for forwarding sources given a storage policy.
+type ForwardingSourcesTTLFn func(storagePolicy policy.StoragePolicy) time.Duration
 
 // Options provide a set of base and derived options for the aggregator.
 type Options interface {
@@ -251,19 +256,11 @@ type Options interface {
 	// for an aggregation window, it can flush the forwarded metric as soon as possible.
 	MaxAggregationWindowsForOptimisticForwarding() int
 
-	// SetForwardingSourcesTTL sets the ttl for forwarding sources.
-	// TODO(xichen): TTL should be a function of aggregation window size, e.g., 10 agg windows.
-	SetForwardingSourcesTTL(value time.Duration) Options
+	// SetForwardingSourcesTTLFn sets the ttl function for forwarding sources.
+	SetForwardingSourcesTTLFn(value ForwardingSourcesTTLFn) Options
 
-	// ForwardingSourcesTTL returns the ttl for forwarding sources.
-	ForwardingSourcesTTL() time.Duration
-
-	// SetForwardingSourcesWarmupDuration sets the warmup duration for building the source set.
-	// TODO(xichen): Warmup duration should be a function of aggregation window size.
-	SetForwardingSourcesWarmupDuration(value time.Duration) Options
-
-	// ForwardingSourcesWarmupDuration returns the warmup duration for building the source set.
-	ForwardingSourcesWarmupDuration() time.Duration
+	// ForwardingSourcesTTLFn returns the ttl function for forwarding sources.
+	ForwardingSourcesTTLFn() ForwardingSourcesTTLFn
 
 	// SetDiscardNaNAggregatedValues determines whether NaN aggregated values are discarded.
 	SetDiscardNaNAggregatedValues(value bool) Options
@@ -335,7 +332,8 @@ type options struct {
 	electionManager                  ElectionManager
 	resignTimeout                    time.Duration
 	maxAllowedForwardingDelayFn      MaxAllowedForwardingDelayFn
-	maxNumCachedSourceSets           int
+	maxForwardingWindows             int
+	forwardingSourcesTTLFn           ForwardingSourcesTTLFn
 	discardNaNAggregatedValues       bool
 	entryPool                        EntryPool
 	counterElemPool                  CounterElemPool
@@ -376,7 +374,8 @@ func NewOptions() Options {
 		defaultStoragePolicies:           defaultDefaultStoragePolicies,
 		resignTimeout:                    defaultResignTimeout,
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
-		maxNumCachedSourceSets:           defaultMaxNumCachedSourceSets,
+		maxForwardingWindows:             defaultMaxForwardingWindows,
+		forwardingSourcesTTLFn:           defaultForwardingSourcesTTLFn,
 		discardNaNAggregatedValues:       defaultDiscardNaNAggregatedValues,
 	}
 
@@ -653,14 +652,24 @@ func (o *options) MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn {
 	return o.maxAllowedForwardingDelayFn
 }
 
-func (o *options) SetMaxNumCachedSourceSets(value int) Options {
+func (o *options) SetMaxAggregationWindowsForOptimisticForwarding(value int) Options {
 	opts := *o
-	opts.maxNumCachedSourceSets = value
+	opts.maxForwardingWindows = value
 	return &opts
 }
 
-func (o *options) MaxNumCachedSourceSets() int {
-	return o.maxNumCachedSourceSets
+func (o *options) MaxAggregationWindowsForOptimisticForwarding() int {
+	return o.maxForwardingWindows
+}
+
+func (o *options) SetForwardingSourcesTTLFn(value ForwardingSourcesTTLFn) Options {
+	opts := *o
+	opts.forwardingSourcesTTLFn = value
+	return &opts
+}
+
+func (o *options) ForwardingSourcesTTLFn() ForwardingSourcesTTLFn {
+	return o.forwardingSourcesTTLFn
 }
 
 func (o *options) SetDiscardNaNAggregatedValues(value bool) Options {
@@ -738,17 +747,17 @@ func (o *options) initPools() {
 
 	o.counterElemPool = NewCounterElemPool(nil)
 	o.counterElemPool.Init(func() *CounterElem {
-		return MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewCounterElem(standardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
 	})
 
 	o.timerElemPool = NewTimerElemPool(nil)
 	o.timerElemPool.Init(func() *TimerElem {
-		return MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewTimerElem(standardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
 	})
 
 	o.gaugeElemPool = NewGaugeElemPool(nil)
 	o.gaugeElemPool.Init(func() *GaugeElem {
-		return MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewGaugeElem(standardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
 	})
 }
 
@@ -788,4 +797,12 @@ func defaultMaxAllowedForwardingDelayFn(
 	numForwardedTimes int,
 ) time.Duration {
 	return resolution * time.Duration(numForwardedTimes)
+}
+
+func defaultForwardingSourcesTTLFn(storagePolicy policy.StoragePolicy) time.Duration {
+	dur1 := time.Duration(defaultForwardingSourcesTTLInMultiplesOfResolution) * storagePolicy.Resolution().Window
+	if dur1 >= defaultForwardingSourcesTTLInDuration {
+		return dur1
+	}
+	return defaultForwardingSourcesTTLInDuration
 }

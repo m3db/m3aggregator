@@ -508,21 +508,18 @@ func (e *GaugeElem) isSourcesSetReadyWithLock() bool {
 	if e.buildingSourcesAtNanos == 0 {
 		return false
 	}
-	dur := time.Duration(e.nowFn().UnixNano() - e.buildingSourcesAtNanos)
-	return dur >= e.opts.ForwardingSourcesWarmupDuration()
+	// NB: Allow TTL for the source set to build up.
+	return e.nowFn().UnixNano() >= e.buildingSourcesAtNanos+e.sourcesTTLNanos
 }
 
 func (e *GaugeElem) maybeRefreshSourcesSetWithLock() {
-	var (
-		nowNanos = e.nowFn().UnixNano()
-		ttlNanos = e.opts.ForwardingSourcesTTL().Nanoseconds()
-	)
-	if nowNanos-e.lastSourcesRefreshNanos < ttlNanos {
+	nowNanos := e.nowFn().UnixNano()
+	if nowNanos-e.lastSourcesRefreshNanos < e.sourcesTTLNanos {
 		return
 	}
 	e.sourcesLock.Lock()
 	for sourceID, lastHeartbeatNanos := range e.sourcesHeartbeat {
-		if nowNanos-lastHeartbeatNanos >= ttlNanos {
+		if nowNanos-lastHeartbeatNanos >= e.sourcesTTLNanos {
 			delete(e.sourcesHeartbeat, sourceID)
 			e.sourcesSet.Clear(uint(sourceID))
 		}

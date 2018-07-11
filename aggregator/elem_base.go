@@ -168,6 +168,7 @@ type elemBase struct {
 	sourcesLock             sync.Mutex
 	sourcesHeartbeat        map[uint32]int64
 	sourcesSet              *bitset.BitSet
+	sourcesTTLNanos         int64
 	buildingSourcesAtNanos  int64
 	lastSourcesRefreshNanos int64
 }
@@ -207,6 +208,7 @@ func (e *elemBase) resetSetData(
 	e.closed = false
 	e.sourcesHeartbeat = nil
 	e.sourcesSet = nil
+	e.sourcesTTLNanos = e.opts.ForwardingSourcesTTLFn()(sp).Nanoseconds()
 	e.buildingSourcesAtNanos = 0
 	e.lastSourcesRefreshNanos = 0
 	return nil
