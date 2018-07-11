@@ -48,6 +48,9 @@ type typeSpecificAggregation interface {
 	// AddUnion adds a new metric value union.
 	AddUnion(mu unaggregated.MetricUnion)
 
+	// Count returns the number of values in the aggregation.
+	Count() int64
+
 	// ValueOf returns the value for the given aggregation type.
 	ValueOf(aggType maggregation.Type) float64
 
@@ -504,6 +507,9 @@ func (e *GenericElem) processValueWithAggregationLock(
 	flushLocalFn flushLocalMetricFn,
 	flushForwardedFn flushForwardedMetricFn,
 ) {
+	if lockedAgg.aggregation.Count() == 0 {
+		return
+	}
 	var (
 		fullPrefix       = e.FullPrefix(e.opts)
 		transformations  = e.parsedPipeline.Transformations

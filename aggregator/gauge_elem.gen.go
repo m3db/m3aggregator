@@ -458,6 +458,9 @@ func (e *GaugeElem) processValueWithAggregationLock(
 	flushLocalFn flushLocalMetricFn,
 	flushForwardedFn flushForwardedMetricFn,
 ) {
+	if lockedAgg.aggregation.Count() == 0 {
+		return
+	}
 	var (
 		fullPrefix       = e.FullPrefix(e.opts)
 		transformations  = e.parsedPipeline.Transformations
