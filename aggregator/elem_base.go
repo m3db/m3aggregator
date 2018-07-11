@@ -35,8 +35,8 @@ import (
 	mpipeline "github.com/m3db/m3metrics/pipeline"
 	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
+	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/pool"
-
 	"github.com/willf/bitset"
 )
 
@@ -55,24 +55,36 @@ const (
 )
 
 var (
-	nan                          = math.NaN()
-	errElemClosed                = errors.New("element is closed")
-	errAggregationClosed         = errors.New("aggregation is closed")
-	errDuplicateForwardingSource = errors.New("duplicate forwarding source")
+	nan                               = math.NaN()
+	errElemClosed                     = errors.New("element is closed")
+	errAggregationClosed              = errors.New("aggregation is closed")
+	errDuplicateOrNewForwardingSource = errors.New("duplicate or new forwarding source")
+	errDuplicateForwardingSource      = errors.New("duplicate forwarding source")
 )
 
 // isEarlierThanFn determines whether the timestamps of the metrics in a given
 // aggregation window are earlier than the given target time.
-type isEarlierThanFn func(windowStartNanos int64, resolution time.Duration, targetNanos int64) bool
+type isEarlierThanFn func(sourceNanos int64, targetNanos int64) bool
 
 // timestampNanosFn determines the final timestamps of metrics in a given aggregation
 // window with a given resolution.
 type timestampNanosFn func(windowStartNanos int64, resolution time.Duration) int64
 
-type createAggregationOptions struct {
-	// initSourceSet determines whether to initialize the source set.
-	initSourceSet bool
+type sourcesOptions struct {
+	// updateSource determines whether to update the source set.
+	updateSources bool
+	// source is the source of the metric.
+	source uint32
 }
+
+type consumeState int
+
+const (
+	notReadyToConsume consumeState = iota
+	readyToConsume
+	consuming
+	consumed
+)
 
 // metricElem is the common interface for metric elements.
 type metricElem interface {
@@ -90,6 +102,7 @@ type metricElem interface {
 
 	// ResetSetData resets the element and sets data.
 	ResetSetData(
+		incomingMetricType incomingMetricType,
 		id id.RawID,
 		sp policy.StoragePolicy,
 		aggTypes maggregation.Types,
@@ -136,7 +149,9 @@ type elemBase struct {
 
 	// Immutable states.
 	opts                            Options
+	nowFn                           clock.NowFn
 	aggTypesOpts                    maggregation.TypesOptions
+	incomingMetricType              incomingMetricType
 	id                              id.RawID
 	sp                              policy.StoragePolicy
 	useDefaultAggregation           bool
@@ -148,15 +163,19 @@ type elemBase struct {
 	onForwardedAggregationWrittenFn onForwardedAggregationDoneFn
 
 	// Mutable states.
-	tombstoned           bool
-	closed               bool
-	cachedSourceSetsLock sync.Mutex       // nolint: structcheck
-	cachedSourceSets     []*bitset.BitSet // nolint: structcheck
+	tombstoned              bool
+	closed                  bool
+	sourcesLock             sync.Mutex
+	sourcesHeartbeat        map[uint32]int64
+	sourcesSet              *bitset.BitSet
+	buildingSourcesAtNanos  int64
+	lastSourcesRefreshNanos int64
 }
 
 func newElemBase(opts Options) elemBase {
 	return elemBase{
 		opts:         opts,
+		nowFn:        opts.ClockOptions().NowFn(),
 		aggTypesOpts: opts.AggregationTypesOptions(),
 		aggOpts:      raggregation.NewOptions(),
 	}
@@ -164,6 +183,7 @@ func newElemBase(opts Options) elemBase {
 
 // resetSetData resets the element base and sets data.
 func (e *elemBase) resetSetData(
+	incomingMetricType incomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -175,6 +195,7 @@ func (e *elemBase) resetSetData(
 	if err != nil {
 		return err
 	}
+	e.incomingMetricType = incomingMetricType
 	e.id = id
 	e.sp = sp
 	e.aggTypes = aggTypes
@@ -184,6 +205,10 @@ func (e *elemBase) resetSetData(
 	e.numForwardedTimes = numForwardedTimes
 	e.tombstoned = false
 	e.closed = false
+	e.sourcesHeartbeat = nil
+	e.sourcesSet = nil
+	e.buildingSourcesAtNanos = 0
+	e.lastSourcesRefreshNanos = 0
 	return nil
 }
 

@@ -287,7 +287,7 @@ func (mgr *flushManager) findOrCreateBucketWithLock(l flushingMetricList) (*flus
 		flushOffset = mgr.computeFlushIntervalOffset(flushInterval)
 	}
 	scope := mgr.scope.SubScope("bucket").Tagged(map[string]string{
-		"bucket-type": bucketID.listType.String(),
+		"bucket-type": bucketID.incomingMetricType.String(),
 		"interval":    flushInterval.String(),
 	})
 	bucket = newBucket(bucketID, flushInterval, flushOffset, scope)

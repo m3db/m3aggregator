@@ -237,11 +237,33 @@ type Options interface {
 	// delay for given metric resolution and number of times the metric has been forwarded.
 	MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn
 
-	// SetMaxNumCachedSourceSets sets the maximum number of cached source sets.
-	SetMaxNumCachedSourceSets(value int) Options
+	// SetMaxAggregationWindowsForOptimisticForwarding sets the maximum aggregation windows
+	// for which we always forward metrics to notify the destination server where the forwarded
+	// metrics are stored of the liveliness of the source for the purpose of optimistic flushing.
+	// This is so that when the destination server has received results from all expected sources,
+	// it can flush the forwarded metric as soon as possible.
+	SetMaxAggregationWindowsForOptimisticForwarding(value int) Options
 
-	// MaxNumCachedSourceSets returns the maximum number of cached source sets.
-	MaxNumCachedSourceSets() int
+	// MaxAggregationWindowsForOptimisticForwarding returns the maximum aggregation windows
+	// for which we always forward metrics to notify the destination server where the forwarded
+	// metrics are stored of the liveliness of the source for the purpose of optimistic flushing.
+	// This is so that when the destination server has received results from all expected sources
+	// for an aggregation window, it can flush the forwarded metric as soon as possible.
+	MaxAggregationWindowsForOptimisticForwarding() int
+
+	// SetForwardingSourcesTTL sets the ttl for forwarding sources.
+	// TODO(xichen): TTL should be a function of aggregation window size, e.g., 10 agg windows.
+	SetForwardingSourcesTTL(value time.Duration) Options
+
+	// ForwardingSourcesTTL returns the ttl for forwarding sources.
+	ForwardingSourcesTTL() time.Duration
+
+	// SetForwardingSourcesWarmupDuration sets the warmup duration for building the source set.
+	// TODO(xichen): Warmup duration should be a function of aggregation window size.
+	SetForwardingSourcesWarmupDuration(value time.Duration) Options
+
+	// ForwardingSourcesWarmupDuration returns the warmup duration for building the source set.
+	ForwardingSourcesWarmupDuration() time.Duration
 
 	// SetDiscardNaNAggregatedValues determines whether NaN aggregated values are discarded.
 	SetDiscardNaNAggregatedValues(value bool) Options
