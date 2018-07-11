@@ -519,9 +519,9 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 		lastWriteNanos = agg.byKey[idx].lastWriteNanos
 		for agg.isEarlierThanFn(currWriteNanos, agg.targetFlushNanos) || bucketIdx < len(agg.byKey[idx].bucketsByTimeAsc) {
 			var compareResult int
-			if !agg.isEarlierThanFn(currWriteNanos, agg.targetFlushNanos) {
+			if bucketIdx >= len(agg.byKey[idx].bucketsByTimeAsc) {
 				compareResult = -1
-			} else if bucketIdx >= len(agg.byKey[idx].bucketsByTimeAsc) {
+			} else if !agg.isEarlierThanFn(currWriteNanos, agg.targetFlushNanos) {
 				compareResult = 1
 			} else {
 				if currWriteNanos == agg.byKey[idx].bucketsByTimeAsc[bucketIdx].timeNanos {
