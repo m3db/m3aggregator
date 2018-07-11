@@ -102,7 +102,7 @@ type metricElem interface {
 
 	// ResetSetData resets the element and sets data.
 	ResetSetData(
-		incomingMetricType incomingMetricType,
+		IncomingMetricType IncomingMetricType,
 		id id.RawID,
 		sp policy.StoragePolicy,
 		aggTypes maggregation.Types,
@@ -151,7 +151,7 @@ type elemBase struct {
 	opts                            Options
 	nowFn                           clock.NowFn
 	aggTypesOpts                    maggregation.TypesOptions
-	incomingMetricType              incomingMetricType
+	IncomingMetricType              IncomingMetricType
 	id                              id.RawID
 	sp                              policy.StoragePolicy
 	useDefaultAggregation           bool
@@ -184,7 +184,7 @@ func newElemBase(opts Options) elemBase {
 
 // resetSetData resets the element base and sets data.
 func (e *elemBase) resetSetData(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -196,7 +196,7 @@ func (e *elemBase) resetSetData(
 	if err != nil {
 		return err
 	}
-	e.incomingMetricType = incomingMetricType
+	e.IncomingMetricType = IncomingMetricType
 	e.id = id
 	e.sp = sp
 	e.aggTypes = aggTypes

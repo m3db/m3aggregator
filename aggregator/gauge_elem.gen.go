@@ -90,7 +90,7 @@ type GaugeElem struct {
 
 // NewGaugeElem creates a new element for the given metric type.
 func NewGaugeElem(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -102,7 +102,7 @@ func NewGaugeElem(
 		elemBase: newElemBase(opts),
 		values:   make([]timedGauge, 0, defaultNumAggregations), // in most cases values will have two entries
 	}
-	if err := e.ResetSetData(incomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes); err != nil {
+	if err := e.ResetSetData(IncomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -110,7 +110,7 @@ func NewGaugeElem(
 
 // MustNewGaugeElem creates a new element, or panics if the input is invalid.
 func MustNewGaugeElem(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -118,7 +118,7 @@ func MustNewGaugeElem(
 	numForwardedTimes int,
 	opts Options,
 ) *GaugeElem {
-	elem, err := NewGaugeElem(incomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes, opts)
+	elem, err := NewGaugeElem(IncomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes, opts)
 	if err != nil {
 		panic(fmt.Errorf("unable to create element: %v", err))
 	}
@@ -127,7 +127,7 @@ func MustNewGaugeElem(
 
 // ResetSetData resets the element and sets data.
 func (e *GaugeElem) ResetSetData(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -138,7 +138,7 @@ func (e *GaugeElem) ResetSetData(
 	if useDefaultAggregation {
 		aggTypes = e.DefaultAggregationTypes(e.aggTypesOpts)
 	}
-	if err := e.elemBase.resetSetData(incomingMetricType, id, sp, aggTypes, useDefaultAggregation, pipeline, numForwardedTimes); err != nil {
+	if err := e.elemBase.resetSetData(IncomingMetricType, id, sp, aggTypes, useDefaultAggregation, pipeline, numForwardedTimes); err != nil {
 		return err
 	}
 	if err := e.gaugeElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation); err != nil {
@@ -278,7 +278,7 @@ func (e *GaugeElem) Consume(
 	// go to such aggregation buckets after they are consumed and therefore avoid the aformentioned
 	// problem.
 	aggregationIdxToCloseUntil := len(e.toConsume)
-	if e.incomingMetricType == forwardedIncomingMetric && e.isSourcesSetReadyWithLock() {
+	if e.IncomingMetricType == ForwardedIncomingMetric && e.isSourcesSetReadyWithLock() {
 		e.maybeRefreshSourcesSetWithLock()
 		// We only attempt to consume if the outgoing metrics type is local instead of forwarded.
 		// This is because forwarded metrics are sent in batches and can only be sent when all sources

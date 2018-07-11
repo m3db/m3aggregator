@@ -536,7 +536,7 @@ type standardMetricListID struct {
 
 func (id standardMetricListID) toMetricListID() metricListID {
 	return metricListID{
-		incomingMetricType: standardIncomingMetric,
+		IncomingMetricType: StandardIncomingMetric,
 		standard:           id,
 	}
 }
@@ -615,7 +615,7 @@ type forwardedMetricListID struct {
 
 func (id forwardedMetricListID) toMetricListID() metricListID {
 	return metricListID{
-		incomingMetricType: forwardedIncomingMetric,
+		IncomingMetricType: ForwardedIncomingMetric,
 		forwarded:          id,
 	}
 }
@@ -713,19 +713,19 @@ func (t metricListType) String() string {
 }
 
 type metricListID struct {
-	incomingMetricType incomingMetricType
+	IncomingMetricType IncomingMetricType
 	standard           standardMetricListID
 	forwarded          forwardedMetricListID
 }
 
 func newMetricList(shard uint32, id metricListID, opts Options) (metricList, error) {
-	switch id.incomingMetricType {
-	case standardIncomingMetric:
+	switch id.IncomingMetricType {
+	case StandardIncomingMetric:
 		return newStandardMetricList(shard, id.standard, opts)
-	case forwardedIncomingMetric:
+	case ForwardedIncomingMetric:
 		return newForwardedMetricList(shard, id.forwarded, opts)
 	default:
-		return nil, fmt.Errorf("unknown incoming metric type for list: %v", id.incomingMetricType)
+		return nil, fmt.Errorf("unknown incoming metric type for list: %v", id.IncomingMetricType)
 	}
 }
 
@@ -806,10 +806,10 @@ func (l *metricLists) Tick() listsTickResult {
 	for id, list := range l.lists {
 		resolution := list.Resolution()
 		numElems := list.Len()
-		switch id.incomingMetricType {
-		case standardIncomingMetric:
+		switch id.IncomingMetricType {
+		case StandardIncomingMetric:
 			res.standard[resolution] += numElems
-		case forwardedIncomingMetric:
+		case ForwardedIncomingMetric:
 			res.forwarded[resolution] += numElems
 		}
 	}

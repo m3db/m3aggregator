@@ -747,17 +747,17 @@ func (o *options) initPools() {
 
 	o.counterElemPool = NewCounterElemPool(nil)
 	o.counterElemPool.Init(func() *CounterElem {
-		return MustNewCounterElem(standardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewCounterElem(StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
 	})
 
 	o.timerElemPool = NewTimerElemPool(nil)
 	o.timerElemPool.Init(func() *TimerElem {
-		return MustNewTimerElem(standardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewTimerElem(StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
 	})
 
 	o.gaugeElemPool = NewGaugeElemPool(nil)
 	o.gaugeElemPool.Init(func() *GaugeElem {
-		return MustNewGaugeElem(standardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewGaugeElem(StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
 	})
 }
 

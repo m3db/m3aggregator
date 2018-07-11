@@ -20,21 +20,22 @@
 
 package aggregator
 
-type incomingMetricType int
+// IncomingMetricType describes the type of an incoming metric.
+type IncomingMetricType int
 
 const (
-	// standardIncomingMetric is a standard (currently untimed) incoming metric.
-	standardIncomingMetric incomingMetricType = iota
+	// StandardIncomingMetric is a standard (currently untimed) incoming metric.
+	StandardIncomingMetric IncomingMetricType = iota
 
-	// forwardedIncomingMetric is a forwarded incoming metric.
-	forwardedIncomingMetric
+	// ForwardedIncomingMetric is a forwarded incoming metric.
+	ForwardedIncomingMetric
 )
 
-func (t incomingMetricType) String() string {
+func (t IncomingMetricType) String() string {
 	switch t {
-	case standardIncomingMetric:
+	case StandardIncomingMetric:
 		return "standardIncomingMetric"
-	case forwardedIncomingMetric:
+	case ForwardedIncomingMetric:
 		return "forwardedIncomingMetric"
 	default:
 		// Should never get here.

@@ -90,7 +90,7 @@ type TimerElem struct {
 
 // NewTimerElem creates a new element for the given metric type.
 func NewTimerElem(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -102,7 +102,7 @@ func NewTimerElem(
 		elemBase: newElemBase(opts),
 		values:   make([]timedTimer, 0, defaultNumAggregations), // in most cases values will have two entries
 	}
-	if err := e.ResetSetData(incomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes); err != nil {
+	if err := e.ResetSetData(IncomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -110,7 +110,7 @@ func NewTimerElem(
 
 // MustNewTimerElem creates a new element, or panics if the input is invalid.
 func MustNewTimerElem(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -118,7 +118,7 @@ func MustNewTimerElem(
 	numForwardedTimes int,
 	opts Options,
 ) *TimerElem {
-	elem, err := NewTimerElem(incomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes, opts)
+	elem, err := NewTimerElem(IncomingMetricType, id, sp, aggTypes, pipeline, numForwardedTimes, opts)
 	if err != nil {
 		panic(fmt.Errorf("unable to create element: %v", err))
 	}
@@ -127,7 +127,7 @@ func MustNewTimerElem(
 
 // ResetSetData resets the element and sets data.
 func (e *TimerElem) ResetSetData(
-	incomingMetricType incomingMetricType,
+	IncomingMetricType IncomingMetricType,
 	id id.RawID,
 	sp policy.StoragePolicy,
 	aggTypes maggregation.Types,
@@ -138,7 +138,7 @@ func (e *TimerElem) ResetSetData(
 	if useDefaultAggregation {
 		aggTypes = e.DefaultAggregationTypes(e.aggTypesOpts)
 	}
-	if err := e.elemBase.resetSetData(incomingMetricType, id, sp, aggTypes, useDefaultAggregation, pipeline, numForwardedTimes); err != nil {
+	if err := e.elemBase.resetSetData(IncomingMetricType, id, sp, aggTypes, useDefaultAggregation, pipeline, numForwardedTimes); err != nil {
 		return err
 	}
 	if err := e.timerElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation); err != nil {
@@ -278,7 +278,7 @@ func (e *TimerElem) Consume(
 	// go to such aggregation buckets after they are consumed and therefore avoid the aformentioned
 	// problem.
 	aggregationIdxToCloseUntil := len(e.toConsume)
-	if e.incomingMetricType == forwardedIncomingMetric && e.isSourcesSetReadyWithLock() {
+	if e.IncomingMetricType == ForwardedIncomingMetric && e.isSourcesSetReadyWithLock() {
 		e.maybeRefreshSourcesSetWithLock()
 		// We only attempt to consume if the outgoing metrics type is local instead of forwarded.
 		// This is because forwarded metrics are sent in batches and can only be sent when all sources
