@@ -47,6 +47,7 @@ import (
 	"github.com/m3db/m3x/pool"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/sync"
+	"github.com/uber-go/tally"
 )
 
 var (
@@ -121,9 +122,6 @@ type AggregatorConfiguration struct {
 
 	// Default storage policies.
 	DefaultStoragePolicies []policy.StoragePolicy `yaml:"defaultStoragePolicies" validate:"nonzero"`
-
-	// Maximum number of cached source sets.
-	MaxNumCachedSourceSets *int `yaml:"maxNumCachedSourceSets"`
 
 	// Whether to discard NaN aggregated values.
 	DiscardNaNAggregatedValues *bool `yaml:"discardNaNAggregatedValues"`
@@ -276,6 +274,35 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	maxAllowedForwardingDelayFn := c.Forwarding.MaxAllowedForwardingDelayFn(jitterEnabled, maxJitterFn)
 	opts = opts.SetMaxAllowedForwardingDelayFn(maxAllowedForwardingDelayFn)
 
+	// Set whether to enable eager forwarding.
+	if c.Forwarding.EnableEagerForwarding != nil {
+		opts = opts.SetEnableEagerForwarding(*c.Forwarding.EnableEagerForwarding)
+	}
+
+	// Set flush interval function.
+	flushIntervalFn := c.Forwarding.FlushIntervalFn()
+	opts = opts.SetFlushIntervalFn(flushIntervalFn)
+
+	// Set max number of aggregation windows for eager forwarding.
+	if c.Forwarding.MaxAggregationWindows != nil {
+		opts = opts.SetMaxAggregationWindowsForEagerForwarding(*c.Forwarding.MaxAggregationWindows)
+	}
+
+	// Set forwarding sources TTL function.
+	if c.Forwarding.SourcesTTL != nil {
+		opts = opts.SetForwardingSourcesTTLFn(c.Forwarding.SourcesTTL.ForwardingSourcesTTLFn())
+	}
+
+	// Set full forwarding latency histograms.
+	latencyScope := scope.Tagged(map[string]string{
+		"latency-type": "full",
+	})
+	latencyBucketsFn := func(key aggregator.ForwardingLatencyBucketKey, numLatencyBuckets int) tally.Buckets {
+		return tally.MustMakeLinearDurationBuckets(0, 2*key.Resolution, numLatencyBuckets)
+	}
+	latencyHistograms := aggregator.NewForwardingLatencyHistograms(latencyScope, latencyBucketsFn)
+	opts = opts.SetFullForwardingLatencyHistograms(latencyHistograms)
+
 	// Set entry options.
 	if c.EntryTTL != 0 {
 		opts = opts.SetEntryTTL(c.EntryTTL)
@@ -295,11 +322,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	copy(storagePolicies, c.DefaultStoragePolicies)
 	opts = opts.SetDefaultStoragePolicies(storagePolicies)
 
-	// Set cached source sets options.
-	if c.MaxNumCachedSourceSets != nil {
-		opts = opts.SetMaxNumCachedSourceSets(*c.MaxNumCachedSourceSets)
-	}
-
 	// Set whether to discard NaN aggregated values.
 	if c.DiscardNaNAggregatedValues != nil {
 		opts = opts.SetDiscardNaNAggregatedValues(*c.DiscardNaNAggregatedValues)
@@ -311,7 +333,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	counterElemPool := aggregator.NewCounterElemPool(counterElemPoolOpts)
 	opts = opts.SetCounterElemPool(counterElemPool)
 	counterElemPool.Init(func() *aggregator.CounterElem {
-		return aggregator.MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
+		return aggregator.MustNewCounterElem(aggregator.StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
 	})
 
 	// Set timer elem pool.
@@ -320,7 +342,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	timerElemPool := aggregator.NewTimerElemPool(timerElemPoolOpts)
 	opts = opts.SetTimerElemPool(timerElemPool)
 	timerElemPool.Init(func() *aggregator.TimerElem {
-		return aggregator.MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
+		return aggregator.MustNewTimerElem(aggregator.StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
 	})
 
 	// Set gauge elem pool.
@@ -329,7 +351,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	gaugeElemPool := aggregator.NewGaugeElemPool(gaugeElemPoolOpts)
 	opts = opts.SetGaugeElemPool(gaugeElemPool)
 	gaugeElemPool.Init(func() *aggregator.GaugeElem {
-		return aggregator.MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
+		return aggregator.MustNewGaugeElem(aggregator.StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
 	})
 
 	// Set entry pool.
@@ -436,7 +458,11 @@ func (c placementManagerConfiguration) NewPlacementManager(
 
 type forwardingConfiguration struct {
 	// MaxSingleDelay is the maximum delay for a single forward step.
-	MaxSingleDelay time.Duration `yaml:"maxSingleDelay"`
+	MaxSingleDelay         time.Duration                      `yaml:"maxSingleDelay"`
+	EnableEagerForwarding  *bool                              `yaml:"enableEagerForwarding"`
+	MaxAggregationWindows  *int                               `yaml:"maxAggregationWindows"`
+	SourcesTTL             *forwardingSourcesTTLConfiguration `yaml:"sourcesTTL"`
+	FlushIntervalOverrides map[time.Duration]time.Duration    `yaml:"flushIntervalOverrides"`
 }
 
 func (c forwardingConfiguration) MaxAllowedForwardingDelayFn(
@@ -452,6 +478,34 @@ func (c forwardingConfiguration) MaxAllowedForwardingDelayFn(
 			initialJitter = maxJitterFn(resolution)
 		}
 		return initialJitter + c.MaxSingleDelay*time.Duration(numForwardedTimes)
+	}
+}
+
+func (c forwardingConfiguration) FlushIntervalFn() aggregator.FlushIntervalFn {
+	return func(metricType aggregator.IncomingMetricType, resolution time.Duration) time.Duration {
+		if metricType != aggregator.ForwardedIncomingMetric {
+			return resolution
+		}
+		override, exists := c.FlushIntervalOverrides[resolution]
+		if !exists {
+			return resolution
+		}
+		return override
+	}
+}
+
+type forwardingSourcesTTLConfiguration struct {
+	ByResolution int           `yaml:"byResolution"`
+	ByDuration   time.Duration `yaml:"byDuration"`
+}
+
+func (c forwardingSourcesTTLConfiguration) ForwardingSourcesTTLFn() aggregator.ForwardingSourcesTTLFn {
+	return func(resolution time.Duration) time.Duration {
+		dur := resolution * time.Duration(c.ByResolution)
+		if dur >= c.ByDuration {
+			return dur
+		}
+		return c.ByDuration
 	}
 }
 
