@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uber-go/tally"
+
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
 	"github.com/m3db/m3aggregator/aggregator/handler"
 	"github.com/m3db/m3aggregator/client"
@@ -292,6 +294,10 @@ type Options interface {
 	// GaugeElemPool returns the gauge element pool.
 	GaugeElemPool() GaugeElemPool
 
+	SetElemMetrics(value *ElemMetrics) Options
+
+	ElemMetrics() *ElemMetrics
+
 	/// Read-only derived options.
 
 	// FullCounterPrefix returns the full prefix for counters.
@@ -335,6 +341,7 @@ type options struct {
 	maxForwardingWindows             int
 	forwardingSourcesTTLFn           ForwardingSourcesTTLFn
 	discardNaNAggregatedValues       bool
+	elemMetrics                      *ElemMetrics
 	entryPool                        EntryPool
 	counterElemPool                  CounterElemPool
 	timerElemPool                    TimerElemPool
@@ -377,6 +384,7 @@ func NewOptions() Options {
 		maxForwardingWindows:             defaultMaxForwardingWindows,
 		forwardingSourcesTTLFn:           defaultForwardingSourcesTTLFn,
 		discardNaNAggregatedValues:       defaultDiscardNaNAggregatedValues,
+		elemMetrics:                      NewElemMetrics(tally.NoopScope),
 	}
 
 	// Initialize pools.
@@ -680,6 +688,16 @@ func (o *options) SetDiscardNaNAggregatedValues(value bool) Options {
 
 func (o *options) DiscardNaNAggregatedValues() bool {
 	return o.discardNaNAggregatedValues
+}
+
+func (o *options) SetElemMetrics(value *ElemMetrics) Options {
+	opts := *o
+	opts.elemMetrics = value
+	return &opts
+}
+
+func (o *options) ElemMetrics() *ElemMetrics {
+	return o.elemMetrics
 }
 
 func (o *options) SetEntryPool(value EntryPool) Options {

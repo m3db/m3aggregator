@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uber-go/tally"
+
 	raggregation "github.com/m3db/m3aggregator/aggregation"
 	maggregation "github.com/m3db/m3metrics/aggregation"
 	"github.com/m3db/m3metrics/metric"
@@ -142,6 +144,64 @@ type metricElem interface {
 
 	// Close closes the element.
 	Close()
+}
+
+type delayMetrics struct {
+	sync.RWMutex
+
+	scope      tally.Scope
+	histograms map[latencyBucketKey]tally.Histogram
+}
+
+func newDelayMetrics(scope tally.Scope) delayMetrics {
+	return delayMetrics{
+		scope:      scope,
+		histograms: make(map[latencyBucketKey]tally.Histogram),
+	}
+}
+
+func (m *delayMetrics) ReportDelay(
+	resolution time.Duration,
+	delay time.Duration,
+) {
+	key := latencyBucketKey{
+		resolution: resolution,
+	}
+	m.RLock()
+	histogram, exists := m.histograms[key]
+	m.RUnlock()
+	if exists {
+		histogram.RecordDuration(delay)
+		return
+	}
+	m.Lock()
+	histogram, exists = m.histograms[key]
+	if exists {
+		m.Unlock()
+		histogram.RecordDuration(delay)
+		return
+	}
+	buckets := tally.MustMakeLinearDurationBuckets(0, time.Second, 60)
+	histogram = m.scope.Tagged(map[string]string{
+		"bucket-version": "1",
+		"resolution":     resolution.String(),
+	}).Histogram("forwarding-delay", buckets)
+	m.histograms[key] = histogram
+	m.Unlock()
+	histogram.RecordDuration(delay)
+}
+
+type ElemMetrics struct {
+	optimisticFlushing tally.Counter
+	forwardingLatency  delayMetrics
+}
+
+func NewElemMetrics(scope tally.Scope) *ElemMetrics {
+	elemScope := scope.SubScope("elem")
+	return &ElemMetrics{
+		optimisticFlushing: elemScope.Counter("optimistic-flushing"),
+		forwardingLatency:  newDelayMetrics(elemScope),
+	}
 }
 
 type elemBase struct {

@@ -333,6 +333,7 @@ func (e *GenericElem) Consume(
 		// This is because forwarded metrics are sent in batches and can only be sent when all sources
 		// in the same shard have been consumed, and as such is not well suited for pre-emptive consumption.
 		if e.outgoingMetricType() == localOutgoingMetric {
+			numOptimisticFlushing := 0
 			for i := 0; i < len(e.values); i++ {
 				// NB: This makes the logic easier to understand but it would be more efficient to use
 				// an atomic here to avoid locking aggregations.
@@ -340,8 +341,12 @@ func (e *GenericElem) Consume(
 				if e.values[i].lockedAgg.consumeState == readyToConsume {
 					e.toConsume = append(e.toConsume, e.values[i])
 					e.values[i].lockedAgg.consumeState = consuming
+					numOptimisticFlushing++
 				}
 				e.values[i].lockedAgg.Unlock()
+			}
+			if numOptimisticFlushing > 0 {
+				e.opts.ElemMetrics().optimisticFlushing.Inc(int64(numOptimisticFlushing))
 			}
 		}
 	}
@@ -514,6 +519,8 @@ func (e *GenericElem) processValueWithAggregationLock(
 		fullPrefix       = e.FullPrefix(e.opts)
 		transformations  = e.parsedPipeline.Transformations
 		discardNaNValues = e.opts.DiscardNaNAggregatedValues()
+		resolution       = e.sp.Resolution().Window
+		nowNanos         = e.nowFn().UnixNano()
 	)
 	for aggTypeIdx, aggType := range e.aggTypes {
 		value := lockedAgg.aggregation.ValueOf(aggType)
@@ -540,6 +547,10 @@ func (e *GenericElem) processValueWithAggregationLock(
 			continue
 		}
 		if e.outgoingMetricType() == localOutgoingMetric {
+			if e.IncomingMetricType == ForwardedIncomingMetric {
+				delay := time.Duration(nowNanos - timeNanos)
+				e.opts.ElemMetrics().forwardingLatency.ReportDelay(resolution, delay)
+			}
 			flushLocalFn(fullPrefix, e.id, e.TypeStringFor(e.aggTypesOpts, aggType), timeNanos, value, e.sp)
 		} else {
 			forwardedAggregationKey, _ := e.ForwardedAggregationKey()

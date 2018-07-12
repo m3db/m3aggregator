@@ -295,15 +295,12 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	copy(storagePolicies, c.DefaultStoragePolicies)
 	opts = opts.SetDefaultStoragePolicies(storagePolicies)
 
-	// Set cached source sets options.
-	if c.MaxNumCachedSourceSets != nil {
-		opts = opts.SetMaxNumCachedSourceSets(*c.MaxNumCachedSourceSets)
-	}
-
 	// Set whether to discard NaN aggregated values.
 	if c.DiscardNaNAggregatedValues != nil {
 		opts = opts.SetDiscardNaNAggregatedValues(*c.DiscardNaNAggregatedValues)
 	}
+
+	opts = opts.SetElemMetrics(aggregator.NewElemMetrics(scope))
 
 	// Set counter elem pool.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("counter-elem-pool"))
