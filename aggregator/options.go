@@ -882,5 +882,6 @@ func defaultForwardingLatencyBucketsFn(
 	key ForwardingLatencyBucketKey,
 	numLatencyBuckets int,
 ) tally.Buckets {
-	return tally.MustMakeLinearDurationBuckets(0, 2*key.Resolution, numLatencyBuckets)
+	bucketWidth := 2 * key.Resolution / time.Duration(numLatencyBuckets)
+	return tally.MustMakeLinearDurationBuckets(0, bucketWidth, numLatencyBuckets)
 }

@@ -23,6 +23,7 @@ package aggregator
 import (
 	"strings"
 	"testing"
+	"time"
 
 	raggregation "github.com/m3db/m3aggregator/aggregation"
 	maggregation "github.com/m3db/m3metrics/aggregation"
@@ -70,8 +71,12 @@ func TestElemBaseResetSetData(t *testing.T) {
 			},
 		}),
 	}
-	e := newElemBase(NewOptions())
-	e.resetSetData(StandardIncomingMetric, testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3)
+	opts := NewOptions().SetForwardingSourcesTTLFn(func(resolution time.Duration) time.Duration {
+		return 2 * resolution
+	})
+	e := newElemBase(opts)
+	e.resetSetData(ForwardedIncomingMetric, testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3)
+	require.Equal(t, ForwardedIncomingMetric, e.incomingMetricType)
 	require.Equal(t, testCounterID, e.id)
 	require.Equal(t, testStoragePolicy, e.sp)
 	require.Equal(t, testAggregationTypesExpensive, e.aggTypes)
@@ -81,6 +86,11 @@ func TestElemBaseResetSetData(t *testing.T) {
 	require.Equal(t, 3, e.numForwardedTimes)
 	require.False(t, e.tombstoned)
 	require.False(t, e.closed)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Nil(t, e.sourcesSet)
+	require.Equal(t, 20*time.Second.Nanoseconds(), e.sourcesTTLNanos)
+	require.Equal(t, int64(0), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(0), e.lastSourcesRefreshNanos)
 }
 
 func TestElemBaseResetSetDataInvalidPipeline(t *testing.T) {
