@@ -41,6 +41,7 @@ func (t IncomingMetricType) String() string {
 	case ForwardedIncomingMetric:
 		return "forwardedIncomingMetric"
 	default:
+		// nolint: goconst
 		// Should never get here.
 		return "unknown"
 	}
@@ -65,6 +66,7 @@ func (t outgoingMetricType) String() string {
 	case forwardedOutgoingMetric:
 		return "forwardedOutgoingMetric"
 	default:
+		// nolint: goconst
 		// Should never get here.
 		return "unknown"
 	}

@@ -182,12 +182,6 @@ func TestSetEntryPool(t *testing.T) {
 	require.Equal(t, value, o.EntryPool())
 }
 
-func TestSetMaxNumCachedSourceSets(t *testing.T) {
-	value := 4
-	o := NewOptions().SetMaxNumCachedSourceSets(value)
-	require.Equal(t, value, o.MaxNumCachedSourceSets())
-}
-
 func TestSetDiscardNaNAggregatedValues(t *testing.T) {
 	value := false
 	o := NewOptions().SetDiscardNaNAggregatedValues(value)

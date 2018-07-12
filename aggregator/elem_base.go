@@ -81,6 +81,7 @@ type sourcesOptions struct {
 type consumeState int
 
 const (
+	// nolint: megacheck
 	notReadyToConsume consumeState = iota
 	readyToConsume
 	consuming
@@ -166,7 +167,7 @@ type elemBase struct {
 	// Mutable states.
 	tombstoned              bool
 	closed                  bool
-	sourcesLock             sync.Mutex
+	sourcesLock             sync.Mutex // nolint: structcheck
 	sourcesHeartbeat        map[uint32]int64
 	sourcesSet              *bitset.BitSet
 	sourcesTTLNanos         int64

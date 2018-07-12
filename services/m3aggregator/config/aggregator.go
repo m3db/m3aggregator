@@ -47,6 +47,7 @@ import (
 	"github.com/m3db/m3x/pool"
 	"github.com/m3db/m3x/retry"
 	"github.com/m3db/m3x/sync"
+
 	"github.com/uber-go/tally"
 )
 
