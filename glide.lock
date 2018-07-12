@@ -1,5 +1,5 @@
-hash: d768fe8463c83e8f144c520574f0071c32d7b986c99d8c341c974d0b4303539b
-updated: 2018-07-10T13:43:43.884489-04:00
+hash: 96c0ee7e20b860f486c8af4208cf953e8b3b4ec996c484c85c4683bd41834c54
+updated: 2018-07-12T12:54:43.803188-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -211,7 +211,7 @@ imports:
   - transformation
   - x/bytes
 - name: github.com/m3db/m3msg
-  version: 603c5b33b9fc58a6eaaa29f97a0ba402219436a2
+  version: e42382613b42e19e825289c3f8ef5f7335e0c5d2
   subpackages:
   - generated/proto/msgpb
   - generated/proto/topicpb
