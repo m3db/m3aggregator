@@ -298,7 +298,9 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		"latency-type": "full",
 	})
 	latencyBucketsFn := func(key aggregator.ForwardingLatencyBucketKey, numLatencyBuckets int) tally.Buckets {
-		return tally.MustMakeLinearDurationBuckets(0, 2*key.Resolution, numLatencyBuckets)
+		maxForwardingDelayAllowed := maxAllowedForwardingDelayFn(key.Resolution, key.NumForwardedTimes)
+		latencyBucketSize := maxForwardingDelayAllowed * 2 / time.Duration(numLatencyBuckets)
+		return tally.MustMakeLinearDurationBuckets(0, latencyBucketSize, numLatencyBuckets)
 	}
 	latencyHistograms := aggregator.NewForwardingLatencyHistograms(latencyScope, latencyBucketsFn)
 	opts = opts.SetFullForwardingLatencyHistograms(latencyHistograms)

@@ -97,6 +97,6 @@ func (m *ForwardingLatencyHistograms) RecordDuration(
 }
 
 const (
-	forwardingLatencyBucketVersion = 3
+	forwardingLatencyBucketVersion = 4
 	numForwardingLatencyBuckets    = 40
 )
