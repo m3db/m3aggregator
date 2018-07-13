@@ -51,10 +51,23 @@ import (
 type lockedGaugeAggregation struct {
 	sync.Mutex
 
-	closed       bool
-	sourcesReady bool           // only used for elements receiving forwarded metrics
-	sourcesSet   *bitset.BitSet // only used for elements receiving forwarded metrics
-	consumeState consumeState   // only used for elements receiving forwarded metrics
+	closed bool
+
+	// sourcesReady is only used for elements receiving forwarded metrics.
+	// It determines whether the current aggregation can use its source set
+	// to determine whether it has received data from all forwarding sources
+	// to perform eager forwarding if enabled.
+	sourcesReady bool
+
+	// sourcesSet only used for elements receiving forwarded metrics. It
+	// keeps track of all the sources the current aggregation has seen so far.
+	sourcesSet *bitset.BitSet
+
+	// consumeState is only used for elements receiving forwarded metrics. It
+	// describes whether the current aggregation is ready to be consumed or has
+	// been consumed. This in turn determines whether the aggregation can be
+	// eagerly consumed, or should be skipped during consumption.
+	consumeState consumeState
 	aggregation  gaugeAggregation
 }
 
@@ -277,7 +290,7 @@ func (e *GaugeElem) Consume(
 	// go to such aggregation buckets after they are consumed and therefore avoid the aformentioned
 	// problem.
 	aggregationIdxToCloseUntil := len(e.toConsume)
-	if e.incomingMetricType == ForwardedIncomingMetric && e.isSourcesSetReadyWithLock() {
+	if e.incomingMetricType == ForwardedIncomingMetric && e.isSourcesSetReadyWithElemLock() {
 		e.maybeRefreshSourcesSetWithLock()
 		// We only attempt to consume if the outgoing metrics type is local instead of forwarded.
 		// This is because forwarded metrics are sent in batches and can only be sent when all sources
@@ -393,7 +406,7 @@ func (e *GaugeElem) findOrCreate(
 	copy(e.values[idx+1:numValues+1], e.values[idx:numValues])
 
 	var (
-		sourcesReady = e.isSourcesSetReadyWithLock()
+		sourcesReady = e.isSourcesSetReadyWithElemLock()
 		sourcesSet   *bitset.BitSet
 	)
 	if sourcesOpts.updateSources {
@@ -515,7 +528,7 @@ func (e *GaugeElem) outgoingMetricType() outgoingMetricType {
 	return forwardedOutgoingMetric
 }
 
-func (e *GaugeElem) isSourcesSetReadyWithLock() bool {
+func (e *GaugeElem) isSourcesSetReadyWithElemLock() bool {
 	if !e.opts.EnableEagerForwarding() {
 		return false
 	}
@@ -526,7 +539,7 @@ func (e *GaugeElem) isSourcesSetReadyWithLock() bool {
 	return e.nowFn().UnixNano() >= e.buildingSourcesAtNanos+e.sourcesTTLNanos
 }
 
-func (e *GaugeElem) maybeRefreshSourcesSetWithLock() {
+func (e *GaugeElem) maybeRefreshSourcesSetWithElemLock() {
 	if !e.opts.EnableEagerForwarding() {
 		return
 	}

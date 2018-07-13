@@ -28,6 +28,11 @@ import (
 	"github.com/uber-go/tally"
 )
 
+const (
+	forwardingLatencyBucketVersion = 4
+	numForwardingLatencyBuckets    = 40
+)
+
 // ForwardingLatencyBucketsFn creates forwarding latency buckets.
 type ForwardingLatencyBucketsFn func(
 	key ForwardingLatencyBucketKey,
@@ -95,8 +100,3 @@ func (m *ForwardingLatencyHistograms) RecordDuration(
 	m.Unlock()
 	histogram.RecordDuration(duration)
 }
-
-const (
-	forwardingLatencyBucketVersion = 4
-	numForwardingLatencyBuckets    = 40
-)

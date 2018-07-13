@@ -527,20 +527,7 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 		)
 		lastWriteNanos = agg.byKey[idx].lastWriteNanos
 		for agg.isEarlierThanFn(currWriteNanos, agg.targetFlushNanos) || bucketIdx < len(agg.byKey[idx].bucketsByTimeAsc) {
-			var compareResult int
-			if bucketIdx >= len(agg.byKey[idx].bucketsByTimeAsc) {
-				compareResult = -1
-			} else if !agg.isEarlierThanFn(currWriteNanos, agg.targetFlushNanos) {
-				compareResult = 1
-			} else {
-				if currWriteNanos == agg.byKey[idx].bucketsByTimeAsc[bucketIdx].timeNanos {
-					compareResult = 0
-				} else if currWriteNanos < agg.byKey[idx].bucketsByTimeAsc[bucketIdx].timeNanos {
-					compareResult = -1
-				} else {
-					compareResult = 1
-				}
-			}
+			compareResult := agg.compareTimes(currWriteNanos, idx, bucketIdx)
 
 			var metric aggregated.ForwardedMetric
 			if compareResult == 0 {
@@ -579,6 +566,35 @@ func (agg *forwardedAggregation) onDone(key aggregationKey) error {
 	}
 	agg.byKey[idx].lastWriteNanos = lastWriteNanos
 	return multiErr.FinalError()
+}
+
+// compare compares the current timestamp derived from the last written timestamp
+// with the timestamp from the buckets populated in the current flush cycle, and
+// determines which timestamp should be chosen in the current iteration.
+// * If all buckets have been exhausted, return -1.
+// * If the current timestamp exceeds the flush target time, return 1.
+// * Otherwise
+//   * If the current write timestamp is the same as the bucket timestamp, return 0.
+//   * If the current write timestamp is earlier than the bucket timestamp, return -1.
+//   * If the current write timestamp is later than the bucket timestamp, return 1.
+func (agg *forwardedAggregation) compareTimes(
+	currWriteNanos int64,
+	aggKeyIdx int,
+	bucketIdx int,
+) int {
+	if bucketIdx >= len(agg.byKey[aggKeyIdx].bucketsByTimeAsc) {
+		return -1
+	}
+	if !agg.isEarlierThanFn(currWriteNanos, agg.targetFlushNanos) {
+		return 1
+	}
+	if currWriteNanos == agg.byKey[aggKeyIdx].bucketsByTimeAsc[bucketIdx].timeNanos {
+		return 0
+	}
+	if currWriteNanos < agg.byKey[aggKeyIdx].bucketsByTimeAsc[bucketIdx].timeNanos {
+		return -1
+	}
+	return 1
 }
 
 func (agg *forwardedAggregation) index(key aggregationKey) int {

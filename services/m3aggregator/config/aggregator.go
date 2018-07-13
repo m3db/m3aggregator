@@ -428,7 +428,7 @@ func (c placementManagerConfiguration) NewPlacementManager(
 
 type forwardingConfiguration struct {
 	// MaxSingleDelay is the maximum delay for a single forward step.
-	MaxSingleDelay         time.Duration                      `yaml:"maxSingleDelay"`
+	MaxSingleDelay         time.Duration                      `yaml:"maxSingleDelay" validate:"nonzero"`
 	EnableEagerForwarding  *bool                              `yaml:"enableEagerForwarding"`
 	MaxAggregationWindows  *int                               `yaml:"maxAggregationWindows"`
 	SourcesTTL             *forwardingSourcesTTLConfiguration `yaml:"sourcesTTL"`
