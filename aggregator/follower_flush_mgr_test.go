@@ -410,8 +410,8 @@ func TestFollowerFlushTaskRun(t *testing.T) {
 		i := i
 		flusher := NewMockflushingMetricList(ctrl)
 		flusher.EXPECT().
-			DiscardBefore(gomock.Any()).
-			Do(func(beforeNanos int64) {
+			DiscardBefore(gomock.Any(), disAllowEagerForwarding).
+			Do(func(beforeNanos int64, _ eagerForwardingMode) {
 				flushedBefore[i] = beforeNanos
 			})
 		flushers[i] = flusher
