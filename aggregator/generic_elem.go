@@ -108,9 +108,14 @@ type lockedAggregation struct {
 	// to perform eager forwarding if enabled.
 	sourcesReady bool
 
-	// sourcesSet only used for elements receiving forwarded metrics. It
-	// keeps track of all the sources the current aggregation has seen so far.
-	sourcesSet *bitset.BitSet
+	// expectedSources is only used for elements receiving forwarded metrics.
+	// It keeps track of all the sources the current aggregation expect to receive
+	// data from.
+	expectedSources *bitset.BitSet
+
+	// seenSources keeps track of all the sources the current aggregation has
+	// seen so far.
+	seenSources *bitset.BitSet
 
 	// consumeState is only used for elements receiving forwarded metrics. It
 	// describes whether the current aggregation is ready to be consumed or has
@@ -125,7 +130,8 @@ func (lockedAgg *lockedAggregation) close() {
 		return
 	}
 	lockedAgg.closed = true
-	lockedAgg.sourcesSet = nil
+	lockedAgg.expectedSources = nil
+	lockedAgg.seenSources = nil
 	lockedAgg.aggregation.Close()
 }
 
@@ -254,28 +260,25 @@ func (e *GenericElem) AddUnique(timestamp time.Time, values []float64, sourceID 
 		return errAggregationClosed
 	}
 	source := uint(sourceID)
-	if !lockedAgg.sourcesReady {
-		// If the sources are not ready, this is an empty source set to start with
-		// so we need to set the source. If the corresponding bit is already set,
-		// it implies a duplicate delivery from that source.
-		if lockedAgg.sourcesSet.Test(source) {
-			lockedAgg.Unlock()
-			return errDuplicateForwardingSource
+	if lockedAgg.seenSources.Test(source) {
+		lockedAgg.Unlock()
+		return errDuplicateForwardingSource
+	}
+	lockedAgg.seenSources.Set(source)
+	if lockedAgg.sourcesReady {
+		// If the sources are ready, the expected sources will be a pre-filled
+		// bitset populated with sources the aggregation is expected to see data from.
+		// As such, we need to clear the source bit in the expected sources.
+		if lockedAgg.expectedSources.Test(source) {
+			// This source is never seen before and is in the expected source list,
+			// as a result, we need to clear the source bit.
+			lockedAgg.expectedSources.Clear(source)
+			if lockedAgg.expectedSources.None() {
+				lockedAgg.consumeState = readyToConsume
+			}
 		}
-		lockedAgg.sourcesSet.Set(source)
-	} else {
-		// Otherwise, this is a pre-filled source set to start with, so we need to
-		// clear the source. If the corresponding bit is not set, it implies either
-		// a duplicate delivery from that source, or a new source that was not in
-		// the initial cloned source set.
-		if !lockedAgg.sourcesSet.Test(source) {
-			lockedAgg.Unlock()
-			return errDuplicateOrNewForwardingSource
-		}
-		lockedAgg.sourcesSet.Clear(source)
-		if lockedAgg.sourcesSet.None() {
-			lockedAgg.consumeState = readyToConsume
-		}
+		// New sources that are not in the expected source list are still allowed
+		// to go through.
 	}
 	for _, v := range values {
 		lockedAgg.aggregation.Add(v)
@@ -340,7 +343,7 @@ func (e *GenericElem) Consume(
 	// problem.
 	aggregationIdxToCloseUntil := len(e.toConsume)
 	if e.incomingMetricType == ForwardedIncomingMetric && e.isSourcesSetReadyWithElemLock() {
-		e.maybeRefreshSourcesSetWithLock()
+		e.maybeRefreshSourcesSetWithElemLock()
 		// We only attempt to consume if the outgoing metrics type is local instead of forwarded.
 		// This is because forwarded metrics are sent in batches and can only be sent when all sources
 		// in the same shard have been consumed, and as such is not well suited for pre-emptive consumption.
@@ -368,6 +371,16 @@ func (e *GenericElem) Consume(
 		}
 		e.toConsume[i].lockedAgg.consumeState = consumed
 		if i < aggregationIdxToCloseUntil {
+			if e.toConsume[i].lockedAgg.seenSources != nil {
+				e.sourcesLock.Lock()
+				// This is to make sure there aren't too many cached source sets taking up
+				// too much space.
+				if len(e.cachedSourceSets) < e.opts.MaxNumCachedSourceSets() {
+					e.cachedSourceSets = append(e.cachedSourceSets, e.toConsume[i].lockedAgg.seenSources)
+					e.toConsume[i].lockedAgg.seenSources = nil
+				}
+				e.sourcesLock.Unlock()
+			}
 			e.toConsume[i].lockedAgg.close()
 		}
 		e.toConsume[i].lockedAgg.Unlock()
@@ -396,6 +409,10 @@ func (e *GenericElem) Close() {
 	e.onForwardedAggregationWrittenFn = nil
 	e.sourcesHeartbeat = nil
 	e.sourcesSet = nil
+	for idx := range e.cachedSourceSets {
+		e.cachedSourceSets[idx] = nil
+	}
+	e.cachedSourceSets = nil
 	for idx := range e.values {
 		// Close the underlying aggregation objects.
 		e.values[idx].lockedAgg.close()
@@ -455,28 +472,35 @@ func (e *GenericElem) findOrCreate(
 	copy(e.values[idx+1:numValues+1], e.values[idx:numValues])
 
 	var (
-		sourcesReady = e.isSourcesSetReadyWithElemLock()
-		sourcesSet   *bitset.BitSet
+		sourcesReady    = e.isSourcesSetReadyWithElemLock()
+		expectedSources *bitset.BitSet
+		seenSources     *bitset.BitSet
 	)
 	if sourcesOpts.updateSources {
+		e.sourcesLock.Lock()
+		// If the sources set is ready, we clone it ane use the clone to
+		// determine when we have received from all the expected sources.
 		if sourcesReady {
-			// If the sources set is ready, we clone it ane use the clone to
-			// determine when we have received from all the expected sources.
-			e.sourcesLock.Lock()
-			sourcesSet = e.sourcesSet.Clone()
-			e.sourcesLock.Unlock()
-		} else {
-			// Otherwise we create a new sources set and use it to filter out
-			// duplicate delivery from the same sources.
-			sourcesSet = bitset.New(defaultNumSources)
+			expectedSources = e.sourcesSet.Clone()
 		}
+		if numCachedSourceSets := len(e.cachedSourceSets); numCachedSourceSets > 0 {
+			seenSources = e.cachedSourceSets[numCachedSourceSets-1]
+			e.cachedSourceSets[numCachedSourceSets-1] = nil
+			e.cachedSourceSets = e.cachedSourceSets[:numCachedSourceSets-1]
+			seenSources.ClearAll()
+		} else {
+			seenSources = bitset.New(defaultNumSources)
+		}
+		e.sourcesLock.Unlock()
 	}
+
 	e.values[idx] = timedAggregation{
 		startAtNanos: alignedStart,
 		lockedAgg: &lockedAggregation{
-			sourcesReady: sourcesReady,
-			sourcesSet:   sourcesSet,
-			aggregation:  e.NewAggregation(e.opts, e.aggOpts),
+			sourcesReady:    sourcesReady,
+			expectedSources: expectedSources,
+			seenSources:     seenSources,
+			aggregation:     e.NewAggregation(e.opts, e.aggOpts),
 		},
 	}
 	agg := e.values[idx].lockedAgg

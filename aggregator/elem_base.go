@@ -56,11 +56,10 @@ const (
 )
 
 var (
-	nan                               = math.NaN()
-	errElemClosed                     = errors.New("element is closed")
-	errAggregationClosed              = errors.New("aggregation is closed")
-	errDuplicateOrNewForwardingSource = errors.New("duplicate or new forwarding source")
-	errDuplicateForwardingSource      = errors.New("duplicate forwarding source")
+	nan                          = math.NaN()
+	errElemClosed                = errors.New("element is closed")
+	errAggregationClosed         = errors.New("aggregation is closed")
+	errDuplicateForwardingSource = errors.New("duplicate forwarding source")
 )
 
 // isEarlierThanFn determines whether the timestamps of the metrics in a given
@@ -167,7 +166,8 @@ type elemBase struct {
 	// Mutable states.
 	tombstoned              bool
 	closed                  bool
-	sourcesLock             sync.Mutex // nolint: structcheck
+	sourcesLock             sync.Mutex       // nolint: structcheck
+	cachedSourceSets        []*bitset.BitSet // nolint: structcheck
 	sourcesHeartbeat        map[uint32]int64
 	sourcesSet              *bitset.BitSet
 	sourcesTTLNanos         int64

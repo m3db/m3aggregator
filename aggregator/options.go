@@ -52,6 +52,7 @@ var (
 	defaultMaxForwardingWindows             = 10
 	defaultForwardingSourcesTTLByResolution = 10
 	defaultForwardingSourcesTTLByDuration   = 5 * time.Minute
+	defaultMaxNumCachedSourceSets           = 2
 	defaultDiscardNaNAggregatedValues       = true
 	defaultResignTimeout                    = 5 * time.Minute
 	defaultDefaultStoragePolicies           = []policy.StoragePolicy{
@@ -255,6 +256,12 @@ type Options interface {
 	// delay for given metric resolution and number of times the metric has been forwarded.
 	MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn
 
+	// SetMaxNumCachedSourceSets sets the maximum number of cached source sets.
+	SetMaxNumCachedSourceSets(value int) Options
+
+	// MaxNumCachedSourceSets returns the maximum number of cached source sets.
+	MaxNumCachedSourceSets() int
+
 	// SetEnableEagerForwarding determines whether eager forwarding is enabled.
 	SetEnableEagerForwarding(value bool) Options
 
@@ -364,6 +371,7 @@ type options struct {
 	resignTimeout                    time.Duration
 	flushIntervalFn                  FlushIntervalFn
 	maxAllowedForwardingDelayFn      MaxAllowedForwardingDelayFn
+	maxNumCachedSourceSets           int
 	enableEagerForwarding            bool
 	maxForwardingWindows             int
 	forwardingSourcesTTLFn           ForwardingSourcesTTLFn
@@ -409,6 +417,7 @@ func NewOptions() Options {
 		resignTimeout:                    defaultResignTimeout,
 		flushIntervalFn:                  defaultFlushIntervalFn,
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
+		maxNumCachedSourceSets:           defaultMaxNumCachedSourceSets,
 		enableEagerForwarding:            defaultEnableEagerForwarding,
 		maxForwardingWindows:             defaultMaxForwardingWindows,
 		forwardingSourcesTTLFn:           defaultForwardingSourcesTTLFn,
@@ -697,6 +706,16 @@ func (o *options) SetMaxAllowedForwardingDelayFn(value MaxAllowedForwardingDelay
 
 func (o *options) MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn {
 	return o.maxAllowedForwardingDelayFn
+}
+
+func (o *options) SetMaxNumCachedSourceSets(value int) Options {
+	opts := *o
+	opts.maxNumCachedSourceSets = value
+	return &opts
+}
+
+func (o *options) MaxNumCachedSourceSets() int {
+	return o.maxNumCachedSourceSets
 }
 
 func (o *options) SetEnableEagerForwarding(value bool) Options {

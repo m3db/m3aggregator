@@ -96,20 +96,18 @@ func newUntimedEntryMetrics(scope tally.Scope) untimedEntryMetrics {
 }
 
 type forwardedEntryMetrics struct {
-	rateLimit             rateLimitEntryMetrics
-	arrivedTooLate        tally.Counter
-	duplicateSources      tally.Counter
-	duplicateOrNewSources tally.Counter
-	metadataUpdates       tally.Counter
+	rateLimit        rateLimitEntryMetrics
+	arrivedTooLate   tally.Counter
+	duplicateSources tally.Counter
+	metadataUpdates  tally.Counter
 }
 
 func newForwardedEntryMetrics(scope tally.Scope) forwardedEntryMetrics {
 	return forwardedEntryMetrics{
-		rateLimit:             newRateLimitEntryMetrics(scope),
-		arrivedTooLate:        scope.Counter("arrived-too-late"),
-		duplicateSources:      scope.Counter("duplicate-sources"),
-		duplicateOrNewSources: scope.Counter("duplicate-or-new-sources"),
-		metadataUpdates:       scope.Counter("metadata-updates"),
+		rateLimit:        newRateLimitEntryMetrics(scope),
+		arrivedTooLate:   scope.Counter("arrived-too-late"),
+		duplicateSources: scope.Counter("duplicate-sources"),
+		metadataUpdates:  scope.Counter("metadata-updates"),
 	}
 }
 
@@ -714,13 +712,6 @@ func (e *Entry) addForwardedWithLock(
 		// Duplicate forwarding sources may occur during a leader re-election and is not
 		// considered an external facing error. Hence, we record it and move on.
 		e.metrics.forwarded.duplicateSources.Inc(1)
-		return nil
-	}
-	if err == errDuplicateOrNewForwardingSource {
-		// Duplicate or new forwarding sources may occur during a leader re-election, or
-		// when a new source is added producing the forwarded metric that was not in the
-		// initial set of expected sources for an aggregation window.
-		e.metrics.forwarded.duplicateOrNewSources.Inc(1)
 		return nil
 	}
 	return err

@@ -124,6 +124,9 @@ type AggregatorConfiguration struct {
 	// Default storage policies.
 	DefaultStoragePolicies []policy.StoragePolicy `yaml:"defaultStoragePolicies" validate:"nonzero"`
 
+	// Maximum number of cached source sets.
+	MaxNumCachedSourceSets *int `yaml:"maxNumCachedSourceSets"`
+
 	// Whether to discard NaN aggregated values.
 	DiscardNaNAggregatedValues *bool `yaml:"discardNaNAggregatedValues"`
 
@@ -291,6 +294,11 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	storagePolicies := make([]policy.StoragePolicy, len(c.DefaultStoragePolicies))
 	copy(storagePolicies, c.DefaultStoragePolicies)
 	opts = opts.SetDefaultStoragePolicies(storagePolicies)
+
+	// Set max number of cached source sets.
+	if c.MaxNumCachedSourceSets != nil {
+		opts = opts.SetMaxNumCachedSourceSets(*c.MaxNumCachedSourceSets)
+	}
 
 	// Set whether to discard NaN aggregated values.
 	if c.DiscardNaNAggregatedValues != nil {
