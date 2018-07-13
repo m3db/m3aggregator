@@ -25,8 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uber-go/tally"
-
 	"github.com/m3db/m3aggregator/aggregation/quantile/cm"
 	"github.com/m3db/m3aggregator/aggregator/handler"
 	"github.com/m3db/m3aggregator/client"
@@ -36,6 +34,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 )
 
 func validateDerivedPrefix(

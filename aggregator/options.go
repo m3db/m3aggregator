@@ -328,8 +328,6 @@ type Options interface {
 	// GaugeElemPool returns the gauge element pool.
 	GaugeElemPool() GaugeElemPool
 
-	// For internal use.
-
 	/// Read-only derived options.
 
 	// FullCounterPrefix returns the full prefix for counters.

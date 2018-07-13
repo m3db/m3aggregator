@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/m3db/m3aggregator/aggregator"
+
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
 )
