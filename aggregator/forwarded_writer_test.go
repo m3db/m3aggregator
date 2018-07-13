@@ -24,18 +24,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m3db/m3metrics/metadata"
-	"github.com/m3db/m3metrics/metric/aggregated"
-
-	"github.com/stretchr/testify/require"
-
 	"github.com/m3db/m3aggregator/client"
 	"github.com/m3db/m3metrics/aggregation"
+	"github.com/m3db/m3metrics/metadata"
 	"github.com/m3db/m3metrics/metric"
+	"github.com/m3db/m3metrics/metric/aggregated"
 	"github.com/m3db/m3metrics/metric/id"
 	"github.com/m3db/m3metrics/policy"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
 )
 
@@ -336,12 +334,16 @@ func TestForwardedWriterPrepare(t *testing.T) {
 	require.Equal(t, 2, len(agg.byKey[0].bucketsByTimeAsc))
 	require.Equal(t, 1, agg.byKey[0].currRefCnt)
 	require.Equal(t, 0, len(agg.byKey[0].cachedValueArrays))
+	require.Equal(t, int64(0), agg.targetFlushNanos)
+	require.Equal(t, int64(1240), agg.byKey[0].lastWriteNanos)
 	agg, exists = fw.aggregations[newIDKey(mt, mid2)]
 	require.True(t, exists)
 	require.Equal(t, 1, len(agg.byKey))
 	require.Equal(t, 2, len(agg.byKey[0].bucketsByTimeAsc))
 	require.Equal(t, 1, agg.byKey[0].currRefCnt)
 	require.Equal(t, 0, len(agg.byKey[0].cachedValueArrays))
+	require.Equal(t, int64(0), agg.targetFlushNanos)
+	require.Equal(t, int64(1239), agg.byKey[0].lastWriteNanos)
 
 	w.Prepare(1234)
 
@@ -353,12 +355,14 @@ func TestForwardedWriterPrepare(t *testing.T) {
 	require.Equal(t, 0, len(agg.byKey[0].bucketsByTimeAsc))
 	require.Equal(t, 0, agg.byKey[0].currRefCnt)
 	require.Equal(t, 2, len(agg.byKey[0].cachedValueArrays))
+	require.Equal(t, int64(1234), agg.targetFlushNanos)
 	agg, exists = fw.aggregations[newIDKey(mt, mid2)]
 	require.True(t, exists)
 	require.Equal(t, 1, len(agg.byKey))
 	require.Equal(t, 0, len(agg.byKey[0].bucketsByTimeAsc))
 	require.Equal(t, 0, agg.byKey[0].currRefCnt)
 	require.Equal(t, 2, len(agg.byKey[0].cachedValueArrays))
+	require.Equal(t, int64(1234), agg.targetFlushNanos)
 
 	// Write datapoints again.
 	writeFn(aggKey, 1234, 3.4)
@@ -376,12 +380,135 @@ func TestForwardedWriterPrepare(t *testing.T) {
 	require.Equal(t, 2, len(agg.byKey[0].bucketsByTimeAsc))
 	require.Equal(t, 1, agg.byKey[0].currRefCnt)
 	require.Equal(t, 0, len(agg.byKey[0].cachedValueArrays))
+	require.Equal(t, int64(1240), agg.byKey[0].lastWriteNanos)
 	agg, exists = fw.aggregations[newIDKey(mt, mid2)]
 	require.True(t, exists)
 	require.Equal(t, 1, len(agg.byKey))
 	require.Equal(t, 2, len(agg.byKey[0].bucketsByTimeAsc))
 	require.Equal(t, 1, agg.byKey[0].currRefCnt)
 	require.Equal(t, 0, len(agg.byKey[0].cachedValueArrays))
+	require.Equal(t, int64(1239), agg.byKey[0].lastWriteNanos)
+}
+
+func TestForwardedWriterOnDoneWithEagerForwardingEnabled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	var (
+		now    = time.Unix(1234, 0)
+		nowFn  = func() time.Time { return now }
+		c      = client.NewMockAdminClient(ctrl)
+		w      = newForwardedWriter(0, c, true, 10, isStandardMetricEarlierThan, nowFn, tally.NoopScope)
+		mt     = metric.GaugeType
+		mid    = id.RawID("foo")
+		mid2   = id.RawID("bar")
+		aggKey = testForwardedWriterAggregationKey
+	)
+
+	// Register an aggregation.
+	writeFn, onDoneFn, err := w.Register(mt, mid, aggKey)
+	require.NoError(t, err)
+
+	// Write some datapoints.
+	writeFn(aggKey, 1234*time.Second.Nanoseconds(), 3.4)
+	writeFn(aggKey, 1234*time.Second.Nanoseconds(), 3.5)
+	writeFn(aggKey, 1240*time.Second.Nanoseconds(), 98.2)
+
+	// Register another aggregation.
+	writeFn2, onDoneFn2, err := w.Register(mt, mid2, aggKey)
+	require.NoError(t, err)
+
+	// Write some more datapoints.
+	writeFn2(aggKey, 1238*time.Second.Nanoseconds(), 3.4)
+	writeFn2(aggKey, 1240*time.Second.Nanoseconds(), 3.5)
+
+	expectedMetric1 := aggregated.ForwardedMetric{
+		Type:      mt,
+		ID:        mid,
+		TimeNanos: 1234 * time.Second.Nanoseconds(),
+		Values:    []float64{3.4, 3.5},
+	}
+	expectedMetric2 := aggregated.ForwardedMetric{
+		Type:      mt,
+		ID:        mid,
+		TimeNanos: 1240 * time.Second.Nanoseconds(),
+		Values:    []float64{98.2},
+	}
+	expectedMetric3 := aggregated.ForwardedMetric{
+		Type:      mt,
+		ID:        mid2,
+		TimeNanos: 1238 * time.Second.Nanoseconds(),
+		Values:    []float64{3.4},
+	}
+	expectedMetric4 := aggregated.ForwardedMetric{
+		Type:      mt,
+		ID:        mid2,
+		TimeNanos: 1240 * time.Second.Nanoseconds(),
+		Values:    []float64{3.5},
+	}
+	expectedMeta := metadata.ForwardMetadata{
+		AggregationID:     aggregation.MustCompressTypes(aggregation.Count),
+		StoragePolicy:     policy.MustParseStoragePolicy("10s:2d"),
+		SourceID:          0,
+		NumForwardedTimes: 1,
+	}
+	c.EXPECT().WriteForwarded(expectedMetric1, expectedMeta).Return(nil).Times(1)
+	c.EXPECT().WriteForwarded(expectedMetric2, expectedMeta).Return(nil).Times(1)
+	c.EXPECT().WriteForwarded(expectedMetric3, expectedMeta).Return(nil).Times(1)
+	c.EXPECT().WriteForwarded(expectedMetric4, expectedMeta).Return(nil).Times(1)
+	require.NoError(t, onDoneFn(aggKey))
+	require.NoError(t, onDoneFn2(aggKey))
+
+	expectedMetrics := []aggregated.ForwardedMetric{
+		{
+			Type:      mt,
+			ID:        mid,
+			TimeNanos: 1240 * time.Second.Nanoseconds(),
+			Values:    []float64{12.4, 18.5},
+		},
+		{
+			Type:      mt,
+			ID:        mid,
+			TimeNanos: 1250 * time.Second.Nanoseconds(),
+		},
+		{
+			Type:      mt,
+			ID:        mid,
+			TimeNanos: 1260 * time.Second.Nanoseconds(),
+			Values:    []float64{78.2},
+		},
+		{
+			Type:      mt,
+			ID:        mid2,
+			TimeNanos: 1250 * time.Second.Nanoseconds(),
+			Values:    []float64{9.4},
+		},
+		{
+			Type:      mt,
+			ID:        mid2,
+			TimeNanos: 1260 * time.Second.Nanoseconds(),
+		},
+		{
+			Type:      mt,
+			ID:        mid2,
+			TimeNanos: 1280 * time.Second.Nanoseconds(),
+			Values:    []float64{-12.5},
+		},
+	}
+	for _, expectedMetric := range expectedMetrics {
+		c.EXPECT().WriteForwarded(expectedMetric, expectedMeta).Return(nil).Times(1)
+	}
+
+	// Prepare for another write.
+	w.Prepare(1263 * time.Second.Nanoseconds())
+
+	writeFn(aggKey, 1240*time.Second.Nanoseconds(), 12.4)
+	writeFn(aggKey, 1240*time.Second.Nanoseconds(), 18.5)
+	writeFn(aggKey, 1260*time.Second.Nanoseconds(), 78.2)
+	writeFn2(aggKey, 1250*time.Second.Nanoseconds(), 9.4)
+	writeFn2(aggKey, 1280*time.Second.Nanoseconds(), -12.5)
+	require.NoError(t, onDoneFn(aggKey))
+	require.NoError(t, onDoneFn2(aggKey))
 }
 
 func TestForwardedWriterCloseWriterClosed(t *testing.T) {

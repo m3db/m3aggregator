@@ -174,7 +174,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	opts = opts.SetStreamOptions(streamOpts)
 
 	// Set administrative client.
-	// TODO(xichen): client retry threshold likely needs to be low for faster retries.
 	iOpts = instrumentOpts.SetMetricsScope(scope.SubScope("client"))
 	adminClient, err := c.Client.NewAdminClient(client, clock.NewOptions(), iOpts)
 	if err != nil {
@@ -269,42 +268,10 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	}
 	opts = opts.SetFlushHandler(flushHandler)
 
-	// Set max allowed forwarding delay function.
+	// Apply forwarding configuration.
 	jitterEnabled := flushManagerOpts.JitterEnabled()
 	maxJitterFn := flushManagerOpts.MaxJitterFn()
-	maxAllowedForwardingDelayFn := c.Forwarding.MaxAllowedForwardingDelayFn(jitterEnabled, maxJitterFn)
-	opts = opts.SetMaxAllowedForwardingDelayFn(maxAllowedForwardingDelayFn)
-
-	// Set whether to enable eager forwarding.
-	if c.Forwarding.EnableEagerForwarding != nil {
-		opts = opts.SetEnableEagerForwarding(*c.Forwarding.EnableEagerForwarding)
-	}
-
-	// Set flush interval function.
-	flushIntervalFn := c.Forwarding.FlushIntervalFn()
-	opts = opts.SetFlushIntervalFn(flushIntervalFn)
-
-	// Set max number of aggregation windows for eager forwarding.
-	if c.Forwarding.MaxAggregationWindows != nil {
-		opts = opts.SetMaxAggregationWindowsForEagerForwarding(*c.Forwarding.MaxAggregationWindows)
-	}
-
-	// Set forwarding sources TTL function.
-	if c.Forwarding.SourcesTTL != nil {
-		opts = opts.SetForwardingSourcesTTLFn(c.Forwarding.SourcesTTL.ForwardingSourcesTTLFn())
-	}
-
-	// Set full forwarding latency histograms.
-	latencyScope := scope.Tagged(map[string]string{
-		"latency-type": "full",
-	})
-	latencyBucketsFn := func(key aggregator.ForwardingLatencyBucketKey, numLatencyBuckets int) tally.Buckets {
-		maxForwardingDelayAllowed := maxAllowedForwardingDelayFn(key.Resolution, key.NumForwardedTimes)
-		latencyBucketSize := maxForwardingDelayAllowed * 2 / time.Duration(numLatencyBuckets)
-		return tally.MustMakeLinearDurationBuckets(0, latencyBucketSize, numLatencyBuckets)
-	}
-	latencyHistograms := aggregator.NewForwardingLatencyHistograms(latencyScope, latencyBucketsFn)
-	opts = opts.SetFullForwardingLatencyHistograms(latencyHistograms)
+	opts = c.Forwarding.ApplyForwardingConfiguration(opts, jitterEnabled, maxJitterFn, scope)
 
 	// Set entry options.
 	if c.EntryTTL != 0 {
@@ -336,7 +303,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	counterElemPool := aggregator.NewCounterElemPool(counterElemPoolOpts)
 	opts = opts.SetCounterElemPool(counterElemPool)
 	counterElemPool.Init(func() *aggregator.CounterElem {
-		return aggregator.MustNewCounterElem(aggregator.StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
+		return aggregator.MustNewCounterElem(aggregator.UnknownIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
 	})
 
 	// Set timer elem pool.
@@ -345,7 +312,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	timerElemPool := aggregator.NewTimerElemPool(timerElemPoolOpts)
 	opts = opts.SetTimerElemPool(timerElemPool)
 	timerElemPool.Init(func() *aggregator.TimerElem {
-		return aggregator.MustNewTimerElem(aggregator.StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
+		return aggregator.MustNewTimerElem(aggregator.UnknownIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
 	})
 
 	// Set gauge elem pool.
@@ -354,7 +321,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	gaugeElemPool := aggregator.NewGaugeElemPool(gaugeElemPoolOpts)
 	opts = opts.SetGaugeElemPool(gaugeElemPool)
 	gaugeElemPool.Init(func() *aggregator.GaugeElem {
-		return aggregator.MustNewGaugeElem(aggregator.StandardIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
+		return aggregator.MustNewGaugeElem(aggregator.UnknownIncomingMetric, nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, opts)
 	})
 
 	// Set entry pool.
@@ -466,6 +433,48 @@ type forwardingConfiguration struct {
 	MaxAggregationWindows  *int                               `yaml:"maxAggregationWindows"`
 	SourcesTTL             *forwardingSourcesTTLConfiguration `yaml:"sourcesTTL"`
 	FlushIntervalOverrides map[time.Duration]time.Duration    `yaml:"flushIntervalOverrides"`
+}
+
+func (c forwardingConfiguration) ApplyForwardingConfiguration(
+	opts aggregator.Options,
+	jitterEnabled bool,
+	maxJitterFn aggregator.FlushJitterFn,
+	scope tally.Scope,
+) aggregator.Options {
+	// Set max allowed forwarding delay function.
+	maxAllowedForwardingDelayFn := c.MaxAllowedForwardingDelayFn(jitterEnabled, maxJitterFn)
+	opts = opts.SetMaxAllowedForwardingDelayFn(maxAllowedForwardingDelayFn)
+
+	// Set whether to enable eager forwarding.
+	if c.EnableEagerForwarding != nil {
+		opts = opts.SetEnableEagerForwarding(*c.EnableEagerForwarding)
+	}
+
+	// Set flush interval function.
+	flushIntervalFn := c.FlushIntervalFn()
+	opts = opts.SetFlushIntervalFn(flushIntervalFn)
+
+	// Set max number of aggregation windows for eager forwarding.
+	if c.MaxAggregationWindows != nil {
+		opts = opts.SetMaxAggregationWindowsForEagerForwarding(*c.MaxAggregationWindows)
+	}
+
+	// Set forwarding sources TTL function.
+	if c.SourcesTTL != nil {
+		opts = opts.SetForwardingSourcesTTLFn(c.SourcesTTL.ForwardingSourcesTTLFn())
+	}
+
+	// Set full forwarding latency histograms.
+	latencyScope := scope.Tagged(map[string]string{
+		"latency-type": "full",
+	})
+	latencyBucketsFn := func(key aggregator.ForwardingLatencyBucketKey, numLatencyBuckets int) tally.Buckets {
+		maxForwardingDelayAllowed := maxAllowedForwardingDelayFn(key.Resolution, key.NumForwardedTimes)
+		latencyBucketSize := maxForwardingDelayAllowed * 2 / time.Duration(numLatencyBuckets)
+		return tally.MustMakeLinearDurationBuckets(0, latencyBucketSize, numLatencyBuckets)
+	}
+	latencyHistograms := aggregator.NewForwardingLatencyHistograms(latencyScope, latencyBucketsFn)
+	return opts.SetFullForwardingLatencyHistograms(latencyHistograms)
 }
 
 func (c forwardingConfiguration) MaxAllowedForwardingDelayFn(

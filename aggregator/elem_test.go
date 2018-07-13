@@ -35,8 +35,10 @@ import (
 	"github.com/m3db/m3metrics/pipeline/applied"
 	"github.com/m3db/m3metrics/policy"
 	"github.com/m3db/m3metrics/transformation"
+	"github.com/m3db/m3x/clock"
 	"github.com/m3db/m3x/pool"
 	xtime "github.com/m3db/m3x/time"
+	"github.com/willf/bitset"
 
 	"github.com/stretchr/testify/require"
 )
@@ -105,6 +107,7 @@ func TestCounterResetSetData(t *testing.T) {
 	opts := NewOptions()
 	ce, err := NewCounterElem(StandardIncomingMetric, nil, policy.EmptyStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, 1, opts)
 	require.NoError(t, err)
+	require.Equal(t, StandardIncomingMetric, ce.incomingMetricType)
 	require.Equal(t, opts.AggregationTypesOptions().DefaultCounterAggregationTypes(), ce.aggTypes)
 	require.True(t, ce.useDefaultAggregation)
 	require.False(t, ce.aggOpts.HasExpensiveAggregations)
@@ -252,7 +255,7 @@ func TestCounterElemAddUnionWithCustomAggregation(t *testing.T) {
 	require.Equal(t, errElemClosed, e.AddUnion(testTimestamps[2], testCounter))
 }
 
-func TestCounterElemAddUnique(t *testing.T) {
+func TestCounterElemAddUniqueSourcesNotReady(t *testing.T) {
 	e, err := NewCounterElem(ForwardedIncomingMetric, testCounterID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, NewOptions())
 	require.NoError(t, err)
 
@@ -303,6 +306,74 @@ func TestCounterElemAddUnique(t *testing.T) {
 	// Adding the counter metric to a closed element results in an error.
 	e.closed = true
 	require.Equal(t, errElemClosed, e.AddUnique(testTimestamps[2], []float64{100}, 1376))
+}
+
+func TestCounterElemAddUniqueSourcesReady(t *testing.T) {
+	opts := NewOptions().
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(func(time.Duration) time.Duration { return 0 })
+	e, err := NewCounterElem(ForwardedIncomingMetric, testCounterID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
+	require.NoError(t, err)
+
+	// Source is not ready the first time a metric is added.
+	source1 := uint32(1234)
+	require.NoError(t, e.AddUnique(testTimestamps[0], []float64{345}, source1))
+	require.Equal(t, 1, len(e.values))
+	require.Equal(t, testAlignedStarts[0], e.values[0].startAtNanos)
+	require.Equal(t, int64(345), e.values[0].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(1), e.values[0].lockedAgg.aggregation.Count())
+	require.Equal(t, int64(0), e.values[0].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[0].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.Equal(t, readyToConsume, e.values[0].lockedAgg.consumeState)
+
+	// Add the counter metric in the next aggregation interval.
+	source2 := uint32(5678)
+	require.NoError(t, e.AddUnique(testTimestamps[2], []float64{278}, source2))
+	require.Equal(t, 2, len(e.values))
+	for i := 0; i < len(e.values); i++ {
+		require.Equal(t, testAlignedStarts[i], e.values[i].startAtNanos)
+	}
+	require.Equal(t, int64(278), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, int64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.True(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, notReadyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Now add another metric within the same aggregation interval with a different source.
+	require.NoError(t, e.AddUnique(testTimestamps[2], []float64{500}, source1))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, int64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, int64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Add the metric with the same source results in an error.
+	require.Equal(t, errDuplicateOrNewForwardingSource, e.AddUnique(testTimestamps[2], []float64{500}, source1))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, int64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, int64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Add the metric with a new source results in an error but updates the source set.
+	source3 := uint32(1987)
+	require.Equal(t, errDuplicateOrNewForwardingSource, e.AddUnique(testTimestamps[2], []float64{500}, source3))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, int64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, int64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+	require.True(t, e.sourcesSet.Test(uint(source3)))
 }
 
 func TestCounterElemAddUniqueWithCustomAggregation(t *testing.T) {
@@ -583,6 +654,125 @@ func TestCounterElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 	require.Equal(t, 0, len(e.values))
 }
 
+func TestCounterElemConsumeDefaultAggregationDefaultPipelineSourcesReady(t *testing.T) {
+	alignedstartAtNanos := []int64{
+		time.Unix(210, 0).UnixNano(),
+		time.Unix(220, 0).UnixNano(),
+		time.Unix(230, 0).UnixNano(),
+		time.Unix(240, 0).UnixNano(),
+		time.Unix(250, 0).UnixNano(),
+	}
+	counterVal := testCounter.CounterVal
+	counterVals := []int64{counterVal, counterVal, counterVal, counterVal}
+	isEarlierThanFn := isStandardMetricEarlierThan
+	timestampNanosFn := standardMetricTimestampNanos
+	nowFn := func() time.Time { return time.Unix(200, 0) }
+	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	opts := NewOptions().
+		SetClockOptions(clockOpts).
+		SetDiscardNaNAggregatedValues(false).
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(func(time.Duration) time.Duration { return time.Minute })
+	e := testCounterElem(alignedstartAtNanos[:len(alignedstartAtNanos)-1], counterVals, maggregation.DefaultTypes, applied.DefaultPipeline, opts)
+	e.incomingMetricType = ForwardedIncomingMetric
+	e.buildingSourcesAtNanos = time.Unix(10, 0).UnixNano()
+	e.values[1].lockedAgg.consumeState = readyToConsume
+	e.sourcesHeartbeat = map[uint32]int64{
+		1: time.Unix(200, 0).UnixNano(), // still live
+		2: time.Unix(100, 0).UnixNano(), // stale
+		3: time.Unix(150, 0).UnixNano(), // still live
+	}
+	e.sourcesSet = bitset.New(10)
+	for k := range e.sourcesHeartbeat {
+		e.sourcesSet.Set(uint(k))
+	}
+
+	// Consume one value.
+	localFn, localRes := testFlushLocalMetricFn()
+	forwardFn, forwardRes := testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes := testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[1], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+
+	var expectedMetrics []testLocalMetricWithMetadata
+	expectedMetrics = append(expectedMetrics, expectedLocalMetricsForCounter(alignedstartAtNanos[1], testStoragePolicy, maggregation.DefaultTypes)...)
+	expectedMetrics = append(expectedMetrics, expectedLocalMetricsForCounter(alignedstartAtNanos[2], testStoragePolicy, maggregation.DefaultTypes)...)
+	expectedHeartbeat := map[uint32]int64{
+		1: time.Unix(200, 0).UnixNano(), // still live
+		3: time.Unix(150, 0).UnixNano(), // still live
+	}
+	expectedSourceSet := bitset.New(e.sourcesSet.Len())
+	expectedSourceSet.Set(1)
+	expectedSourceSet.Set(3)
+	require.Equal(t, expectedMetrics, *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 3, len(e.values))
+	require.Equal(t, expectedHeartbeat, e.sourcesHeartbeat)
+	require.True(t, expectedSourceSet.Equal(e.sourcesSet))
+	require.Equal(t, nowFn().UnixNano(), e.lastSourcesRefreshNanos)
+	require.Equal(t, consumed, e.values[0].lockedAgg.consumeState)
+	for _, v := range e.values {
+		require.NotNil(t, v.lockedAgg)
+	}
+
+	// Disable eager forwarding and consume another value and expect that
+	// the aggregations are not eagerly consumed.
+	e.opts = e.opts.SetEnableEagerForwarding(false)
+	e.values[2].lockedAgg.consumeState = readyToConsume
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[3], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, expectedLocalMetricsForCounter(alignedstartAtNanos[3], testStoragePolicy, maggregation.DefaultTypes), *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 1, len(e.values))
+
+	// Now enable eager forwarding and consume another value.
+	e.opts = e.opts.SetEnableEagerForwarding(true)
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[2], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, expectedLocalMetricsForCounter(alignedstartAtNanos[4], testStoragePolicy, maggregation.DefaultTypes), *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 1, len(e.values))
+
+	// Tombstone the element and discard all values.
+	e.tombstoned = true
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.True(t, e.Consume(alignedstartAtNanos[4], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, 0, len(*localRes))
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 0, len(e.values))
+}
+
+func TestCounterElemOutgoingMetricType(t *testing.T) {
+	inputs := []struct {
+		pipeline applied.Pipeline
+		expected outgoingMetricType
+	}{
+		{
+			pipeline: applied.DefaultPipeline,
+			expected: localOutgoingMetric,
+		},
+		{
+			pipeline: testPipeline,
+			expected: forwardedOutgoingMetric,
+		},
+	}
+
+	for _, input := range inputs {
+		e, err := NewCounterElem(StandardIncomingMetric, testCounterID, testStoragePolicy, maggregation.DefaultTypes, input.pipeline, testNumForwardedTimes, NewOptions())
+		require.NoError(t, err)
+		require.Equal(t, input.expected, e.outgoingMetricType())
+	}
+}
+
 func TestCounterElemClose(t *testing.T) {
 	e := testCounterElem(testAlignedStarts[:len(testAlignedStarts)-1], testCounterVals, maggregation.DefaultTypes, applied.DefaultPipeline, NewOptions())
 	require.False(t, e.closed)
@@ -598,6 +788,8 @@ func TestCounterElemClose(t *testing.T) {
 	require.Equal(t, parsedPipeline{}, e.parsedPipeline)
 	require.Nil(t, e.writeForwardedMetricFn)
 	require.Nil(t, e.onForwardedAggregationWrittenFn)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Nil(t, e.sourcesSet)
 	require.Equal(t, 0, len(e.values))
 	require.Equal(t, 0, len(e.toConsume))
 	require.Equal(t, 0, len(e.lastConsumedValues))
@@ -629,8 +821,9 @@ func TestCounterFindOrCreateNoSourceSet(t *testing.T) {
 	}
 }
 
-func TestCounterFindOrCreateWithSourceSet(t *testing.T) {
-	e, err := NewCounterElem(StandardIncomingMetric, testCounterID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, NewOptions())
+func TestCounterFindOrCreateWithSourceSetNoEagerForwarding(t *testing.T) {
+	opts := NewOptions().SetEnableEagerForwarding(false)
+	e, err := NewCounterElem(StandardIncomingMetric, testCounterID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
 	require.NoError(t, err)
 
 	inputs := []int64{10, 20}
@@ -651,6 +844,44 @@ func TestCounterFindOrCreateWithSourceSet(t *testing.T) {
 	}
 }
 
+func TestCounterFindOrCreateWithSourceSetWithEagerForwarding(t *testing.T) {
+	forwardingSourcesTTLFn := func(time.Duration) time.Duration { return 10 * time.Second }
+	now := time.Unix(1234, 0)
+	nowFn := func() time.Time { return now }
+	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	opts := NewOptions().
+		SetClockOptions(clockOpts).
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(forwardingSourcesTTLFn)
+	e, err := NewCounterElem(StandardIncomingMetric, testCounterID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
+	require.NoError(t, err)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Equal(t, int64(0), e.buildingSourcesAtNanos)
+
+	// First time should not clone the source set.
+	sourceOpts := sourcesOptions{updateSources: true, source: 1234}
+	res, err := e.findOrCreate(1230*time.Second.Nanoseconds(), sourceOpts)
+	require.NoError(t, err)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.lastSourcesRefreshNanos)
+	require.True(t, e.sourcesSet.Test(uint(1234)))
+	require.NotNil(t, res.sourcesSet)
+	require.False(t, res.sourcesSet.Test(uint(1234)))
+
+	// Move time forward and create a second time should clone the source set.
+	now = time.Unix(1300, 0)
+	sourceOpts = sourcesOptions{updateSources: true, source: 5678}
+	res, err = e.findOrCreate(1240*time.Second.Nanoseconds(), sourceOpts)
+	require.NoError(t, err)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.lastSourcesRefreshNanos)
+	require.True(t, e.sourcesSet.Test(uint(1234)))
+	require.True(t, e.sourcesSet.Test(uint(5678)))
+	require.NotNil(t, res.sourcesSet)
+	require.True(t, res.sourcesSet.Test(uint(1234)))
+	require.True(t, res.sourcesSet.Test(uint(5678)))
+}
+
 func TestTimerResetSetData(t *testing.T) {
 	opts := NewOptions()
 	te, err := NewTimerElem(StandardIncomingMetric, nil, policy.EmptyStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
@@ -658,6 +889,7 @@ func TestTimerResetSetData(t *testing.T) {
 	require.Nil(t, te.quantilesPool)
 	require.NotNil(t, te.quantiles)
 	require.True(t, te.aggOpts.HasExpensiveAggregations)
+	require.Equal(t, StandardIncomingMetric, te.incomingMetricType)
 	require.Equal(t, opts.AggregationTypesOptions().DefaultTimerAggregationTypes(), te.aggTypes)
 	require.True(t, te.useDefaultAggregation)
 
@@ -779,7 +1011,7 @@ func TestTimerElemAddUnion(t *testing.T) {
 	require.Equal(t, errElemClosed, e.AddUnion(testTimestamps[2], testBatchTimer))
 }
 
-func TestTimerElemAddUnique(t *testing.T) {
+func TestTimerElemAddUniqueSourcesNotReady(t *testing.T) {
 	e, err := NewTimerElem(ForwardedIncomingMetric, testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, NewOptions())
 	require.NoError(t, err)
 
@@ -828,6 +1060,69 @@ func TestTimerElemAddUnique(t *testing.T) {
 	// Adding the timer metric to a closed element results in an error.
 	e.closed = true
 	require.Equal(t, errElemClosed, e.AddUnique(testTimestamps[2], []float64{100}, 3))
+}
+
+func TestTimerElemAddUniqueSourcesReady(t *testing.T) {
+	opts := NewOptions().
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(func(time.Duration) time.Duration { return 0 })
+	e, err := NewTimerElem(ForwardedIncomingMetric, testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
+	require.NoError(t, err)
+
+	// Source is not ready the first time a metric is added.
+	source1 := uint32(1234)
+	require.NoError(t, e.AddUnique(testTimestamps[0], []float64{345}, source1))
+	require.Equal(t, 1, len(e.values))
+	require.Equal(t, testAlignedStarts[0], e.values[0].startAtNanos)
+	require.Equal(t, float64(345), e.values[0].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(1), e.values[0].lockedAgg.aggregation.Count())
+	require.False(t, e.values[0].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.Equal(t, readyToConsume, e.values[0].lockedAgg.consumeState)
+
+	// Add the counter metric in the next aggregation interval.
+	source2 := uint32(5678)
+	require.NoError(t, e.AddUnique(testTimestamps[2], []float64{278}, source2))
+	require.Equal(t, 2, len(e.values))
+	for i := 0; i < len(e.values); i++ {
+		require.Equal(t, testAlignedStarts[i], e.values[i].startAtNanos)
+	}
+	require.Equal(t, float64(278), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
+	require.True(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, notReadyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Now add another metric within the same aggregation interval with a different source.
+	require.NoError(t, e.AddUnique(testTimestamps[2], []float64{500}, source1))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, float64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Add the metric with the same source results in an error.
+	require.Equal(t, errDuplicateOrNewForwardingSource, e.AddUnique(testTimestamps[2], []float64{500}, source1))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, float64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Add the metric with a new source results in an error but updates the source set.
+	source3 := uint32(1987)
+	require.Equal(t, errDuplicateOrNewForwardingSource, e.AddUnique(testTimestamps[2], []float64{500}, source3))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, float64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+	require.True(t, e.sourcesSet.Test(uint(source3)))
 }
 
 func TestTimerElemConsumeDefaultAggregationDefaultPipeline(t *testing.T) {
@@ -1078,6 +1373,125 @@ func TestTimerElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 	require.Equal(t, 0, len(e.values))
 }
 
+func TestTimerElemConsumeDefaultAggregationDefaultPipelineSourcesReady(t *testing.T) {
+	alignedstartAtNanos := []int64{
+		time.Unix(210, 0).UnixNano(),
+		time.Unix(220, 0).UnixNano(),
+		time.Unix(230, 0).UnixNano(),
+		time.Unix(240, 0).UnixNano(),
+		time.Unix(250, 0).UnixNano(),
+	}
+	timerVal := testBatchTimer.BatchTimerVal
+	timerVals := [][]float64{timerVal, timerVal, timerVal, timerVal}
+	isEarlierThanFn := isStandardMetricEarlierThan
+	timestampNanosFn := standardMetricTimestampNanos
+	nowFn := func() time.Time { return time.Unix(200, 0) }
+	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	opts := NewOptions().
+		SetClockOptions(clockOpts).
+		SetDiscardNaNAggregatedValues(false).
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(func(time.Duration) time.Duration { return time.Minute })
+	e := testTimerElem(alignedstartAtNanos[:len(alignedstartAtNanos)-1], timerVals, maggregation.DefaultTypes, applied.DefaultPipeline, opts)
+	e.incomingMetricType = ForwardedIncomingMetric
+	e.buildingSourcesAtNanos = time.Unix(10, 0).UnixNano()
+	e.values[1].lockedAgg.consumeState = readyToConsume
+	e.sourcesHeartbeat = map[uint32]int64{
+		1: time.Unix(200, 0).UnixNano(), // still live
+		2: time.Unix(100, 0).UnixNano(), // stale
+		3: time.Unix(150, 0).UnixNano(), // still live
+	}
+	e.sourcesSet = bitset.New(10)
+	for k := range e.sourcesHeartbeat {
+		e.sourcesSet.Set(uint(k))
+	}
+
+	// Consume one value.
+	localFn, localRes := testFlushLocalMetricFn()
+	forwardFn, forwardRes := testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes := testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[1], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+
+	var expectedMetrics []testLocalMetricWithMetadata
+	expectedMetrics = append(expectedMetrics, expectedLocalMetricsForTimer(alignedstartAtNanos[1], testStoragePolicy, maggregation.DefaultTypes)...)
+	expectedMetrics = append(expectedMetrics, expectedLocalMetricsForTimer(alignedstartAtNanos[2], testStoragePolicy, maggregation.DefaultTypes)...)
+	expectedHeartbeat := map[uint32]int64{
+		1: time.Unix(200, 0).UnixNano(), // still live
+		3: time.Unix(150, 0).UnixNano(), // still live
+	}
+	expectedSourceSet := bitset.New(e.sourcesSet.Len())
+	expectedSourceSet.Set(1)
+	expectedSourceSet.Set(3)
+	require.Equal(t, expectedMetrics, *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 3, len(e.values))
+	require.Equal(t, expectedHeartbeat, e.sourcesHeartbeat)
+	require.True(t, expectedSourceSet.Equal(e.sourcesSet))
+	require.Equal(t, nowFn().UnixNano(), e.lastSourcesRefreshNanos)
+	require.Equal(t, consumed, e.values[0].lockedAgg.consumeState)
+	for _, v := range e.values {
+		require.NotNil(t, v.lockedAgg)
+	}
+
+	// Disable eager forwarding and consume another value and expect that
+	// the aggregations are not eagerly consumed.
+	e.opts = e.opts.SetEnableEagerForwarding(false)
+	e.values[2].lockedAgg.consumeState = readyToConsume
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[3], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, expectedLocalMetricsForTimer(alignedstartAtNanos[3], testStoragePolicy, maggregation.DefaultTypes), *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 1, len(e.values))
+
+	// Now enable eager forwarding and consume another value.
+	e.opts = e.opts.SetEnableEagerForwarding(true)
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[2], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, expectedLocalMetricsForTimer(alignedstartAtNanos[4], testStoragePolicy, maggregation.DefaultTypes), *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 1, len(e.values))
+
+	// Tombstone the element and discard all values.
+	e.tombstoned = true
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.True(t, e.Consume(alignedstartAtNanos[4], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, 0, len(*localRes))
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 0, len(e.values))
+}
+
+func TestTimerElemOutgoingMetricType(t *testing.T) {
+	inputs := []struct {
+		pipeline applied.Pipeline
+		expected outgoingMetricType
+	}{
+		{
+			pipeline: applied.DefaultPipeline,
+			expected: localOutgoingMetric,
+		},
+		{
+			pipeline: testPipeline,
+			expected: forwardedOutgoingMetric,
+		},
+	}
+
+	for _, input := range inputs {
+		e, err := NewTimerElem(StandardIncomingMetric, testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, input.pipeline, testNumForwardedTimes, NewOptions())
+		require.NoError(t, err)
+		require.Equal(t, input.expected, e.outgoingMetricType())
+	}
+}
+
 func TestTimerElemClose(t *testing.T) {
 	// Set up stream options.
 	streamOpts, p, numAlloc := testStreamOptions(t, len(testAlignedStarts)-1)
@@ -1100,6 +1514,8 @@ func TestTimerElemClose(t *testing.T) {
 	require.Equal(t, parsedPipeline{}, e.parsedPipeline)
 	require.Nil(t, e.writeForwardedMetricFn)
 	require.Nil(t, e.onForwardedAggregationWrittenFn)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Nil(t, e.sourcesSet)
 	require.Equal(t, 0, len(e.values))
 	require.Equal(t, 0, len(e.toConsume))
 	require.Equal(t, 0, len(e.lastConsumedValues))
@@ -1133,8 +1549,9 @@ func TestTimerFindOrCreateNoSourceSet(t *testing.T) {
 	}
 }
 
-func TestTimerFindOrCreateWithSourceSet(t *testing.T) {
-	e, err := NewTimerElem(StandardIncomingMetric, testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, NewOptions())
+func TestTimerFindOrCreateWithSourceSetNoEagerForwarding(t *testing.T) {
+	opts := NewOptions().SetEnableEagerForwarding(false)
+	e, err := NewTimerElem(StandardIncomingMetric, testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
 	require.NoError(t, err)
 
 	inputs := []int64{10, 20}
@@ -1155,10 +1572,49 @@ func TestTimerFindOrCreateWithSourceSet(t *testing.T) {
 	}
 }
 
+func TestTimerFindOrCreateWithSourceSetWithEagerForwarding(t *testing.T) {
+	forwardingSourcesTTLFn := func(time.Duration) time.Duration { return 10 * time.Second }
+	now := time.Unix(1234, 0)
+	nowFn := func() time.Time { return now }
+	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	opts := NewOptions().
+		SetClockOptions(clockOpts).
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(forwardingSourcesTTLFn)
+	e, err := NewTimerElem(StandardIncomingMetric, testBatchTimerID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
+	require.NoError(t, err)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Equal(t, int64(0), e.buildingSourcesAtNanos)
+
+	// First time should not clone the source set.
+	sourceOpts := sourcesOptions{updateSources: true, source: 1234}
+	res, err := e.findOrCreate(1230*time.Second.Nanoseconds(), sourceOpts)
+	require.NoError(t, err)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.lastSourcesRefreshNanos)
+	require.True(t, e.sourcesSet.Test(uint(1234)))
+	require.NotNil(t, res.sourcesSet)
+	require.False(t, res.sourcesSet.Test(uint(1234)))
+
+	// Move time forward and create a second time should clone the source set.
+	now = time.Unix(1300, 0)
+	sourceOpts = sourcesOptions{updateSources: true, source: 5678}
+	res, err = e.findOrCreate(1240*time.Second.Nanoseconds(), sourceOpts)
+	require.NoError(t, err)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.lastSourcesRefreshNanos)
+	require.True(t, e.sourcesSet.Test(uint(1234)))
+	require.True(t, e.sourcesSet.Test(uint(5678)))
+	require.NotNil(t, res.sourcesSet)
+	require.True(t, res.sourcesSet.Test(uint(1234)))
+	require.True(t, res.sourcesSet.Test(uint(5678)))
+}
+
 func TestGaugeResetSetData(t *testing.T) {
 	opts := NewOptions()
 	ge, err := NewGaugeElem(StandardIncomingMetric, nil, policy.EmptyStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
 	require.NoError(t, err)
+	require.Equal(t, StandardIncomingMetric, ge.incomingMetricType)
 	require.Equal(t, opts.AggregationTypesOptions().DefaultGaugeAggregationTypes(), ge.aggTypes)
 	require.True(t, ge.useDefaultAggregation)
 	require.False(t, ge.aggOpts.HasExpensiveAggregations)
@@ -1287,7 +1743,7 @@ func TestGaugeElemAddUnionWithCustomAggregation(t *testing.T) {
 	require.Equal(t, errElemClosed, e.AddUnion(testTimestamps[2], testGauge))
 }
 
-func TestGaugeElemAddUnique(t *testing.T) {
+func TestGaugeElemAddUniqueSourcesNotReady(t *testing.T) {
 	e, err := NewGaugeElem(ForwardedIncomingMetric, testGaugeID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, NewOptions())
 	require.NoError(t, err)
 
@@ -1338,6 +1794,74 @@ func TestGaugeElemAddUnique(t *testing.T) {
 	// Adding the gauge metric to a closed element results in an error.
 	e.closed = true
 	require.Equal(t, errElemClosed, e.AddUnique(testTimestamps[2], []float64{10.0}, 3))
+}
+
+func TestGaugeElemAddUniqueSourcesReady(t *testing.T) {
+	opts := NewOptions().
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(func(time.Duration) time.Duration { return 0 })
+	e, err := NewGaugeElem(ForwardedIncomingMetric, testGaugeID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
+	require.NoError(t, err)
+
+	// Source is not ready the first time a metric is added.
+	source1 := uint32(1234)
+	require.NoError(t, e.AddUnique(testTimestamps[0], []float64{345}, source1))
+	require.Equal(t, 1, len(e.values))
+	require.Equal(t, testAlignedStarts[0], e.values[0].startAtNanos)
+	require.Equal(t, float64(345), e.values[0].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(1), e.values[0].lockedAgg.aggregation.Count())
+	require.Equal(t, float64(0), e.values[0].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[0].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.Equal(t, readyToConsume, e.values[0].lockedAgg.consumeState)
+
+	// Add the counter metric in the next aggregation interval.
+	source2 := uint32(5678)
+	require.NoError(t, e.AddUnique(testTimestamps[2], []float64{278}, source2))
+	require.Equal(t, 2, len(e.values))
+	for i := 0; i < len(e.values); i++ {
+		require.Equal(t, testAlignedStarts[i], e.values[i].startAtNanos)
+	}
+	require.Equal(t, float64(278), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(1), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, float64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.True(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, notReadyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Now add another metric within the same aggregation interval with a different source.
+	require.NoError(t, e.AddUnique(testTimestamps[2], []float64{500}, source1))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, float64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, float64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Add the metric with the same source results in an error.
+	require.Equal(t, errDuplicateOrNewForwardingSource, e.AddUnique(testTimestamps[2], []float64{500}, source1))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, float64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, float64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+
+	// Add the metric with a new source results in an error but updates the source set.
+	source3 := uint32(1987)
+	require.Equal(t, errDuplicateOrNewForwardingSource, e.AddUnique(testTimestamps[2], []float64{500}, source3))
+	require.Equal(t, 2, len(e.values))
+	require.Equal(t, testAlignedStarts[1], e.values[1].startAtNanos)
+	require.Equal(t, float64(778), e.values[1].lockedAgg.aggregation.Sum())
+	require.Equal(t, int64(2), e.values[1].lockedAgg.aggregation.Count())
+	require.Equal(t, float64(0), e.values[1].lockedAgg.aggregation.SumSq())
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source1)))
+	require.False(t, e.values[1].lockedAgg.sourcesSet.Test(uint(source2)))
+	require.Equal(t, readyToConsume, e.values[1].lockedAgg.consumeState)
+	require.True(t, e.sourcesSet.Test(uint(source3)))
 }
 
 func TestGaugeElemAddUniqueWithCustomAggregation(t *testing.T) {
@@ -1618,6 +2142,125 @@ func TestGaugeElemConsumeCustomAggregationCustomPipeline(t *testing.T) {
 	require.Equal(t, 0, len(e.values))
 }
 
+func TestGaugeElemConsumeDefaultAggregationDefaultPipelineSourcesReady(t *testing.T) {
+	alignedstartAtNanos := []int64{
+		time.Unix(210, 0).UnixNano(),
+		time.Unix(220, 0).UnixNano(),
+		time.Unix(230, 0).UnixNano(),
+		time.Unix(240, 0).UnixNano(),
+		time.Unix(250, 0).UnixNano(),
+	}
+	gaugeVal := testGauge.GaugeVal
+	gaugeVals := []float64{gaugeVal, gaugeVal, gaugeVal, gaugeVal}
+	isEarlierThanFn := isStandardMetricEarlierThan
+	timestampNanosFn := standardMetricTimestampNanos
+	nowFn := func() time.Time { return time.Unix(200, 0) }
+	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	opts := NewOptions().
+		SetClockOptions(clockOpts).
+		SetDiscardNaNAggregatedValues(false).
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(func(time.Duration) time.Duration { return time.Minute })
+	e := testGaugeElem(alignedstartAtNanos[:len(alignedstartAtNanos)-1], gaugeVals, maggregation.DefaultTypes, applied.DefaultPipeline, opts)
+	e.incomingMetricType = ForwardedIncomingMetric
+	e.buildingSourcesAtNanos = time.Unix(10, 0).UnixNano()
+	e.values[1].lockedAgg.consumeState = readyToConsume
+	e.sourcesHeartbeat = map[uint32]int64{
+		1: time.Unix(200, 0).UnixNano(), // still live
+		2: time.Unix(100, 0).UnixNano(), // stale
+		3: time.Unix(150, 0).UnixNano(), // still live
+	}
+	e.sourcesSet = bitset.New(10)
+	for k := range e.sourcesHeartbeat {
+		e.sourcesSet.Set(uint(k))
+	}
+
+	// Consume one value.
+	localFn, localRes := testFlushLocalMetricFn()
+	forwardFn, forwardRes := testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes := testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[1], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+
+	var expectedMetrics []testLocalMetricWithMetadata
+	expectedMetrics = append(expectedMetrics, expectedLocalMetricsForGauge(alignedstartAtNanos[1], testStoragePolicy, maggregation.DefaultTypes)...)
+	expectedMetrics = append(expectedMetrics, expectedLocalMetricsForGauge(alignedstartAtNanos[2], testStoragePolicy, maggregation.DefaultTypes)...)
+	expectedHeartbeat := map[uint32]int64{
+		1: time.Unix(200, 0).UnixNano(), // still live
+		3: time.Unix(150, 0).UnixNano(), // still live
+	}
+	expectedSourceSet := bitset.New(e.sourcesSet.Len())
+	expectedSourceSet.Set(1)
+	expectedSourceSet.Set(3)
+	require.Equal(t, expectedMetrics, *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 3, len(e.values))
+	require.Equal(t, expectedHeartbeat, e.sourcesHeartbeat)
+	require.True(t, expectedSourceSet.Equal(e.sourcesSet))
+	require.Equal(t, nowFn().UnixNano(), e.lastSourcesRefreshNanos)
+	require.Equal(t, consumed, e.values[0].lockedAgg.consumeState)
+	for _, v := range e.values {
+		require.NotNil(t, v.lockedAgg)
+	}
+
+	// Disable eager forwarding and consume another value and expect that
+	// the aggregations are not eagerly consumed.
+	e.opts = e.opts.SetEnableEagerForwarding(false)
+	e.values[2].lockedAgg.consumeState = readyToConsume
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[3], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, expectedLocalMetricsForGauge(alignedstartAtNanos[3], testStoragePolicy, maggregation.DefaultTypes), *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 1, len(e.values))
+
+	// Now enable eager forwarding and consume another value.
+	e.opts = e.opts.SetEnableEagerForwarding(true)
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.False(t, e.Consume(alignedstartAtNanos[2], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, expectedLocalMetricsForGauge(alignedstartAtNanos[4], testStoragePolicy, maggregation.DefaultTypes), *localRes)
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 1, len(e.values))
+
+	// Tombstone the element and discard all values.
+	e.tombstoned = true
+	localFn, localRes = testFlushLocalMetricFn()
+	forwardFn, forwardRes = testFlushForwardedMetricFn()
+	onForwardedFlushedFn, onForwardedFlushedRes = testOnForwardedFlushedFn()
+	require.True(t, e.Consume(alignedstartAtNanos[4], isEarlierThanFn, timestampNanosFn, localFn, forwardFn, onForwardedFlushedFn))
+	require.Equal(t, 0, len(*localRes))
+	require.Equal(t, 0, len(*forwardRes))
+	require.Equal(t, 0, len(*onForwardedFlushedRes))
+	require.Equal(t, 0, len(e.values))
+}
+
+func TestGaugeElemOutgoingMetricType(t *testing.T) {
+	inputs := []struct {
+		pipeline applied.Pipeline
+		expected outgoingMetricType
+	}{
+		{
+			pipeline: applied.DefaultPipeline,
+			expected: localOutgoingMetric,
+		},
+		{
+			pipeline: testPipeline,
+			expected: forwardedOutgoingMetric,
+		},
+	}
+
+	for _, input := range inputs {
+		e, err := NewGaugeElem(StandardIncomingMetric, testGaugeID, testStoragePolicy, maggregation.DefaultTypes, input.pipeline, testNumForwardedTimes, NewOptions())
+		require.NoError(t, err)
+		require.Equal(t, input.expected, e.outgoingMetricType())
+	}
+}
+
 func TestGaugeElemClose(t *testing.T) {
 	e := testGaugeElem(testAlignedStarts[:len(testAlignedStarts)-1], testGaugeVals, maggregation.DefaultTypes, applied.DefaultPipeline, NewOptions())
 	require.False(t, e.closed)
@@ -1633,6 +2276,8 @@ func TestGaugeElemClose(t *testing.T) {
 	require.Equal(t, parsedPipeline{}, e.parsedPipeline)
 	require.Nil(t, e.writeForwardedMetricFn)
 	require.Nil(t, e.onForwardedAggregationWrittenFn)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Nil(t, e.sourcesSet)
 	require.Equal(t, 0, len(e.values))
 	require.Equal(t, 0, len(e.toConsume))
 	require.Equal(t, 0, len(e.lastConsumedValues))
@@ -1663,8 +2308,9 @@ func TestGaugeFindOrCreateNoSourceSet(t *testing.T) {
 	}
 }
 
-func TestGaugeFindOrCreateWithSourceSet(t *testing.T) {
-	e, err := NewGaugeElem(StandardIncomingMetric, testGaugeID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, NewOptions())
+func TestGaugeFindOrCreateWithSourceSetNoEagerForwarding(t *testing.T) {
+	opts := NewOptions().SetEnableEagerForwarding(false)
+	e, err := NewGaugeElem(StandardIncomingMetric, testGaugeID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
 	require.NoError(t, err)
 
 	inputs := []int64{10, 20}
@@ -1683,6 +2329,44 @@ func TestGaugeFindOrCreateWithSourceSet(t *testing.T) {
 		require.Equal(t, expected[idx].data, times)
 		require.NotNil(t, e.values[expected[idx].index].lockedAgg.sourcesSet)
 	}
+}
+
+func TestGaugeFindOrCreateWithSourceSetWithEagerForwarding(t *testing.T) {
+	forwardingSourcesTTLFn := func(time.Duration) time.Duration { return 10 * time.Second }
+	now := time.Unix(1234, 0)
+	nowFn := func() time.Time { return now }
+	clockOpts := clock.NewOptions().SetNowFn(nowFn)
+	opts := NewOptions().
+		SetClockOptions(clockOpts).
+		SetEnableEagerForwarding(true).
+		SetForwardingSourcesTTLFn(forwardingSourcesTTLFn)
+	e, err := NewGaugeElem(StandardIncomingMetric, testGaugeID, testStoragePolicy, maggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, opts)
+	require.NoError(t, err)
+	require.Nil(t, e.sourcesHeartbeat)
+	require.Equal(t, int64(0), e.buildingSourcesAtNanos)
+
+	// First time should not clone the source set.
+	sourceOpts := sourcesOptions{updateSources: true, source: 1234}
+	res, err := e.findOrCreate(1230*time.Second.Nanoseconds(), sourceOpts)
+	require.NoError(t, err)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.lastSourcesRefreshNanos)
+	require.True(t, e.sourcesSet.Test(uint(1234)))
+	require.NotNil(t, res.sourcesSet)
+	require.False(t, res.sourcesSet.Test(uint(1234)))
+
+	// Move time forward and create a second time should clone the source set.
+	now = time.Unix(1300, 0)
+	sourceOpts = sourcesOptions{updateSources: true, source: 5678}
+	res, err = e.findOrCreate(1240*time.Second.Nanoseconds(), sourceOpts)
+	require.NoError(t, err)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.buildingSourcesAtNanos)
+	require.Equal(t, int64(1234*time.Second.Nanoseconds()), e.lastSourcesRefreshNanos)
+	require.True(t, e.sourcesSet.Test(uint(1234)))
+	require.True(t, e.sourcesSet.Test(uint(5678)))
+	require.NotNil(t, res.sourcesSet)
+	require.True(t, res.sourcesSet.Test(uint(1234)))
+	require.True(t, res.sourcesSet.Test(uint(5678)))
 }
 
 type testIndexData struct {
