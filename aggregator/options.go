@@ -48,7 +48,7 @@ var (
 	defaultEntryCheckInterval               = time.Hour
 	defaultEntryCheckBatchPercent           = 0.01
 	defaultMaxTimerBatchSizePerWrite        = 0
-	defaultEnableEagerForwarding            = true
+	defaultEnableEagerForwarding            = false
 	defaultMaxForwardingWindows             = 10
 	defaultForwardingSourcesTTLByResolution = 10
 	defaultForwardingSourcesTTLByDuration   = 5 * time.Minute
