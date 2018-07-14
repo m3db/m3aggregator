@@ -413,7 +413,7 @@ func (t *leaderFlushTask) Run() {
 		flusher := flusher
 		wgWorkers.Add(1)
 		mgr.workers.Go(func() {
-			flusher.Flush(req, allowEagerForwarding)
+			flusher.Flush(req)
 			wgWorkers.Done()
 		})
 	}
