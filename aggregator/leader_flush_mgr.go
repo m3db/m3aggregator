@@ -264,10 +264,10 @@ func (mgr *leaderFlushManager) updateFlushTimesWithLock(
 	}
 	for _, bucket := range buckets {
 		bucketID := bucket.bucketID
-		switch bucketID.incomingMetricType {
-		case StandardIncomingMetric:
+		switch bucketID.listType {
+		case standardMetricListType:
 			mgr.updateStandardFlushTimesWithLock(bucketID.standard, bucket.flushers)
-		case ForwardedIncomingMetric:
+		case forwardedMetricListType:
 			mgr.updateForwardedFlushTimesWithLock(bucketID.forwarded, bucket.flushers)
 		default:
 			panic("should never get here")

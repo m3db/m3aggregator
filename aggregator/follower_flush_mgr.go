@@ -289,10 +289,10 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 		bucketID := bucket.bucketID
 		flushersByInterval[i].interval = bucket.interval
 		flushersByInterval[i].duration = bucket.duration
-		switch bucketID.incomingMetricType {
-		case StandardIncomingMetric:
+		switch bucketID.listType {
+		case standardMetricListType:
 			flushersByInterval[i].flushers = mgr.standardFlushersFromKVUpdateWithLock(bucketID.standard, bucket.flushers)
-		case ForwardedIncomingMetric:
+		case forwardedMetricListType:
 			flushersByInterval[i].flushers = mgr.forwardedFlushersFromKVUpdateWithLock(bucketID.forwarded, bucket.flushers)
 		default:
 			panic("should never get here")
