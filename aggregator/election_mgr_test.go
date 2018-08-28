@@ -30,6 +30,7 @@ import (
 	"time"
 
 	schema "github.com/m3db/m3aggregator/generated/proto/flush"
+	"github.com/m3db/m3cluster/placement"
 	"github.com/m3db/m3cluster/services"
 	"github.com/m3db/m3cluster/services/leader/campaign"
 	"github.com/m3db/m3cluster/shard"
@@ -300,6 +301,14 @@ func TestElectionManagerResignSuccess(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	p := placement.NewPlacement().SetInstances([]placement.Instance{
+		placement.NewInstance().SetID("myself"),
+		placement.NewInstance().SetID("someone else"),
+	})
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Placement().
+		Return(nil, p, nil)
 	mgr = NewElectionManager(opts).(*electionManager)
 	mgr.sleepFn = func(time.Duration) {}
 	mgr.electionStateWatchable.Update(LeaderState)
@@ -368,6 +377,15 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	p := placement.NewPlacement().SetInstances([]placement.Instance{
+		placement.NewInstance().SetID("myself"),
+		placement.NewInstance().SetID("someone else"),
+	})
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Placement().
+		Return(nil, p, nil).
+		AnyTimes()
 	mgr := NewElectionManager(opts).(*electionManager)
 
 	var enabled = int32(1)
@@ -451,7 +469,7 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 	}
 }
 
-func TestElectionManagerVerifyLeaderDelay(t *testing.T) {
+func TestElectionManagerVerifyLeaderDelayWithValidLeader(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -475,6 +493,14 @@ func TestElectionManagerVerifyLeaderDelay(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	p := placement.NewPlacement().SetInstances([]placement.Instance{
+		placement.NewInstance().SetID("myself"),
+		placement.NewInstance().SetID("someone else"),
+	})
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Placement().
+		Return(nil, p, nil)
 	mgr := NewElectionManager(opts).(*electionManager)
 	retryOpts := retry.NewOptions().
 		SetInitialBackoff(10 * time.Millisecond).
@@ -500,6 +526,65 @@ func TestElectionManagerVerifyLeaderDelay(t *testing.T) {
 	}
 	close(mgr.doneCh)
 	require.Equal(t, 10, iter)
+}
+
+func TestElectionManagerVerifyLeaderDelayWithInvalidLeader(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	var iter int32
+	leaderValue := "myself"
+	leaderService := services.NewMockLeaderService(ctrl)
+	leaderService.EXPECT().
+		Leader(gomock.Any()).
+		DoAndReturn(func(electionID string) (string, error) {
+			num := atomic.AddInt32(&iter, 1)
+			if num < 10 {
+				return leaderValue, nil
+			}
+			return "someone else not in placement", nil
+		}).
+		AnyTimes()
+
+	campaignOpts, err := services.NewCampaignOptions()
+	require.NoError(t, err)
+	campaignOpts = campaignOpts.SetLeaderValue(leaderValue)
+	opts := testElectionManagerOptions(t, ctrl).
+		SetCampaignOptions(campaignOpts).
+		SetLeaderService(leaderService)
+	p := placement.NewPlacement().SetInstances([]placement.Instance{
+		placement.NewInstance().SetID("myself"),
+		placement.NewInstance().SetID("someone else"),
+	})
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Placement().
+		Return(nil, p, nil).
+		AnyTimes()
+	mgr := NewElectionManager(opts).(*electionManager)
+	retryOpts := retry.NewOptions().
+		SetInitialBackoff(10 * time.Millisecond).
+		SetBackoffFactor(2).
+		SetMaxBackoff(50 * time.Millisecond).
+		SetMaxRetries(15)
+	mgr.changeRetrier = retry.NewRetrier(retryOpts)
+	mgr.electionStateWatchable.Update(PendingFollowerState)
+	mgr.campaignStateWatchable.Update(campaignEnabled)
+
+	_, watch, err := mgr.goalStateWatchable.Watch()
+	require.NoError(t, err)
+
+	mgr.Add(1)
+	go mgr.verifyPendingFollower(watch)
+	mgr.goalStateWatchable.Update(goalState{state: PendingFollowerState})
+	for {
+		if atomic.LoadInt32(&iter) > 10 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	require.NotEqual(t, FollowerState, mgr.goalStateWatchable.Get().(goalState).state)
+	close(mgr.doneCh)
 }
 
 func TestElectionManagerVerifyWithLeaderErrors(t *testing.T) {
@@ -529,6 +614,15 @@ func TestElectionManagerVerifyWithLeaderErrors(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	p := placement.NewPlacement().SetInstances([]placement.Instance{
+		placement.NewInstance().SetID("myself"),
+		placement.NewInstance().SetID("someone else"),
+	})
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Placement().
+		Return(nil, p, nil).
+		AnyTimes()
 	mgr := NewElectionManager(opts).(*electionManager)
 	mgr.electionStateWatchable.Update(PendingFollowerState)
 	mgr.changeRetrier = retry.NewRetrier(retry.NewOptions().SetInitialBackoff(100 * time.Millisecond))
