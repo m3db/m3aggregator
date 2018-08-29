@@ -301,9 +301,13 @@ func TestElectionManagerResignSuccess(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	i := placement.NewInstance().SetID("myself")
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Instance().
+		Return(i, nil)
 	p := placement.NewPlacement().SetInstances([]placement.Instance{
-		placement.NewInstance().SetID("myself").SetShardSetID(testShardSetID),
-		placement.NewInstance().SetID("someone else").SetShardSetID(testShardSetID),
+		i, placement.NewInstance().SetID("someone else"),
 	})
 	opts.PlacementManager().(*MockPlacementManager).
 		EXPECT().
@@ -377,9 +381,14 @@ func TestElectionManagerCampaignLoop(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	i := placement.NewInstance().SetID("myself")
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Instance().
+		Return(i, nil).
+		AnyTimes()
 	p := placement.NewPlacement().SetInstances([]placement.Instance{
-		placement.NewInstance().SetID("myself").SetShardSetID(testShardSetID),
-		placement.NewInstance().SetID("someone else").SetShardSetID(testShardSetID),
+		i, placement.NewInstance().SetID("someone else"),
 	})
 	opts.PlacementManager().(*MockPlacementManager).
 		EXPECT().
@@ -493,14 +502,20 @@ func TestElectionManagerVerifyLeaderDelayWithValidLeader(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	i := placement.NewInstance().SetID("myself")
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Instance().
+		Return(i, nil).
+		AnyTimes()
 	p := placement.NewPlacement().SetInstances([]placement.Instance{
-		placement.NewInstance().SetID("myself"),
-		placement.NewInstance().SetID("someone else"),
+		i, placement.NewInstance().SetID("someone else"),
 	})
 	opts.PlacementManager().(*MockPlacementManager).
 		EXPECT().
 		Placement().
-		Return(nil, p, nil)
+		Return(nil, p, nil).
+		AnyTimes()
 	mgr := NewElectionManager(opts).(*electionManager)
 	retryOpts := retry.NewOptions().
 		SetInitialBackoff(10 * time.Millisecond).
@@ -611,9 +626,14 @@ func TestElectionManagerVerifyLeaderDelayWithLeaderOwningDifferentShardSet(t *te
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	i := placement.NewInstance().SetID("myself")
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Instance().
+		Return(i, nil).
+		AnyTimes()
 	p := placement.NewPlacement().SetInstances([]placement.Instance{
-		placement.NewInstance().SetID("myself"),
-		placement.NewInstance().SetID("someone else").SetShardSetID(100),
+		i, placement.NewInstance().SetID("someone else").SetShardSetID(100),
 	})
 	opts.PlacementManager().(*MockPlacementManager).
 		EXPECT().
@@ -673,9 +693,14 @@ func TestElectionManagerVerifyWithLeaderErrors(t *testing.T) {
 	opts := testElectionManagerOptions(t, ctrl).
 		SetCampaignOptions(campaignOpts).
 		SetLeaderService(leaderService)
+	i := placement.NewInstance().SetID("myself")
+	opts.PlacementManager().(*MockPlacementManager).
+		EXPECT().
+		Instance().
+		Return(i, nil).
+		AnyTimes()
 	p := placement.NewPlacement().SetInstances([]placement.Instance{
-		placement.NewInstance().SetID("myself"),
-		placement.NewInstance().SetID("someone else"),
+		i, placement.NewInstance().SetID("someone else"),
 	})
 	opts.PlacementManager().(*MockPlacementManager).
 		EXPECT().
