@@ -530,8 +530,8 @@ func (mgr *electionManager) verifyPendingFollower(watch watch.Watch) {
 				return err
 			}
 			if leaderInstance.ShardSetID() != instance.ShardSetID() {
-				err := fmt.Errorf("received invalid leader value: [%s] which owns shardSet %v, while this aggregator owns shardSet %v",
-					leader, leaderInstance.ShardSetID(), instance.ShardSetID())
+				err := fmt.Errorf("received invalid leader value: [%s] which is in shardSet group %v",
+					leader, leaderInstance.ShardSetID())
 				mgr.logError("invalid leader value", err)
 				return err
 			}
