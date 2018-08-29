@@ -265,6 +265,7 @@ type electionManager struct {
 	doneCh                 chan struct{}
 	campaigning            int32
 	campaignStateWatchable watch.Watchable
+	shardSetID             uint32
 	electionKey            string
 	electionStateWatchable watch.Watchable
 	nextGoalStateID        int64
@@ -333,6 +334,7 @@ func (mgr *electionManager) Open(shardSetID uint32) error {
 	if mgr.state != electionManagerNotOpen {
 		return errElectionManagerAlreadyOpenOrClosed
 	}
+	mgr.shardSetID = shardSetID
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
 	_, stateChangeWatch, err := mgr.goalStateWatchable.Watch()
 	if err != nil {
@@ -514,11 +516,17 @@ func (mgr *electionManager) verifyPendingFollower(watch watch.Watch) {
 				mgr.logError("error getting placement", err)
 				return err
 			}
-			_, exist := p.Instance(leader)
+			instance, exist := p.Instance(leader)
 			if !exist {
 				mgr.metrics.verifyLeaderNotInPlacement.Inc(1)
 				err := fmt.Errorf("received invalid leader value: [%s], which is not available in placement", leader)
-				mgr.logger.Error(err.Error())
+				mgr.logError("invalid leader value", err)
+				return err
+			}
+			ssID := instance.ShardSetID()
+			if ssID != mgr.shardSetID {
+				err := fmt.Errorf("received invalid leader value: [%s] which owns shardSet %v, while this aggregator owns shardSet %v", leader, ssID, mgr.shardSetID)
+				mgr.logError("invalid leader value", err)
 				return err
 			}
 			mgr.logger.Infof("found valid new leader: [%s] for the campaign", leader)
