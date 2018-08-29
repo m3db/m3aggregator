@@ -265,7 +265,6 @@ type electionManager struct {
 	doneCh                 chan struct{}
 	campaigning            int32
 	campaignStateWatchable watch.Watchable
-	shardSetID             uint32
 	electionKey            string
 	electionStateWatchable watch.Watchable
 	nextGoalStateID        int64
@@ -334,7 +333,6 @@ func (mgr *electionManager) Open(shardSetID uint32) error {
 	if mgr.state != electionManagerNotOpen {
 		return errElectionManagerAlreadyOpenOrClosed
 	}
-	mgr.shardSetID = shardSetID
 	mgr.electionKey = fmt.Sprintf(mgr.electionKeyFmt, shardSetID)
 	_, stateChangeWatch, err := mgr.goalStateWatchable.Watch()
 	if err != nil {
@@ -523,7 +521,7 @@ func (mgr *electionManager) verifyPendingFollower(watch watch.Watch) {
 				mgr.logger.Error(err.Error())
 				return err
 			}
-			mgr.logger.Infof("found new leader: [%s] for the campaign, resigning.", leader)
+			mgr.logger.Infof("found valid new leader: [%s] for the campaign", leader)
 			return nil
 		}); verifyErr != nil {
 			// If state has changed, we skip this stale change.
