@@ -32,12 +32,18 @@ const (
 	// nolint: megacheck
 	unknownPayloadType payloadType = iota
 	untimedType
+	timedType
 	forwardedType
 )
 
 type untimedPayload struct {
 	metric    unaggregated.MetricUnion
 	metadatas metadata.StagedMetadatas
+}
+
+type timedPayload struct {
+	metric   aggregated.Metric
+	metadata metadata.TimedMetadata
 }
 
 type forwardedPayload struct {
@@ -48,5 +54,6 @@ type forwardedPayload struct {
 type payloadUnion struct {
 	payloadType payloadType
 	untimed     untimedPayload
+	timed       timedPayload
 	forwarded   forwardedPayload
 }

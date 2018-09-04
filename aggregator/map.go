@@ -57,6 +57,7 @@ const (
 	// nolint: megacheck
 	unknownMetricCategory metricCategory = iota
 	untimedMetric
+	timedMetric
 	forwardedMetric
 )
 
@@ -76,6 +77,8 @@ type metricMapMetrics struct {
 	noRateLimitWarmup          tally.Counter
 	newMetricRateLimitExceeded tally.Counter
 	droppedNewMetrics          tally.Counter
+	timedMetricArrivedTooEarly tally.Counter
+	timedMetricArrivedTooLate  tally.Counter
 }
 
 func newMetricMapMetrics(scope tally.Scope) metricMapMetrics {
@@ -84,6 +87,8 @@ func newMetricMapMetrics(scope tally.Scope) metricMapMetrics {
 		noRateLimitWarmup:          scope.Counter("no-rate-limit-warmup"),
 		newMetricRateLimitExceeded: scope.Counter("new-metric-rate-limit-exceeded"),
 		droppedNewMetrics:          scope.Counter("dropped-new-metrics"),
+		timedMetricArrivedTooEarly: scope.Counter("timed-metric-arrived-too-early"),
+		timedMetricArrivedTooLate:  scope.Counter("timed-metric-arrived-too-late"),
 	}
 }
 
@@ -154,6 +159,24 @@ func (m *metricMap) AddUntimed(
 		return err
 	}
 	err = entry.AddUntimed(metric, metadatas)
+	entry.DecWriter()
+	return err
+}
+
+func (m *metricMap) AddTimed(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	key := entryKey{
+		metricCategory: timedMetric,
+		metricType:     metric.Type,
+		idHash:         hash.Murmur3Hash128(metric.ID),
+	}
+	entry, err := m.findOrCreate(key)
+	if err != nil {
+		return err
+	}
+	err = entry.AddTimed(metric, metadata)
 	entry.DecWriter()
 	return err
 }

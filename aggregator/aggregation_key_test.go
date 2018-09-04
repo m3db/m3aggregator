@@ -47,14 +47,28 @@ func TestAggregationKeyEqual(t *testing.T) {
 		},
 		{
 			a: aggregationKey{
-				aggregationID: aggregation.DefaultID,
-				storagePolicy: policy.NewStoragePolicy(10*time.Second, xtime.Second, 48*time.Hour),
+				aggregationID:  aggregation.DefaultID,
+				storagePolicy:  policy.NewStoragePolicy(10*time.Second, xtime.Second, 48*time.Hour),
+				idMutationType: IDMutationEnabled,
+			},
+			b: aggregationKey{
+				aggregationID:  aggregation.DefaultID,
+				storagePolicy:  policy.NewStoragePolicy(10*time.Second, xtime.Second, 48*time.Hour),
+				idMutationType: IDMutationEnabled,
+			},
+			expected: true,
+		},
+		{
+			a: aggregationKey{
+				aggregationID:  aggregation.DefaultID,
+				storagePolicy:  policy.NewStoragePolicy(10*time.Second, xtime.Second, 48*time.Hour),
+				idMutationType: IDMutationEnabled,
 			},
 			b: aggregationKey{
 				aggregationID: aggregation.DefaultID,
 				storagePolicy: policy.NewStoragePolicy(10*time.Second, xtime.Second, 48*time.Hour),
 			},
-			expected: true,
+			expected: false,
 		},
 		{
 			a: aggregationKey{

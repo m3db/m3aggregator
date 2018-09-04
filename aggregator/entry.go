@@ -54,6 +54,7 @@ var (
 	errEmptyMetadatas              = errors.New("empty metadata list")
 	errNoApplicableMetadata        = errors.New("no applicable metadata")
 	errNoPipelinesInMetadata       = errors.New("no pipelines in metadata")
+	errArrivedTooEarly             = errors.New("arrived too early")
 	errArrivedTooLate              = errors.New("arrived too late")
 )
 
@@ -95,6 +96,22 @@ func newUntimedEntryMetrics(scope tally.Scope) untimedEntryMetrics {
 	}
 }
 
+type timedEntryMetrics struct {
+	rateLimit       rateLimitEntryMetrics
+	arrivedTooEarly tally.Counter
+	arrivedTooLate  tally.Counter
+	metadataUpdates tally.Counter
+}
+
+func newTimedEntryMetrics(scope tally.Scope) timedEntryMetrics {
+	return timedEntryMetrics{
+		rateLimit:       newRateLimitEntryMetrics(scope),
+		arrivedTooEarly: scope.Counter("arrived-too-early"),
+		arrivedTooLate:  scope.Counter("arrived-too-late"),
+		metadataUpdates: scope.Counter("metadata-updates"),
+	}
+}
+
 type forwardedEntryMetrics struct {
 	rateLimit        rateLimitEntryMetrics
 	arrivedTooLate   tally.Counter
@@ -113,14 +130,17 @@ func newForwardedEntryMetrics(scope tally.Scope) forwardedEntryMetrics {
 
 type entryMetrics struct {
 	untimed   untimedEntryMetrics
+	timed     timedEntryMetrics
 	forwarded forwardedEntryMetrics
 }
 
 func newEntryMetrics(scope tally.Scope) entryMetrics {
 	untimedEntryScope := scope.Tagged(map[string]string{"entry-type": "untimed"})
+	timedEntryScope := scope.Tagged(map[string]string{"entry-type": "timed"})
 	forwardedEntryScope := scope.Tagged(map[string]string{"entry-type": "forwarded"})
 	return entryMetrics{
 		untimed:   newUntimedEntryMetrics(untimedEntryScope),
+		timed:     newTimedEntryMetrics(timedEntryScope),
 		forwarded: newForwardedEntryMetrics(forwardedEntryScope),
 	}
 }
@@ -222,12 +242,23 @@ func (e *Entry) AddUntimed(
 	}
 }
 
+// AddTimed adds a timed metric alongside its metadata.
+func (e *Entry) AddTimed(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	if err := e.applyValueRateLimit(1, e.metrics.timed.rateLimit); err != nil {
+		return err
+	}
+	return e.addTimed(metric, metadata)
+}
+
 // AddForwarded adds a forwarded metric alongside its metadata.
 func (e *Entry) AddForwarded(
 	metric aggregated.ForwardedMetric,
 	metadata metadata.ForwardMetadata,
 ) error {
-	if err := e.applyValueRateLimit(1, e.metrics.untimed.rateLimit); err != nil {
+	if err := e.applyValueRateLimit(1, e.metrics.forwarded.rateLimit); err != nil {
 		return err
 	}
 	return e.addForwarded(metric, metadata)
@@ -438,9 +469,10 @@ func (e *Entry) shouldUpdateStagedMetadatasWithLock(sm metadata.StagedMetadata) 
 		storagePolicies := e.storagePolicies(pipeline.StoragePolicies)
 		for _, storagePolicy := range storagePolicies {
 			key := aggregationKey{
-				aggregationID: pipeline.AggregationID,
-				storagePolicy: storagePolicy,
-				pipeline:      pipeline.Pipeline,
+				aggregationID:  pipeline.AggregationID,
+				storagePolicy:  storagePolicy,
+				pipeline:       pipeline.Pipeline,
+				idMutationType: IDMutationEnabled,
 			}
 			idx := e.aggregations.index(key)
 			if idx < 0 {
@@ -505,7 +537,7 @@ func (e *Entry) addNewAggregationKey(
 	}
 	// NB: The pipeline may not be owned by us and as such we need to make a copy here.
 	key.pipeline = key.pipeline.Clone()
-	if err = newElem.ResetSetData(metricID, key.storagePolicy, aggTypes, key.pipeline, key.numForwardedTimes); err != nil {
+	if err = newElem.ResetSetData(metricID, key.storagePolicy, aggTypes, key.pipeline, key.numForwardedTimes, key.idMutationType); err != nil {
 		return nil, err
 	}
 	list, err := e.lists.FindOrCreate(listID)
@@ -543,9 +575,10 @@ func (e *Entry) updateStagedMetadatasWithLock(
 		storagePolicies := e.storagePolicies(pipeline.StoragePolicies)
 		for _, storagePolicy := range storagePolicies {
 			key := aggregationKey{
-				aggregationID: pipeline.AggregationID,
-				storagePolicy: storagePolicy,
-				pipeline:      pipeline.Pipeline,
+				aggregationID:  pipeline.AggregationID,
+				storagePolicy:  storagePolicy,
+				pipeline:       pipeline.Pipeline,
+				idMutationType: IDMutationEnabled,
 			}
 			listID := standardMetricListID{
 				resolution: storagePolicy.Resolution().Window,
@@ -580,6 +613,136 @@ func (e *Entry) addUntimedWithLock(timestamp time.Time, mu unaggregated.MetricUn
 	return multiErr.FinalError()
 }
 
+func (e *Entry) addTimed(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	timeLock := e.opts.TimeLock()
+	timeLock.RLock()
+
+	// NB(xichen): it is important that we determine the current time
+	// within the time lock. This ensures time ordering by wrapping
+	// actions that need to happen before a given time within a read lock,
+	// so it is guaranteed that actions before when a write lock is acquired
+	// must have all completed. This is used to ensure we never write metrics
+	// for times that have already been flushed.
+	currTime := e.opts.ClockOptions().NowFn()()
+	e.recordLastAccessed(currTime)
+
+	e.RLock()
+	if e.closed {
+		e.RUnlock()
+		timeLock.RUnlock()
+		return errEntryClosed
+	}
+
+	// Reject datapoints that arrive too late or too early.
+	if err := e.checkTimestampForTimedMetric(
+		currTime.UnixNano(),
+		metric.TimeNanos,
+		metadata.StoragePolicy.Resolution().Window,
+	); err != nil {
+		e.RUnlock()
+		timeLock.RUnlock()
+		return err
+	}
+
+	// Check if we should update metadata, and add metric if not.
+	key := aggregationKey{
+		aggregationID:  metadata.AggregationID,
+		storagePolicy:  metadata.StoragePolicy,
+		idMutationType: IDMutationDisabled,
+	}
+	if idx := e.aggregations.index(key); idx >= 0 {
+		err := e.addTimedWithLock(e.aggregations[idx], metric)
+		e.RUnlock()
+		timeLock.RUnlock()
+		return err
+	}
+	e.RUnlock()
+
+	e.Lock()
+	if e.closed {
+		e.Unlock()
+		timeLock.RUnlock()
+		return errEntryClosed
+	}
+
+	if idx := e.aggregations.index(key); idx >= 0 {
+		err := e.addTimedWithLock(e.aggregations[idx], metric)
+		e.Unlock()
+		timeLock.RUnlock()
+		return err
+	}
+
+	// Update metatadata if not exists, and add metric.
+	if err := e.updateTimedMetadataWithLock(metric, metadata); err != nil {
+		e.Unlock()
+		timeLock.RUnlock()
+		return err
+	}
+	idx := e.aggregations.index(key)
+	err := e.addTimedWithLock(e.aggregations[idx], metric)
+	e.Unlock()
+	timeLock.RUnlock()
+	return err
+}
+
+func (e *Entry) checkTimestampForTimedMetric(
+	currNanos, metricTimeNanos int64,
+	resolution time.Duration,
+) error {
+	bufferFutureFn := e.opts.TimedAggregationBufferFutureFn()
+	timedBufferFuture := bufferFutureFn(resolution)
+	if metricTimeNanos-currNanos > timedBufferFuture.Nanoseconds() {
+		e.metrics.timed.arrivedTooEarly.Inc(1)
+		return errArrivedTooEarly
+	}
+	bufferPastFn := e.opts.TimedAggregationBufferPastFn()
+	timedBufferPast := bufferPastFn(resolution)
+	if currNanos-metricTimeNanos > timedBufferPast.Nanoseconds() {
+		e.metrics.timed.arrivedTooLate.Inc(1)
+		return errArrivedTooLate
+	}
+	return nil
+}
+
+func (e *Entry) updateTimedMetadataWithLock(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	var (
+		elemID = e.maybeCopyIDWithLock(metric.ID)
+		err    error
+	)
+
+	// Update the timed metadata.
+	key := aggregationKey{
+		aggregationID:  metadata.AggregationID,
+		storagePolicy:  metadata.StoragePolicy,
+		idMutationType: IDMutationDisabled,
+	}
+	listID := timedMetricListID{
+		resolution: metadata.StoragePolicy.Resolution().Window,
+	}.toMetricListID()
+	newAggregations, err := e.addNewAggregationKey(metric.Type, elemID, key, listID, e.aggregations)
+	if err != nil {
+		return err
+	}
+
+	e.aggregations = newAggregations
+	e.metrics.forwarded.metadataUpdates.Inc(1)
+	return nil
+}
+
+func (e *Entry) addTimedWithLock(
+	value aggregationValue,
+	metric aggregated.Metric,
+) error {
+	timestamp := time.Unix(0, metric.TimeNanos)
+	return value.elem.Value.(metricElem).AddValue(timestamp, metric.Value)
+}
+
 func (e *Entry) addForwarded(
 	metric aggregated.ForwardedMetric,
 	metadata metadata.ForwardMetadata,
@@ -604,7 +767,7 @@ func (e *Entry) addForwarded(
 	}
 
 	// Reject datapoints that arrive too late.
-	if err := e.checkLateness(
+	if err := e.checkLatenessForForwardedMetric(
 		currTime.UnixNano(),
 		metric.TimeNanos,
 		metadata.StoragePolicy.Resolution().Window,
@@ -621,6 +784,7 @@ func (e *Entry) addForwarded(
 		storagePolicy:     metadata.StoragePolicy,
 		pipeline:          metadata.Pipeline,
 		numForwardedTimes: metadata.NumForwardedTimes,
+		idMutationType:    IDMutationEnabled,
 	}
 	if idx := e.aggregations.index(key); idx >= 0 {
 		err := e.addForwardedWithLock(e.aggregations[idx], metric, metadata.SourceID)
@@ -657,7 +821,7 @@ func (e *Entry) addForwarded(
 	return err
 }
 
-func (e *Entry) checkLateness(
+func (e *Entry) checkLatenessForForwardedMetric(
 	currNanos, metricTimeNanos int64,
 	resolution time.Duration,
 	numForwardedTimes int,
@@ -686,6 +850,7 @@ func (e *Entry) updateForwardMetadataWithLock(
 		storagePolicy:     metadata.StoragePolicy,
 		pipeline:          metadata.Pipeline,
 		numForwardedTimes: metadata.NumForwardedTimes,
+		idMutationType:    IDMutationEnabled,
 	}
 	listID := forwardedMetricListID{
 		resolution:        metadata.StoragePolicy.Resolution().Window,

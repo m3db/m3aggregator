@@ -82,6 +82,16 @@ func (_mr *_MockClientRecorder) Init() *gomock.Call {
 	return _mr.mock.ctrl.RecordCall(_mr.mock, "Init")
 }
 
+func (_m *MockClient) WriteTimed(_param0 aggregated.Metric, _param1 metadata.TimedMetadata) error {
+	ret := _m.ctrl.Call(_m, "WriteTimed", _param0, _param1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (_mr *_MockClientRecorder) WriteTimed(arg0, arg1 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "WriteTimed", arg0, arg1)
+}
+
 func (_m *MockClient) WriteUntimedBatchTimer(_param0 unaggregated.BatchTimer, _param1 metadata.StagedMetadatas) error {
 	ret := _m.ctrl.Call(_m, "WriteUntimedBatchTimer", _param0, _param1)
 	ret0, _ := ret[0].(error)
@@ -171,6 +181,16 @@ func (_m *MockAdminClient) WriteForwarded(_param0 aggregated.ForwardedMetric, _p
 
 func (_mr *_MockAdminClientRecorder) WriteForwarded(arg0, arg1 interface{}) *gomock.Call {
 	return _mr.mock.ctrl.RecordCall(_mr.mock, "WriteForwarded", arg0, arg1)
+}
+
+func (_m *MockAdminClient) WriteTimed(_param0 aggregated.Metric, _param1 metadata.TimedMetadata) error {
+	ret := _m.ctrl.Call(_m, "WriteTimed", _param0, _param1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (_mr *_MockAdminClientRecorder) WriteTimed(arg0, arg1 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "WriteTimed", arg0, arg1)
 }
 
 func (_m *MockAdminClient) WriteUntimedBatchTimer(_param0 unaggregated.BatchTimer, _param1 metadata.StagedMetadatas) error {

@@ -75,6 +75,9 @@ var (
 // destination server, and ingestion delay at the destination server.
 type MaxAllowedForwardingDelayFn func(resolution time.Duration, numForwardedTimes int) time.Duration
 
+// TimedAggregationBufferFn returns the buffer duration for timed metrics.
+type TimedAggregationBufferFn func(resolution time.Duration) time.Duration
+
 // Options provide a set of base and derived options for the aggregator.
 type Options interface {
 	/// Read-write base options.
@@ -237,6 +240,18 @@ type Options interface {
 	// delay for given metric resolution and number of times the metric has been forwarded.
 	MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn
 
+	// SetTimedAggregationBufferPastFn sets the size of the buffer for timed metrics in the past.
+	SetTimedAggregationBufferPastFn(value TimedAggregationBufferFn) Options
+
+	// TimedAggregationBufferPastFn returns the size of the buffer for timed metrics in the past.
+	TimedAggregationBufferPastFn() TimedAggregationBufferFn
+
+	// SetTimedAggregationBufferFutureFn sets the size of the buffer for timed metrics in the future.
+	SetTimedAggregationBufferFutureFn(value TimedAggregationBufferFn) Options
+
+	// TimedAggregationBufferFutureFn returns the size of the buffer for timed metrics in the future.
+	TimedAggregationBufferFutureFn() TimedAggregationBufferFn
+
 	// SetMaxNumCachedSourceSets sets the maximum number of cached source sets.
 	SetMaxNumCachedSourceSets(value int) Options
 
@@ -313,6 +328,8 @@ type options struct {
 	electionManager                  ElectionManager
 	resignTimeout                    time.Duration
 	maxAllowedForwardingDelayFn      MaxAllowedForwardingDelayFn
+	timedAggregationBufferPastFn     TimedAggregationBufferFn
+	timedAggregationBufferFutureFn   TimedAggregationBufferFn
 	maxNumCachedSourceSets           int
 	discardNaNAggregatedValues       bool
 	entryPool                        EntryPool
@@ -354,6 +371,8 @@ func NewOptions() Options {
 		defaultStoragePolicies:           defaultDefaultStoragePolicies,
 		resignTimeout:                    defaultResignTimeout,
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
+		timedAggregationBufferPastFn:     defaultTimedAggregationBufferFn,
+		timedAggregationBufferFutureFn:   defaultTimedAggregationBufferFn,
 		maxNumCachedSourceSets:           defaultMaxNumCachedSourceSets,
 		discardNaNAggregatedValues:       defaultDiscardNaNAggregatedValues,
 	}
@@ -631,6 +650,26 @@ func (o *options) MaxAllowedForwardingDelayFn() MaxAllowedForwardingDelayFn {
 	return o.maxAllowedForwardingDelayFn
 }
 
+func (o *options) SetTimedAggregationBufferPastFn(value TimedAggregationBufferFn) Options {
+	opts := *o
+	opts.timedAggregationBufferPastFn = value
+	return &opts
+}
+
+func (o *options) TimedAggregationBufferPastFn() TimedAggregationBufferFn {
+	return o.timedAggregationBufferPastFn
+}
+
+func (o *options) SetTimedAggregationBufferFutureFn(value TimedAggregationBufferFn) Options {
+	opts := *o
+	opts.timedAggregationBufferFutureFn = value
+	return &opts
+}
+
+func (o *options) TimedAggregationBufferFutureFn() TimedAggregationBufferFn {
+	return o.timedAggregationBufferFutureFn
+}
+
 func (o *options) SetMaxNumCachedSourceSets(value int) Options {
 	opts := *o
 	opts.maxNumCachedSourceSets = value
@@ -716,17 +755,17 @@ func (o *options) initPools() {
 
 	o.counterElemPool = NewCounterElemPool(nil)
 	o.counterElemPool.Init(func() *CounterElem {
-		return MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, o)
 	})
 
 	o.timerElemPool = NewTimerElemPool(nil)
 	o.timerElemPool.Init(func() *TimerElem {
-		return MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, o)
 	})
 
 	o.gaugeElemPool = NewGaugeElemPool(nil)
 	o.gaugeElemPool.Init(func() *GaugeElem {
-		return MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, o)
+		return MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, o)
 	})
 }
 
@@ -766,4 +805,8 @@ func defaultMaxAllowedForwardingDelayFn(
 	numForwardedTimes int,
 ) time.Duration {
 	return resolution * time.Duration(numForwardedTimes)
+}
+
+func defaultTimedAggregationBufferFn(resolution time.Duration) time.Duration {
+	return resolution
 }
