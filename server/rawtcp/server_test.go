@@ -225,7 +225,7 @@ func testRawTCPServerHandleUnaggregated(
 		if protocol == protobufEncoding {
 			expectedResult.TimedMetricWithMetadata = append(expectedResult.TimedMetricWithMetadata, testTimedMetricWithMetadata)
 			expectedResult.ForwardedMetricsWithMetadata = append(expectedResult.ForwardedMetricsWithMetadata, testForwardedMetricWithMetadata)
-			expectedTotalMetrics += 4
+			expectedTotalMetrics += 5
 		} else {
 			expectedTotalMetrics += 3
 		}
@@ -284,7 +284,8 @@ func testRawTCPServerHandleUnaggregated(
 	s.Close()
 
 	// Assert the snapshot match expectations.
-	require.True(t, cmp.Equal(expectedResult, agg.Snapshot(), testCmpOpts...))
+	snapshot := agg.Snapshot()
+	require.True(t, cmp.Equal(expectedResult, snapshot, testCmpOpts...), expectedResult, snapshot)
 }
 
 func testServerOptions() Options {
