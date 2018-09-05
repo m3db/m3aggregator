@@ -31,11 +31,13 @@ type aggregationKey struct {
 	storagePolicy     policy.StoragePolicy
 	pipeline          applied.Pipeline
 	numForwardedTimes int
+	idMutationType    IDMutationType
 }
 
 func (k aggregationKey) Equal(other aggregationKey) bool {
 	return k.aggregationID == other.aggregationID &&
 		k.storagePolicy == other.storagePolicy &&
 		k.pipeline.Equal(other.pipeline) &&
-		k.numForwardedTimes == other.numForwardedTimes
+		k.numForwardedTimes == other.numForwardedTimes &&
+		k.idMutationType == other.idMutationType
 }

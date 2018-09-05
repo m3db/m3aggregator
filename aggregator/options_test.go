@@ -164,6 +164,23 @@ func TestSetMaxAllowedForwardingDelayFn(t *testing.T) {
 	require.Equal(t, 72*time.Second, fn(time.Minute, 12))
 }
 
+func TestSetTimedAggregationBufferPastFn(t *testing.T) {
+	value := func(resolution time.Duration) time.Duration {
+		return resolution * 2
+	}
+	o := NewOptions().SetBufferForPastTimedMetricFn(value)
+	fn := o.BufferForPastTimedMetricFn()
+	require.Equal(t, 2*time.Minute, fn(time.Minute))
+}
+
+func TestSetTimedAggregationBufferFutureFn(t *testing.T) {
+	value := func() time.Duration {
+		return 3 * time.Minute
+	}
+	o := NewOptions().SetBufferForFutureTimedMetricFn(value)
+	require.Equal(t, 3*time.Minute, o.BufferForFutureTimedMetricFn()())
+}
+
 func TestSetEntryCheckInterval(t *testing.T) {
 	value := time.Minute
 	o := NewOptions().SetEntryCheckInterval(value)

@@ -44,6 +44,7 @@ type aggregator struct {
 	batchTimersWithMetadatas     []unaggregated.BatchTimerWithMetadatas
 	gaugesWithMetadatas          []unaggregated.GaugeWithMetadatas
 	forwardedMetricsWithMetadata []aggregated.ForwardedMetricWithMetadata
+	timedMetricsWithMetadata     []aggregated.TimedMetricWithMetadata
 }
 
 // NewAggregator creates a new capturing aggregator.
@@ -90,6 +91,26 @@ func (agg *aggregator) AddUntimed(
 	return nil
 }
 
+func (agg *aggregator) AddTimed(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	// Clone the metric and timed metadata to ensure it cannot be mutated externally.
+	metric = cloneTimedMetric(metric)
+	metadata = cloneTimedMetadata(metadata)
+
+	agg.Lock()
+	defer agg.Unlock()
+
+	tm := aggregated.TimedMetricWithMetadata{
+		Metric:        metric,
+		TimedMetadata: metadata,
+	}
+	agg.timedMetricsWithMetadata = append(agg.timedMetricsWithMetadata, tm)
+	agg.numMetricsAdded++
+	return nil
+}
+
 func (agg *aggregator) AddForwarded(
 	metric aggregated.ForwardedMetric,
 	metadata metadata.ForwardMetadata,
@@ -128,11 +149,13 @@ func (agg *aggregator) Snapshot() SnapshotResult {
 		CountersWithMetadatas:        agg.countersWithMetadatas,
 		BatchTimersWithMetadatas:     agg.batchTimersWithMetadatas,
 		GaugesWithMetadatas:          agg.gaugesWithMetadatas,
+		TimedMetricWithMetadata:      agg.timedMetricsWithMetadata,
 		ForwardedMetricsWithMetadata: agg.forwardedMetricsWithMetadata,
 	}
 	agg.countersWithMetadatas = nil
 	agg.batchTimersWithMetadatas = nil
 	agg.gaugesWithMetadatas = nil
+	agg.timedMetricsWithMetadata = nil
 	agg.forwardedMetricsWithMetadata = nil
 	agg.numMetricsAdded = 0
 
@@ -204,5 +227,18 @@ func cloneForwardedMetric(metric aggregated.ForwardedMetric) aggregated.Forwarde
 func cloneForwardMetadata(meta metadata.ForwardMetadata) metadata.ForwardMetadata {
 	cloned := meta
 	cloned.Pipeline = meta.Pipeline.Clone()
+	return cloned
+}
+
+func cloneTimedMetric(metric aggregated.Metric) aggregated.Metric {
+	cloned := metric
+	cloned.ID = make(id.RawID, len(metric.ID))
+	copy(cloned.ID, metric.ID)
+	cloned.Value = metric.Value
+	return cloned
+}
+
+func cloneTimedMetadata(meta metadata.TimedMetadata) metadata.TimedMetadata {
+	cloned := meta
 	return cloned
 }

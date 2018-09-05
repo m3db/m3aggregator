@@ -57,6 +57,7 @@ const (
 	// nolint: megacheck
 	unknownMetricCategory metricCategory = iota
 	untimedMetric
+	timedMetric
 	forwardedMetric
 )
 
@@ -154,6 +155,24 @@ func (m *metricMap) AddUntimed(
 		return err
 	}
 	err = entry.AddUntimed(metric, metadatas)
+	entry.DecWriter()
+	return err
+}
+
+func (m *metricMap) AddTimed(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	key := entryKey{
+		metricCategory: timedMetric,
+		metricType:     metric.Type,
+		idHash:         hash.Murmur3Hash128(metric.ID),
+	}
+	entry, err := m.findOrCreate(key)
+	if err != nil {
+		return err
+	}
+	err = entry.AddTimed(metric, metadata)
 	entry.DecWriter()
 	return err
 }

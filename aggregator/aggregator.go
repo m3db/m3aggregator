@@ -66,6 +66,9 @@ type Aggregator interface {
 	// AddUntimed adds an untimed metric with staged metadatas.
 	AddUntimed(metric unaggregated.MetricUnion, metas metadata.StagedMetadatas) error
 
+	// AddTimed adds a timed metric with metadata.
+	AddTimed(metric aggregated.Metric, metadata metadata.TimedMetadata) error
+
 	// AddForwarded adds a forwarded metric with metadata.
 	AddForwarded(metric aggregated.ForwardedMetric, metadata metadata.ForwardMetadata) error
 
@@ -180,6 +183,24 @@ func (agg *aggregator) AddUntimed(
 		return err
 	}
 	agg.metrics.addUntimed.ReportSuccess(agg.nowFn().Sub(callStart))
+	return nil
+}
+
+func (agg *aggregator) AddTimed(
+	metric aggregated.Metric,
+	metadata metadata.TimedMetadata,
+) error {
+	callStart := agg.nowFn()
+	shard, err := agg.shardFor(metric.ID)
+	if err != nil {
+		agg.metrics.addTimed.ReportError(err)
+		return err
+	}
+	if err = shard.AddTimed(metric, metadata); err != nil {
+		agg.metrics.addTimed.ReportError(err)
+		return err
+	}
+	agg.metrics.addTimed.ReportSuccess(agg.nowFn().Sub(callStart))
 	return nil
 }
 
@@ -838,6 +859,7 @@ type aggregatorMetrics struct {
 	gauges       tally.Counter
 	forwarded    tally.Counter
 	addUntimed   aggregatorAddUntimedMetrics
+	addTimed     aggregatorAddMetricMetrics
 	addForwarded aggregatorAddForwardedMetrics
 	placement    aggregatorPlacementMetrics
 	shards       aggregatorShardsMetrics
@@ -851,6 +873,7 @@ func newAggregatorMetrics(
 	maxAllowedForwardingDelayFn MaxAllowedForwardingDelayFn,
 ) aggregatorMetrics {
 	addUntimedScope := scope.SubScope("addUntimed")
+	addTimedScope := scope.SubScope("addTimed")
 	addForwardedScope := scope.SubScope("addForwarded")
 	placementScope := scope.SubScope("placement")
 	shardsScope := scope.SubScope("shards")
@@ -863,6 +886,7 @@ func newAggregatorMetrics(
 		gauges:       scope.Counter("gauges"),
 		forwarded:    scope.Counter("forwarded"),
 		addUntimed:   newAggregatorAddUntimedMetrics(addUntimedScope, samplingRate),
+		addTimed:     newAggregatorAddMetricMetrics(addTimedScope, samplingRate),
 		addForwarded: newAggregatorAddForwardedMetrics(addForwardedScope, samplingRate, maxAllowedForwardingDelayFn),
 		placement:    newAggregatorPlacementMetrics(placementScope),
 		shards:       newAggregatorShardsMetrics(shardsScope),
