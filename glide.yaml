@@ -118,7 +118,7 @@ import:
   version: 3ac0863d7acf3bc44daf49afef8919af12f704ef
 
 - package: github.com/gogo/protobuf
-  version: 0.4
+  version: ^1.1.1
 
 - package: github.com/google/btree
   version: 925471ac9e2131377a91e1595defec898166fe49

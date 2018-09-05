@@ -1,5 +1,5 @@
-hash: 0fedb04f24e51f3fcc02aa784f328e4dd5c8aa4d096bc7d6aa66d7d72c9d38a6
-updated: 2018-09-05T17:28:25.1336-04:00
+hash: 0b486f26c4b058ad3e565d4dcc1b18c0e0505ec15d03267755c52120ddef2d14
+updated: 2018-09-05T17:43:19.425831-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -116,7 +116,7 @@ imports:
 - name: github.com/go-ole/go-ole
   version: de8695c8edbf8236f30d6e1376e20b198a028d42
 - name: github.com/gogo/protobuf
-  version: 100ba4e885062801d56799d78530b73b178a78f3
+  version: 636bf0302bc95575d69441b25a2603156ffdddf1
   subpackages:
   - gogoproto
   - proto
