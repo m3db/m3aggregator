@@ -731,7 +731,7 @@ func (e *Entry) updateTimedMetadataWithLock(
 	}
 
 	e.aggregations = newAggregations
-	e.metrics.forwarded.metadataUpdates.Inc(1)
+	e.metrics.timed.metadataUpdates.Inc(1)
 	return nil
 }
 
