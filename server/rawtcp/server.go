@@ -126,10 +126,10 @@ func (s *handler) Handle(conn net.Conn) {
 	var (
 		untimedMetric   unaggregated.MetricUnion
 		stagedMetadatas metadata.StagedMetadatas
-		timedMetric     aggregated.Metric
-		timedMetadata   metadata.TimedMetadata
 		forwardedMetric aggregated.ForwardedMetric
 		forwardMetadata metadata.ForwardMetadata
+		timedMetric     aggregated.Metric
+		timedMetadata   metadata.TimedMetadata
 		err             error
 	)
 	for it.Next() {
@@ -147,14 +147,14 @@ func (s *handler) Handle(conn net.Conn) {
 			untimedMetric = current.GaugeWithMetadatas.Gauge.ToUnion()
 			stagedMetadatas = current.GaugeWithMetadatas.StagedMetadatas
 			err = toAddUntimedError(s.aggregator.AddUntimed(untimedMetric, stagedMetadatas))
-		case encoding.TimedMetricWithMetadataType:
-			timedMetric = current.TimedMetricWithMetadata.Metric
-			timedMetadata = current.TimedMetricWithMetadata.TimedMetadata
-			err = toAddTimedError(s.aggregator.AddTimed(timedMetric, timedMetadata))
 		case encoding.ForwardedMetricWithMetadataType:
 			forwardedMetric = current.ForwardedMetricWithMetadata.ForwardedMetric
 			forwardMetadata = current.ForwardedMetricWithMetadata.ForwardMetadata
 			err = toAddForwardedError(s.aggregator.AddForwarded(forwardedMetric, forwardMetadata))
+		case encoding.TimedMetricWithMetadataType:
+			timedMetric = current.TimedMetricWithMetadata.Metric
+			timedMetadata = current.TimedMetricWithMetadata.TimedMetadata
+			err = toAddTimedError(s.aggregator.AddTimed(timedMetric, timedMetadata))
 		default:
 			err = newUnknownMessageTypeError(current.Type)
 		}
@@ -185,15 +185,6 @@ func (s *handler) Handle(conn net.Conn) {
 				log.NewField("metadatas", stagedMetadatas),
 				log.NewErrField(err),
 			).Error("error adding untimed metric")
-		case addTimedError:
-			s.metrics.addTimedErrors.Inc(1)
-			s.log.WithFields(
-				log.NewField("remoteAddress", remoteAddress),
-				log.NewField("id", timedMetric.ID.String()),
-				log.NewField("timestamp", time.Unix(0, timedMetric.TimeNanos).String()),
-				log.NewField("value", timedMetric.Value),
-				log.NewErrField(err),
-			).Error("error adding timed metric")
 		case addForwardedError:
 			s.metrics.addForwardedErrors.Inc(1)
 			s.log.WithFields(
@@ -203,6 +194,15 @@ func (s *handler) Handle(conn net.Conn) {
 				log.NewField("values", forwardedMetric.Values),
 				log.NewErrField(err),
 			).Error("error adding forwarded metric")
+		case addTimedError:
+			s.metrics.addTimedErrors.Inc(1)
+			s.log.WithFields(
+				log.NewField("remoteAddress", remoteAddress),
+				log.NewField("id", timedMetric.ID.String()),
+				log.NewField("timestamp", time.Unix(0, timedMetric.TimeNanos).String()),
+				log.NewField("value", timedMetric.Value),
+				log.NewErrField(err),
+			).Error("error adding timed metric")
 		default:
 			s.metrics.unknownErrorTypeErrors.Inc(1)
 			s.log.WithFields(

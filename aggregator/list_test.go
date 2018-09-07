@@ -1212,6 +1212,21 @@ func TestMetricLists(t *testing.T) {
 	require.True(t, fl == fl2)
 	require.Equal(t, 2, lists.Len())
 
+	// Create a new timed metric list.
+	listID = timedMetricListID{
+		resolution: time.Minute,
+	}.toMetricListID()
+	tl, err := lists.FindOrCreate(listID)
+	require.NoError(t, err)
+	require.NotNil(t, tl)
+	require.Equal(t, 3, lists.Len())
+
+	// Find the same timed metric list.
+	tl2, err := lists.FindOrCreate(listID)
+	require.NoError(t, err)
+	require.True(t, tl == tl2)
+	require.Equal(t, 3, lists.Len())
+
 	// Perform a tick.
 	tickRes := lists.Tick()
 	expectedRes := listsTickResult{
@@ -1220,6 +1235,9 @@ func TestMetricLists(t *testing.T) {
 		},
 		forwarded: map[time.Duration]int{
 			10 * time.Second: 0,
+		},
+		timed: map[time.Duration]int{
+			time.Minute: 0,
 		},
 	}
 	require.Equal(t, expectedRes, tickRes)

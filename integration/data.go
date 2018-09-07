@@ -207,10 +207,10 @@ func generateTestDataset(opts datasetGenOpts) (testDataset, error) {
 				if err != nil {
 					return nil, err
 				}
-			case timedMetric:
-				mu = generateTestTimedMetric(metricType, opts.ids[i], timestamp.UnixNano(), intervalIdx, i, opts.valueGenOpts.timed)
 			case forwardedMetric:
 				mu = generateTestForwardedMetric(metricType, opts.ids[i], timestamp.UnixNano(), intervalIdx, i, opts.valueGenOpts.forwarded)
+			case timedMetric:
+				mu = generateTestTimedMetric(metricType, opts.ids[i], timestamp.UnixNano(), intervalIdx, i, opts.valueGenOpts.timed)
 			default:
 				return nil, fmt.Errorf("unrecognized metric category: %v", opts.category)
 			}
@@ -399,10 +399,10 @@ func computeExpectedAggregationBuckets(
 				switch mu.category {
 				case untimedMetric:
 					values, err = addUntimedMetricToAggregation(values, mu.untimed)
-				case timedMetric:
-					values, err = addTimedMetricToAggregation(values, mu.timed)
 				case forwardedMetric:
 					values, err = addForwardedMetricToAggregation(values, mu.forwarded)
+				case timedMetric:
+					values, err = addTimedMetricToAggregation(values, mu.timed)
 				default:
 					err = fmt.Errorf("unrecognized metric category: %v", mu.category)
 				}
@@ -690,8 +690,8 @@ type metricCategory int
 
 const (
 	untimedMetric metricCategory = iota
-	timedMetric
 	forwardedMetric
+	timedMetric
 )
 
 func (c metricCategory) TimestampNanosFn() timestampNanosFn {
@@ -700,13 +700,13 @@ func (c metricCategory) TimestampNanosFn() timestampNanosFn {
 		return func(windowStartAtNanos int64, resolution time.Duration) int64 {
 			return windowStartAtNanos + resolution.Nanoseconds()
 		}
-	case timedMetric:
-		return func(windowStartAtNanos int64, resolution time.Duration) int64 {
-			return windowStartAtNanos + resolution.Nanoseconds()
-		}
 	case forwardedMetric:
 		return func(windowStartAtNanos int64, _ time.Duration) int64 {
 			return windowStartAtNanos
+		}
+	case timedMetric:
+		return func(windowStartAtNanos int64, resolution time.Duration) int64 {
+			return windowStartAtNanos + resolution.Nanoseconds()
 		}
 	default:
 		panic(fmt.Errorf("unknown category type: %v", c))
@@ -716,18 +716,18 @@ func (c metricCategory) TimestampNanosFn() timestampNanosFn {
 type metricUnion struct {
 	category  metricCategory
 	untimed   unaggregated.MetricUnion
-	timed     aggregated.Metric
 	forwarded aggregated.ForwardedMetric
+	timed     aggregated.Metric
 }
 
 func (mu metricUnion) Type() metric.Type {
 	switch mu.category {
 	case untimedMetric:
 		return mu.untimed.Type
-	case timedMetric:
-		return mu.timed.Type
 	case forwardedMetric:
 		return mu.forwarded.Type
+	case timedMetric:
+		return mu.timed.Type
 	default:
 		panic(fmt.Errorf("unknown category type: %v", mu.category))
 	}
@@ -737,10 +737,10 @@ func (mu metricUnion) ID() id.RawID {
 	switch mu.category {
 	case untimedMetric:
 		return mu.untimed.ID
-	case timedMetric:
-		return mu.timed.ID
 	case forwardedMetric:
 		return mu.forwarded.ID
+	case timedMetric:
+		return mu.timed.ID
 	default:
 		panic(fmt.Errorf("unknown category type: %v", mu.category))
 	}
@@ -751,8 +751,8 @@ type metadataType int
 const (
 	policiesListType metadataType = iota
 	stagedMetadatasType
-	timedMetadataType
 	forwardMetadataType
+	timedMetadataType
 )
 
 type metadataFn func(idx int) metadataUnion
@@ -774,10 +774,10 @@ func (mu metadataUnion) expectedAggregationKeys(
 		return computeExpectedAggregationKeysFromPoliciesList(now, mu.policiesList, defaultStoragePolicies)
 	case stagedMetadatasType:
 		return computeExpectedAggregationKeysFromStagedMetadatas(now, mu.stagedMetadatas, defaultStoragePolicies)
-	case timedMetadataType:
-		return computeExpectedAggregationKeysFromTimedMetadata(mu.timedMetadata), nil
 	case forwardMetadataType:
 		return computeExpectedAggregationKeysFromForwardMetadata(mu.forwardMetadata), nil
+	case timedMetadataType:
+		return computeExpectedAggregationKeysFromTimedMetadata(mu.timedMetadata), nil
 	default:
 		return nil, fmt.Errorf("unexpected metadata type: %v", mu.mType)
 	}

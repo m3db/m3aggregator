@@ -149,14 +149,14 @@ func (agg *aggregator) Snapshot() SnapshotResult {
 		CountersWithMetadatas:        agg.countersWithMetadatas,
 		BatchTimersWithMetadatas:     agg.batchTimersWithMetadatas,
 		GaugesWithMetadatas:          agg.gaugesWithMetadatas,
-		TimedMetricWithMetadata:      agg.timedMetricsWithMetadata,
 		ForwardedMetricsWithMetadata: agg.forwardedMetricsWithMetadata,
+		TimedMetricWithMetadata:      agg.timedMetricsWithMetadata,
 	}
 	agg.countersWithMetadatas = nil
 	agg.batchTimersWithMetadatas = nil
 	agg.gaugesWithMetadatas = nil
-	agg.timedMetricsWithMetadata = nil
 	agg.forwardedMetricsWithMetadata = nil
+	agg.timedMetricsWithMetadata = nil
 	agg.numMetricsAdded = 0
 
 	agg.Unlock()

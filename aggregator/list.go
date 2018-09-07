@@ -767,18 +767,18 @@ type metricListType int
 
 const (
 	standardMetricListType metricListType = iota
-	timedMetricListType
 	forwardedMetricListType
+	timedMetricListType
 )
 
 func (t metricListType) String() string {
 	switch t {
 	case standardMetricListType:
 		return "standard"
-	case timedMetricListType:
-		return "timed"
 	case forwardedMetricListType:
 		return "forwarded"
+	case timedMetricListType:
+		return "timed"
 	default:
 		// Should never get here.
 		return "unknown"
@@ -878,6 +878,7 @@ func (l *metricLists) Tick() listsTickResult {
 	res := listsTickResult{
 		standard:  make(map[time.Duration]int, len(l.lists)),
 		forwarded: make(map[time.Duration]int, len(l.lists)),
+		timed:     make(map[time.Duration]int, len(l.lists)),
 	}
 	for id, list := range l.lists {
 		resolution := list.Resolution()
@@ -887,6 +888,8 @@ func (l *metricLists) Tick() listsTickResult {
 			res.standard[resolution] += numElems
 		case forwardedMetricListType:
 			res.forwarded[resolution] += numElems
+		case timedMetricListType:
+			res.timed[resolution] += numElems
 		}
 	}
 	return res
@@ -909,4 +912,5 @@ func (l *metricLists) Close() {
 type listsTickResult struct {
 	standard  map[time.Duration]int
 	forwarded map[time.Duration]int
+	timed     map[time.Duration]int
 }

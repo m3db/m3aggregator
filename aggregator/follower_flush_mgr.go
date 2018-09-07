@@ -76,11 +76,13 @@ type followerFlushManagerMetrics struct {
 	notCampaigning    tally.Counter
 	standard          standardFollowerFlusherMetrics
 	forwarded         forwardedFollowerFlusherMetrics
+	timed             standardFollowerFlusherMetrics
 }
 
 func newFollowerFlushManagerMetrics(scope tally.Scope) followerFlushManagerMetrics {
 	standardScope := scope.Tagged(map[string]string{"flusher-type": "standard"})
 	forwardedScope := scope.Tagged(map[string]string{"flusher-type": "forwarded"})
+	timedScope := scope.Tagged(map[string]string{"flusher-type": "timed"})
 	return followerFlushManagerMetrics{
 		watchCreateErrors: scope.Counter("watch-create-errors"),
 		kvUpdateFlush:     scope.Counter("kv-update-flush"),
@@ -88,6 +90,7 @@ func newFollowerFlushManagerMetrics(scope tally.Scope) followerFlushManagerMetri
 		notCampaigning:    scope.Counter("not-campaigning"),
 		standard:          newStandardFlusherMetrics(standardScope),
 		forwarded:         newForwardedFlusherMetrics(forwardedScope),
+		timed:             newStandardFlusherMetrics(timedScope),
 	}
 }
 
@@ -294,6 +297,8 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 			flushersByInterval[i].flushers = mgr.standardFlushersFromKVUpdateWithLock(bucketID.standard, bucket.flushers)
 		case forwardedMetricListType:
 			flushersByInterval[i].flushers = mgr.forwardedFlushersFromKVUpdateWithLock(bucketID.forwarded, bucket.flushers)
+		case timedMetricListType:
+			flushersByInterval[i].flushers = mgr.timedFlushersFromKVUpdateWithLock(bucketID.timed, bucket.flushers)
 		default:
 			panic("should never get here")
 		}
@@ -334,6 +339,43 @@ func (mgr *followerFlushManager) standardFlushersFromKVUpdateWithLock(
 		}
 		flushersWithTime = append(flushersWithTime, newFlushTarget)
 		mgr.metrics.standard.kvUpdates.Inc(1)
+	}
+	return flushersWithTime
+}
+
+func (mgr *followerFlushManager) timedFlushersFromKVUpdateWithLock(
+	listID timedMetricListID,
+	flushers []flushingMetricList,
+) []flusherWithTime {
+	var (
+		resolution       = listID.resolution
+		flushersWithTime = make([]flusherWithTime, 0, defaultInitialFlushCapacity)
+	)
+	for _, flusher := range flushers {
+		shard := flusher.Shard()
+		shardFlushTimes, exists := mgr.received.ByShard[shard]
+		if !exists {
+			mgr.metrics.timed.shardNotFound.Inc(1)
+			mgr.logger.WithFields(
+				log.NewField("shard", shard),
+			).Warn("shard not found in timed flusher flush times")
+			continue
+		}
+		lastFlushedAtNanos, exists := shardFlushTimes.TimedByResolution[int64(resolution)]
+		if !exists {
+			mgr.metrics.timed.resolutionNotFound.Inc(1)
+			mgr.logger.WithFields(
+				log.NewField("shard", shard),
+				log.NewField("resolution", resolution.String()),
+			).Warn("resolution not found in timed flusher flush times")
+			continue
+		}
+		newFlushTarget := flusherWithTime{
+			flusher:          flusher,
+			flushBeforeNanos: lastFlushedAtNanos,
+		}
+		flushersWithTime = append(flushersWithTime, newFlushTarget)
+		mgr.metrics.timed.kvUpdates.Inc(1)
 	}
 	return flushersWithTime
 }
