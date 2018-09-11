@@ -505,7 +505,7 @@ func (e *Entry) maybeCopyIDWithLock(id metricid.RawID) metricid.RawID {
 }
 
 // addAggregationKey adds a new aggregation key to the list of new aggregations.
-func (e *Entry) addNewAggregationKey(
+func (e *Entry) addNewAggregationKeyWithLock(
 	metricType metric.Type,
 	metricID metricid.RawID,
 	key aggregationKey,
@@ -584,7 +584,7 @@ func (e *Entry) updateStagedMetadatasWithLock(
 				resolution: storagePolicy.Resolution().Window,
 			}.toMetricListID()
 			var err error
-			newAggregations, err = e.addNewAggregationKey(metric.Type, elemID, key, listID, newAggregations)
+			newAggregations, err = e.addNewAggregationKeyWithLock(metric.Type, elemID, key, listID, newAggregations)
 			if err != nil {
 				return err
 			}
@@ -725,7 +725,7 @@ func (e *Entry) updateTimedMetadataWithLock(
 	listID := timedMetricListID{
 		resolution: metadata.StoragePolicy.Resolution().Window,
 	}.toMetricListID()
-	newAggregations, err := e.addNewAggregationKey(metric.Type, elemID, key, listID, e.aggregations)
+	newAggregations, err := e.addNewAggregationKeyWithLock(metric.Type, elemID, key, listID, e.aggregations)
 	if err != nil {
 		return err
 	}
@@ -856,7 +856,7 @@ func (e *Entry) updateForwardMetadataWithLock(
 		resolution:        metadata.StoragePolicy.Resolution().Window,
 		numForwardedTimes: metadata.NumForwardedTimes,
 	}.toMetricListID()
-	newAggregations, err := e.addNewAggregationKey(metric.Type, elemID, key, listID, e.aggregations)
+	newAggregations, err := e.addNewAggregationKeyWithLock(metric.Type, elemID, key, listID, e.aggregations)
 	if err != nil {
 		return err
 	}
