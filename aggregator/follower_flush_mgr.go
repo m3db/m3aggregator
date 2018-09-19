@@ -243,16 +243,11 @@ func (mgr *followerFlushManager) CanLead() bool {
 		// Check that for standard metrics, all the open windows containing the process
 		// start time are closed, meaning the standard metrics that didn't make to the
 		// process have been flushed successfully downstream.
-		for windowNanos, lastFlushedNanos := range shardFlushTimes.StandardByResolution {
-			windowSize := time.Duration(windowNanos)
-			windowEndAt := mgr.openedAt.Truncate(windowSize)
-			if windowEndAt.Before(mgr.openedAt) {
-				windowEndAt = windowEndAt.Add(windowSize)
-			}
-			if lastFlushedNanos < windowEndAt.UnixNano() {
-				mgr.metrics.standard.flushWindowsNotEnded.Inc(1)
-				return false
-			}
+		if !mgr.canLead(shardFlushTimes.StandardByResolution, mgr.metrics.standard) {
+			return false
+		}
+		if !mgr.canLead(shardFlushTimes.TimedByResolution, mgr.metrics.timed) {
+			return false
 		}
 
 		// Check that the forwarded metrics have been flushed past the process start
@@ -281,6 +276,24 @@ func (mgr *followerFlushManager) CanLead() bool {
 		}
 	}
 
+	return true
+}
+
+func (mgr *followerFlushManager) canLead(
+	flushTimes map[int64]int64,
+	metrics standardFollowerFlusherMetrics,
+) bool {
+	for windowNanos, lastFlushedNanos := range flushTimes {
+		windowSize := time.Duration(windowNanos)
+		windowEndAt := mgr.openedAt.Truncate(windowSize)
+		if windowEndAt.Before(mgr.openedAt) {
+			windowEndAt = windowEndAt.Add(windowSize)
+		}
+		if lastFlushedNanos < windowEndAt.UnixNano() {
+			metrics.flushWindowsNotEnded.Inc(1)
+			return false
+		}
+	}
 	return true
 }
 
