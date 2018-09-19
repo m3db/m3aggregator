@@ -80,9 +80,6 @@ type MaxAllowedForwardingDelayFn func(resolution time.Duration, numForwardedTime
 // BufferForPastTimedMetricFn returns the buffer duration for past timed metrics.
 type BufferForPastTimedMetricFn func(resolution time.Duration) time.Duration
 
-// BufferForFutureTimedMetricFn returns the buffer duration for future timed metrics.
-type BufferForFutureTimedMetricFn func() time.Duration
-
 // Options provide a set of base and derived options for the aggregator.
 type Options interface {
 	/// Read-write base options.
@@ -251,11 +248,11 @@ type Options interface {
 	// BufferForPastTimedMetricFn returns the size of the buffer for timed metrics in the past.
 	BufferForPastTimedMetricFn() BufferForPastTimedMetricFn
 
-	// SetBufferForFutureTimedMetricFn sets the size of the buffer for timed metrics in the future.
-	SetBufferForFutureTimedMetricFn(value BufferForFutureTimedMetricFn) Options
+	// SetBufferForFutureTimedMetric sets the size of the buffer for timed metrics in the future.
+	SetBufferForFutureTimedMetric(value time.Duration) Options
 
-	// BufferForFutureTimedMetricFn returns the size of the buffer for timed metrics in the future.
-	BufferForFutureTimedMetricFn() BufferForFutureTimedMetricFn
+	// BufferForFutureTimedMetric returns the size of the buffer for timed metrics in the future.
+	BufferForFutureTimedMetric() time.Duration
 
 	// SetMaxNumCachedSourceSets sets the maximum number of cached source sets.
 	SetMaxNumCachedSourceSets(value int) Options
@@ -334,7 +331,7 @@ type options struct {
 	resignTimeout                    time.Duration
 	maxAllowedForwardingDelayFn      MaxAllowedForwardingDelayFn
 	bufferForPastTimedMetricFn       BufferForPastTimedMetricFn
-	bufferForFutureTimedMetricFn     BufferForFutureTimedMetricFn
+	bufferForFutureTimedMetric       time.Duration
 	maxNumCachedSourceSets           int
 	discardNaNAggregatedValues       bool
 	entryPool                        EntryPool
@@ -356,17 +353,17 @@ func NewOptions() Options {
 		SetTimerTypeStringTransformFn(aggregation.SuffixTransform).
 		SetGaugeTypeStringTransformFn(aggregation.EmptyTransform)
 	o := &options{
-		aggTypesOptions:                  aggTypesOptions,
-		metricPrefix:                     defaultMetricPrefix,
-		counterPrefix:                    defaultCounterPrefix,
-		timerPrefix:                      defaultTimerPrefix,
-		gaugePrefix:                      defaultGaugePrefix,
-		timeLock:                         &sync.RWMutex{},
-		clockOpts:                        clock.NewOptions(),
-		instrumentOpts:                   instrument.NewOptions(),
-		streamOpts:                       cm.NewOptions(),
-		runtimeOptsManager:               runtime.NewOptionsManager(runtime.NewOptions()),
-		shardFn:                          sharding.Murmur32Hash.MustShardFn(),
+		aggTypesOptions:    aggTypesOptions,
+		metricPrefix:       defaultMetricPrefix,
+		counterPrefix:      defaultCounterPrefix,
+		timerPrefix:        defaultTimerPrefix,
+		gaugePrefix:        defaultGaugePrefix,
+		timeLock:           &sync.RWMutex{},
+		clockOpts:          clock.NewOptions(),
+		instrumentOpts:     instrument.NewOptions(),
+		streamOpts:         cm.NewOptions(),
+		runtimeOptsManager: runtime.NewOptionsManager(runtime.NewOptions()),
+		shardFn:            sharding.Murmur32Hash.MustShardFn(),
 		bufferDurationBeforeShardCutover: defaultBufferDurationBeforeShardCutover,
 		bufferDurationAfterShardCutoff:   defaultBufferDurationAfterShardCutoff,
 		entryTTL:                         defaultEntryTTL,
@@ -377,7 +374,7 @@ func NewOptions() Options {
 		resignTimeout:                    defaultResignTimeout,
 		maxAllowedForwardingDelayFn:      defaultMaxAllowedForwardingDelayFn,
 		bufferForPastTimedMetricFn:       defaultBufferForPastTimedMetricFn,
-		bufferForFutureTimedMetricFn:     defaultBufferForFutureTimedMetricFn,
+		bufferForFutureTimedMetric:       defaultTimedMetricBuffer,
 		maxNumCachedSourceSets:           defaultMaxNumCachedSourceSets,
 		discardNaNAggregatedValues:       defaultDiscardNaNAggregatedValues,
 	}
@@ -665,14 +662,14 @@ func (o *options) BufferForPastTimedMetricFn() BufferForPastTimedMetricFn {
 	return o.bufferForPastTimedMetricFn
 }
 
-func (o *options) SetBufferForFutureTimedMetricFn(value BufferForFutureTimedMetricFn) Options {
+func (o *options) SetBufferForFutureTimedMetric(value time.Duration) Options {
 	opts := *o
-	opts.bufferForFutureTimedMetricFn = value
+	opts.bufferForFutureTimedMetric = value
 	return &opts
 }
 
-func (o *options) BufferForFutureTimedMetricFn() BufferForFutureTimedMetricFn {
-	return o.bufferForFutureTimedMetricFn
+func (o *options) BufferForFutureTimedMetric() time.Duration {
+	return o.bufferForFutureTimedMetric
 }
 
 func (o *options) SetMaxNumCachedSourceSets(value int) Options {
@@ -760,17 +757,17 @@ func (o *options) initPools() {
 
 	o.counterElemPool = NewCounterElemPool(nil)
 	o.counterElemPool.Init(func() *CounterElem {
-		return MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, o)
+		return MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, NoPrefixNoSuffix, o)
 	})
 
 	o.timerElemPool = NewTimerElemPool(nil)
 	o.timerElemPool.Init(func() *TimerElem {
-		return MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, o)
+		return MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, NoPrefixNoSuffix, o)
 	})
 
 	o.gaugeElemPool = NewGaugeElemPool(nil)
 	o.gaugeElemPool.Init(func() *GaugeElem {
-		return MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, o)
+		return MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, NoPrefixNoSuffix, o)
 	})
 }
 
@@ -814,8 +811,4 @@ func defaultMaxAllowedForwardingDelayFn(
 
 func defaultBufferForPastTimedMetricFn(resolution time.Duration) time.Duration {
 	return resolution + defaultTimedMetricBuffer
-}
-
-func defaultBufferForFutureTimedMetricFn() time.Duration {
-	return defaultTimedMetricBuffer
 }

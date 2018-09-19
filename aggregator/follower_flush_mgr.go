@@ -294,11 +294,23 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 		flushersByInterval[i].duration = bucket.duration
 		switch bucketID.listType {
 		case standardMetricListType:
-			flushersByInterval[i].flushers = mgr.standardFlushersFromKVUpdateWithLock(bucketID.standard, bucket.flushers)
+			flushersByInterval[i].flushers = mgr.standardFlushersFromKVUpdateWithLock(
+				bucketID.standard.resolution,
+				bucket.flushers,
+				getStandardFlushTimesByResolutionFn,
+				mgr.metrics.standard,
+				mgr.logger.WithFields(log.NewField("flusher-type", "standard")),
+			)
 		case forwardedMetricListType:
 			flushersByInterval[i].flushers = mgr.forwardedFlushersFromKVUpdateWithLock(bucketID.forwarded, bucket.flushers)
 		case timedMetricListType:
-			flushersByInterval[i].flushers = mgr.timedFlushersFromKVUpdateWithLock(bucketID.timed, bucket.flushers)
+			flushersByInterval[i].flushers = mgr.standardFlushersFromKVUpdateWithLock(
+				bucketID.timed.resolution,
+				bucket.flushers,
+				getTimedFlushTimesByResolutionFn,
+				mgr.metrics.timed,
+				mgr.logger.WithFields(log.NewField("flusher-type", "timed")),
+			)
 		default:
 			panic("should never get here")
 		}
@@ -307,30 +319,33 @@ func (mgr *followerFlushManager) flushersFromKVUpdateWithLock(buckets []*flushBu
 }
 
 func (mgr *followerFlushManager) standardFlushersFromKVUpdateWithLock(
-	listID standardMetricListID,
+	resolution time.Duration,
 	flushers []flushingMetricList,
+	getFlushTimesByResolutionFn getFlushTimesByResolutionFn,
+	metrics standardFollowerFlusherMetrics,
+	logger log.Logger,
 ) []flusherWithTime {
 	var (
-		resolution       = listID.resolution
 		flushersWithTime = make([]flusherWithTime, 0, defaultInitialFlushCapacity)
 	)
 	for _, flusher := range flushers {
 		shard := flusher.Shard()
 		shardFlushTimes, exists := mgr.received.ByShard[shard]
 		if !exists {
-			mgr.metrics.standard.shardNotFound.Inc(1)
-			mgr.logger.WithFields(
+			metrics.shardNotFound.Inc(1)
+			logger.WithFields(
 				log.NewField("shard", shard),
-			).Warn("shard not found in standard flusher flush times")
+			).Warn("shard not found in flush times")
 			continue
 		}
-		lastFlushedAtNanos, exists := shardFlushTimes.StandardByResolution[int64(resolution)]
+		flushTimes := getFlushTimesByResolutionFn(shardFlushTimes)
+		lastFlushedAtNanos, exists := flushTimes[int64(resolution)]
 		if !exists {
-			mgr.metrics.standard.resolutionNotFound.Inc(1)
-			mgr.logger.WithFields(
+			metrics.resolutionNotFound.Inc(1)
+			logger.WithFields(
 				log.NewField("shard", shard),
 				log.NewField("resolution", resolution.String()),
-			).Warn("resolution not found in standard flusher flush times")
+			).Warn("resolution not found in flush times")
 			continue
 		}
 		newFlushTarget := flusherWithTime{
@@ -338,44 +353,7 @@ func (mgr *followerFlushManager) standardFlushersFromKVUpdateWithLock(
 			flushBeforeNanos: lastFlushedAtNanos,
 		}
 		flushersWithTime = append(flushersWithTime, newFlushTarget)
-		mgr.metrics.standard.kvUpdates.Inc(1)
-	}
-	return flushersWithTime
-}
-
-func (mgr *followerFlushManager) timedFlushersFromKVUpdateWithLock(
-	listID timedMetricListID,
-	flushers []flushingMetricList,
-) []flusherWithTime {
-	var (
-		resolution       = listID.resolution
-		flushersWithTime = make([]flusherWithTime, 0, defaultInitialFlushCapacity)
-	)
-	for _, flusher := range flushers {
-		shard := flusher.Shard()
-		shardFlushTimes, exists := mgr.received.ByShard[shard]
-		if !exists {
-			mgr.metrics.timed.shardNotFound.Inc(1)
-			mgr.logger.WithFields(
-				log.NewField("shard", shard),
-			).Warn("shard not found in timed flusher flush times")
-			continue
-		}
-		lastFlushedAtNanos, exists := shardFlushTimes.TimedByResolution[int64(resolution)]
-		if !exists {
-			mgr.metrics.timed.resolutionNotFound.Inc(1)
-			mgr.logger.WithFields(
-				log.NewField("shard", shard),
-				log.NewField("resolution", resolution.String()),
-			).Warn("resolution not found in timed flusher flush times")
-			continue
-		}
-		newFlushTarget := flusherWithTime{
-			flusher:          flusher,
-			flushBeforeNanos: lastFlushedAtNanos,
-		}
-		flushersWithTime = append(flushersWithTime, newFlushTarget)
-		mgr.metrics.timed.kvUpdates.Inc(1)
+		metrics.kvUpdates.Inc(1)
 	}
 	return flushersWithTime
 }
@@ -395,35 +373,39 @@ func (mgr *followerFlushManager) forwardedFlushersFromKVUpdateWithLock(
 		if !exists {
 			mgr.metrics.forwarded.shardNotFound.Inc(1)
 			mgr.logger.WithFields(
+				log.NewField("flusher-type", "forwarded"),
 				log.NewField("shard", shard),
-			).Warn("shard not found in forwarded flusher flush times")
+			).Warn("shard not found in flush times")
 			continue
 		}
 		flushTimesForResolution, exists := shardFlushTimes.ForwardedByResolution[int64(resolution)]
 		if !exists {
 			mgr.metrics.forwarded.resolutionNotFound.Inc(1)
 			mgr.logger.WithFields(
+				log.NewField("flusher-type", "forwarded"),
 				log.NewField("shard", shard),
 				log.NewField("resolution", resolution.String()),
-			).Warn("resolution not found in forwarded flusher flush times")
+			).Warn("resolution not found in flush times")
 			continue
 		}
 		if flushTimesForResolution == nil {
 			mgr.metrics.forwarded.nilForwardedTimes.Inc(1)
 			mgr.logger.WithFields(
+				log.NewField("flusher-type", "forwarded"),
 				log.NewField("shard", shard),
 				log.NewField("resolution", resolution.String()),
-			).Warn("nil forwarded flusher flush times")
+			).Warn("nil flush times")
 			continue
 		}
 		lastFlushedAtNanos, exists := flushTimesForResolution.ByNumForwardedTimes[int32(numForwardedTimes)]
 		if !exists {
 			mgr.metrics.forwarded.numForwardedTimesNotFound.Inc(1)
 			mgr.logger.WithFields(
+				log.NewField("flusher-type", "forwarded"),
 				log.NewField("shard", shard),
 				log.NewField("resolution", resolution.String()),
 				log.NewField("numForwardedTimes", numForwardedTimes),
-			).Warn("numForwardedTimes not found in forwarded flush times")
+			).Warn("numForwardedTimes not found in flush times")
 			continue
 		}
 		newFlushTarget := flusherWithTime{

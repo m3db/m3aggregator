@@ -228,7 +228,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 		opts = opts.SetBufferForPastTimedMetricFn(bufferForPastTimedMetricFn(c.BufferDurationForPastTimedMetric))
 	}
 	if c.BufferDurationForFutureTimedMetric != 0 {
-		opts = opts.SetBufferForFutureTimedMetricFn(bufferForFutureTimedMetricFn(c.BufferDurationForFutureTimedMetric))
+		opts = opts.SetBufferForFutureTimedMetric(c.BufferDurationForFutureTimedMetric)
 	}
 
 	// Set resign timeout.
@@ -323,7 +323,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	counterElemPool := aggregator.NewCounterElemPool(counterElemPoolOpts)
 	opts = opts.SetCounterElemPool(counterElemPool)
 	counterElemPool.Init(func() *aggregator.CounterElem {
-		return aggregator.MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, aggregator.IDMutationDisabled, opts)
+		return aggregator.MustNewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, aggregator.NoPrefixNoSuffix, opts)
 	})
 
 	// Set timer elem pool.
@@ -332,7 +332,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	timerElemPool := aggregator.NewTimerElemPool(timerElemPoolOpts)
 	opts = opts.SetTimerElemPool(timerElemPool)
 	timerElemPool.Init(func() *aggregator.TimerElem {
-		return aggregator.MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, aggregator.IDMutationDisabled, opts)
+		return aggregator.MustNewTimerElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, aggregator.NoPrefixNoSuffix, opts)
 	})
 
 	// Set gauge elem pool.
@@ -341,7 +341,7 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 	gaugeElemPool := aggregator.NewGaugeElemPool(gaugeElemPoolOpts)
 	opts = opts.SetGaugeElemPool(gaugeElemPool)
 	gaugeElemPool.Init(func() *aggregator.GaugeElem {
-		return aggregator.MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, aggregator.IDMutationDisabled, opts)
+		return aggregator.MustNewGaugeElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, aggregator.NoPrefixNoSuffix, opts)
 	})
 
 	// Set entry pool.
@@ -357,12 +357,6 @@ func (c *AggregatorConfiguration) NewAggregatorOptions(
 func bufferForPastTimedMetricFn(buffer time.Duration) aggregator.BufferForPastTimedMetricFn {
 	return func(resolution time.Duration) time.Duration {
 		return buffer + resolution
-	}
-}
-
-func bufferForFutureTimedMetricFn(buffer time.Duration) aggregator.BufferForFutureTimedMetricFn {
-	return func() time.Duration {
-		return buffer
 	}
 }
 

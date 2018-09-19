@@ -174,11 +174,8 @@ func TestSetTimedAggregationBufferPastFn(t *testing.T) {
 }
 
 func TestSetTimedAggregationBufferFutureFn(t *testing.T) {
-	value := func() time.Duration {
-		return 3 * time.Minute
-	}
-	o := NewOptions().SetBufferForFutureTimedMetricFn(value)
-	require.Equal(t, 3*time.Minute, o.BufferForFutureTimedMetricFn()())
+	o := NewOptions().SetBufferForFutureTimedMetric(3 * time.Minute)
+	require.Equal(t, 3*time.Minute, o.BufferForFutureTimedMetric())
 }
 
 func TestSetEntryCheckInterval(t *testing.T) {

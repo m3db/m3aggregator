@@ -84,14 +84,14 @@ func NewTimerElem(
 	aggTypes maggregation.Types,
 	pipeline applied.Pipeline,
 	numForwardedTimes int,
-	idMutationType IDMutationType,
+	idPrefixSuffixType IDPrefixSuffixType,
 	opts Options,
 ) (*TimerElem, error) {
 	e := &TimerElem{
 		elemBase: newElemBase(opts),
 		values:   make([]timedTimer, 0, defaultNumAggregations), // in most cases values will have two entries
 	}
-	if err := e.ResetSetData(id, sp, aggTypes, pipeline, numForwardedTimes, idMutationType); err != nil {
+	if err := e.ResetSetData(id, sp, aggTypes, pipeline, numForwardedTimes, idPrefixSuffixType); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -104,10 +104,10 @@ func MustNewTimerElem(
 	aggTypes maggregation.Types,
 	pipeline applied.Pipeline,
 	numForwardedTimes int,
-	idMutationType IDMutationType,
+	idPrefixSuffixType IDPrefixSuffixType,
 	opts Options,
 ) *TimerElem {
-	elem, err := NewTimerElem(id, sp, aggTypes, pipeline, numForwardedTimes, idMutationType, opts)
+	elem, err := NewTimerElem(id, sp, aggTypes, pipeline, numForwardedTimes, idPrefixSuffixType, opts)
 	if err != nil {
 		panic(fmt.Errorf("unable to create element: %v", err))
 	}
@@ -121,13 +121,13 @@ func (e *TimerElem) ResetSetData(
 	aggTypes maggregation.Types,
 	pipeline applied.Pipeline,
 	numForwardedTimes int,
-	idMutationType IDMutationType,
+	idPrefixSuffixType IDPrefixSuffixType,
 ) error {
 	useDefaultAggregation := aggTypes.IsDefault()
 	if useDefaultAggregation {
 		aggTypes = e.DefaultAggregationTypes(e.aggTypesOpts)
 	}
-	if err := e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation, pipeline, numForwardedTimes, idMutationType); err != nil {
+	if err := e.elemBase.resetSetData(id, sp, aggTypes, useDefaultAggregation, pipeline, numForwardedTimes, idPrefixSuffixType); err != nil {
 		return err
 	}
 	if err := e.timerElemBase.ResetSetData(e.aggTypesOpts, aggTypes, useDefaultAggregation); err != nil {
@@ -443,10 +443,10 @@ func (e *TimerElem) processValueWithAggregationLock(
 			continue
 		}
 		if !e.parsedPipeline.HasRollup {
-			switch e.idMutationType {
-			case IDMutationDisabled:
+			switch e.idPrefixSuffixType {
+			case NoPrefixNoSuffix:
 				flushLocalFn(nil, e.id, nil, timeNanos, value, e.sp)
-			case IDMutationEnabled:
+			case WithPrefixWithSuffix:
 				flushLocalFn(e.FullPrefix(e.opts), e.id, e.TypeStringFor(e.aggTypesOpts, aggType), timeNanos, value, e.sp)
 			}
 		} else {

@@ -608,8 +608,6 @@ type aggregatorAddMetricMetrics struct {
 	valueRateLimitExceeded     tally.Counter
 	newMetricRateLimitExceeded tally.Counter
 	uncategorizedErrors        tally.Counter
-	arrivedTooEarly            tally.Counter
-	arrivedTooLate             tally.Counter
 }
 
 func newAggregatorAddMetricMetrics(
@@ -634,12 +632,6 @@ func newAggregatorAddMetricMetrics(
 		uncategorizedErrors: scope.Tagged(map[string]string{
 			"reason": "not-categorized",
 		}).Counter("errors"),
-		arrivedTooEarly: scope.Tagged(map[string]string{
-			"reason": "arrived-too-early",
-		}).Counter("errors"),
-		arrivedTooLate: scope.Tagged(map[string]string{
-			"reason": "arrived-too-late",
-		}).Counter("errors"),
 	}
 }
 
@@ -661,10 +653,6 @@ func (m *aggregatorAddMetricMetrics) ReportError(err error) {
 		m.newMetricRateLimitExceeded.Inc(1)
 	case errWriteValueRateLimitExceeded:
 		m.valueRateLimitExceeded.Inc(1)
-	case errArrivedTooEarly:
-		m.arrivedTooEarly.Inc(1)
-	case errArrivedTooLate:
-		m.arrivedTooLate.Inc(1)
 	default:
 		m.uncategorizedErrors.Inc(1)
 	}
@@ -691,6 +679,40 @@ func newAggregatorAddUntimedMetrics(
 func (m *aggregatorAddUntimedMetrics) ReportError(err error) {
 	if err == errInvalidMetricType {
 		m.invalidMetricTypes.Inc(1)
+		return
+	}
+	m.aggregatorAddMetricMetrics.ReportError(err)
+}
+
+type aggregatorAddTimedMetrics struct {
+	aggregatorAddMetricMetrics
+
+	tooFarInTheFuture tally.Counter
+	tooFarInThePast   tally.Counter
+}
+
+func newAggregatorAddTimedMetrics(
+	scope tally.Scope,
+	samplingRate float64,
+) aggregatorAddTimedMetrics {
+	return aggregatorAddTimedMetrics{
+		aggregatorAddMetricMetrics: newAggregatorAddMetricMetrics(scope, samplingRate),
+		tooFarInTheFuture: scope.Tagged(map[string]string{
+			"reason": "too-far-in-the-future",
+		}).Counter("errors"),
+		tooFarInThePast: scope.Tagged(map[string]string{
+			"reason": "too-far-in-the-past",
+		}).Counter("errors"),
+	}
+}
+
+func (m *aggregatorAddTimedMetrics) ReportError(err error) {
+	if err == errTooFarInTheFuture {
+		m.tooFarInTheFuture.Inc(1)
+		return
+	}
+	if err == errTooFarInThePast {
+		m.tooFarInThePast.Inc(1)
 		return
 	}
 	m.aggregatorAddMetricMetrics.ReportError(err)
@@ -873,7 +895,7 @@ type aggregatorMetrics struct {
 	forwarded    tally.Counter
 	timed        tally.Counter
 	addUntimed   aggregatorAddUntimedMetrics
-	addTimed     aggregatorAddMetricMetrics
+	addTimed     aggregatorAddTimedMetrics
 	addForwarded aggregatorAddForwardedMetrics
 	placement    aggregatorPlacementMetrics
 	shards       aggregatorShardsMetrics
@@ -901,7 +923,7 @@ func newAggregatorMetrics(
 		forwarded:    scope.Counter("forwarded"),
 		timed:        scope.Counter("timed"),
 		addUntimed:   newAggregatorAddUntimedMetrics(addUntimedScope, samplingRate),
-		addTimed:     newAggregatorAddMetricMetrics(addTimedScope, samplingRate),
+		addTimed:     newAggregatorAddTimedMetrics(addTimedScope, samplingRate),
 		addForwarded: newAggregatorAddForwardedMetrics(addForwardedScope, samplingRate, maxAllowedForwardingDelayFn),
 		placement:    newAggregatorPlacementMetrics(placementScope),
 		shards:       newAggregatorShardsMetrics(shardsScope),

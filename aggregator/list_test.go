@@ -53,7 +53,7 @@ func TestBaseMetricListPushBackElemWithDefaultPipeline(t *testing.T) {
 
 	l, err := newBaseMetricList(testShard, time.Second, nil, nil, nil, testOptions(ctrl))
 	require.NoError(t, err)
-	elem, err := NewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationDisabled, l.opts)
+	elem, err := NewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, NoPrefixNoSuffix, l.opts)
 	require.NoError(t, err)
 
 	// Push a counter to the list.
@@ -79,7 +79,7 @@ func TestBaseMetricListPushBackElemWithForwardingPipeline(t *testing.T) {
 
 	l, err := newBaseMetricList(testShard, time.Second, nil, nil, nil, testOptions(ctrl))
 	require.NoError(t, err)
-	elem, err := NewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, testPipeline, 0, IDMutationDisabled, l.opts)
+	elem, err := NewCounterElem(nil, policy.EmptyStoragePolicy, aggregation.DefaultTypes, testPipeline, 0, NoPrefixNoSuffix, l.opts)
 	require.NoError(t, err)
 
 	// Push a counter to the list.
@@ -313,15 +313,15 @@ func TestStandardMetricListFlushConsumingAndCollectingLocalMetrics(t *testing.T)
 		metric unaggregated.MetricUnion
 	}{
 		{
-			elem:   MustNewCounterElem(testCounterID, testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationEnabled, opts),
+			elem:   MustNewCounterElem(testCounterID, testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, WithPrefixWithSuffix, opts),
 			metric: testCounter,
 		},
 		{
-			elem:   MustNewTimerElem(testBatchTimerID, testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationEnabled, opts),
+			elem:   MustNewTimerElem(testBatchTimerID, testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, WithPrefixWithSuffix, opts),
 			metric: testBatchTimer,
 		},
 		{
-			elem:   MustNewGaugeElem(testGaugeID, testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, IDMutationEnabled, opts),
+			elem:   MustNewGaugeElem(testGaugeID, testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, 0, WithPrefixWithSuffix, opts),
 			metric: testGauge,
 		},
 	}
@@ -470,22 +470,6 @@ func TestTimedMetricListID(t *testing.T) {
 	require.Equal(t, expectedListID, l.ID())
 }
 
-func TestTimedMetricListFlushOffset(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	timedAggregationBufferPastFn := func(resolution time.Duration) time.Duration {
-		return resolution + time.Second
-	}
-	resolution := 10 * time.Second
-	opts := testOptions(ctrl).SetBufferForPastTimedMetricFn(timedAggregationBufferPastFn)
-	listID := timedMetricListID{resolution: resolution}
-	l, err := newTimedMetricList(testShard, listID, opts)
-	require.NoError(t, err)
-
-	require.Equal(t, time.Second, l.FlushOffset())
-}
-
 func TestTimedMetricListFlushConsumingAndCollectingTimedMetrics(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -545,7 +529,7 @@ func TestTimedMetricListFlushConsumingAndCollectingTimedMetrics(t *testing.T) {
 		metric aggregated.Metric
 	}{
 		{
-			elem: MustNewCounterElem([]byte("testTimedCounter"), testStoragePolicy, aggregation.DefaultTypes, applied.Pipeline{}, testNumForwardedTimes, IDMutationDisabled, opts),
+			elem: MustNewCounterElem([]byte("testTimedCounter"), testStoragePolicy, aggregation.DefaultTypes, applied.Pipeline{}, testNumForwardedTimes, NoPrefixNoSuffix, opts),
 			metric: aggregated.Metric{
 				Type:      metric.CounterType,
 				ID:        []byte("testTimedCounter"),
@@ -554,7 +538,7 @@ func TestTimedMetricListFlushConsumingAndCollectingTimedMetrics(t *testing.T) {
 			},
 		},
 		{
-			elem: MustNewGaugeElem([]byte("testTimedGauge"), testStoragePolicy, aggregation.DefaultTypes, applied.Pipeline{}, testNumForwardedTimes, IDMutationDisabled, opts),
+			elem: MustNewGaugeElem([]byte("testTimedGauge"), testStoragePolicy, aggregation.DefaultTypes, applied.Pipeline{}, testNumForwardedTimes, NoPrefixNoSuffix, opts),
 			metric: aggregated.Metric{
 				Type:      metric.GaugeType,
 				ID:        []byte("testTimedGauge"),
@@ -827,7 +811,7 @@ func TestForwardedMetricListFlushConsumingAndCollectingForwardedMetrics(t *testi
 		metric aggregated.ForwardedMetric
 	}{
 		{
-			elem: MustNewCounterElem([]byte("testForwardedCounter"), testStoragePolicy, aggregation.DefaultTypes, pipeline, testNumForwardedTimes, IDMutationDisabled, opts),
+			elem: MustNewCounterElem([]byte("testForwardedCounter"), testStoragePolicy, aggregation.DefaultTypes, pipeline, testNumForwardedTimes, NoPrefixNoSuffix, opts),
 			metric: aggregated.ForwardedMetric{
 				Type:      metric.CounterType,
 				ID:        []byte("testForwardedCounter"),
@@ -836,7 +820,7 @@ func TestForwardedMetricListFlushConsumingAndCollectingForwardedMetrics(t *testi
 			},
 		},
 		{
-			elem: MustNewGaugeElem([]byte("testForwardedGauge"), testStoragePolicy, aggregation.DefaultTypes, pipeline, testNumForwardedTimes, IDMutationDisabled, opts),
+			elem: MustNewGaugeElem([]byte("testForwardedGauge"), testStoragePolicy, aggregation.DefaultTypes, pipeline, testNumForwardedTimes, NoPrefixNoSuffix, opts),
 			metric: aggregated.ForwardedMetric{
 				Type:      metric.GaugeType,
 				ID:        []byte("testForwardedGauge"),
@@ -1012,7 +996,7 @@ func TestForwardedMetricListLastStepLocalFlush(t *testing.T) {
 		metric         aggregated.ForwardedMetric
 	}{
 		{
-			elem:           MustNewCounterElem([]byte("testForwardedCounter"), testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, IDMutationEnabled, opts),
+			elem:           MustNewCounterElem([]byte("testForwardedCounter"), testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, WithPrefixWithSuffix, opts),
 			expectedPrefix: opts.FullCounterPrefix(),
 			metric: aggregated.ForwardedMetric{
 				Type:      metric.CounterType,
@@ -1022,7 +1006,7 @@ func TestForwardedMetricListLastStepLocalFlush(t *testing.T) {
 			},
 		},
 		{
-			elem:           MustNewGaugeElem([]byte("testForwardedGauge"), testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, IDMutationEnabled, opts),
+			elem:           MustNewGaugeElem([]byte("testForwardedGauge"), testStoragePolicy, aggregation.DefaultTypes, applied.DefaultPipeline, testNumForwardedTimes, WithPrefixWithSuffix, opts),
 			expectedPrefix: opts.FullGaugePrefix(),
 			metric: aggregated.ForwardedMetric{
 				Type:      metric.GaugeType,

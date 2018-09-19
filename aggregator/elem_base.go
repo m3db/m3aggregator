@@ -74,14 +74,15 @@ type createAggregationOptions struct {
 	initSourceSet bool
 }
 
-// IDMutationType configs if the id should be mutated after aggregation.
-type IDMutationType int
+// IDPrefixSuffixType configs if the id should be added with prefix or suffix
+// after aggregation.
+type IDPrefixSuffixType int
 
 const (
-	// IDMutationDisabled disables id mutation after aggregation.
-	IDMutationDisabled IDMutationType = iota
-	// IDMutationEnabled enables id mutation after aggregation.
-	IDMutationEnabled
+	// WithPrefixWithSuffix adds both prefix and suffix to the id after aggregation.
+	WithPrefixWithSuffix IDPrefixSuffixType = iota
+	// NoPrefixNoSuffix adds neither prefix nor suffix to the id after aggregation.
+	NoPrefixNoSuffix
 )
 
 // metricElem is the common interface for metric elements.
@@ -105,7 +106,7 @@ type metricElem interface {
 		aggTypes maggregation.Types,
 		pipeline applied.Pipeline,
 		numForwardedTimes int,
-		idMutationType IDMutationType,
+		idPrefixSuffixType IDPrefixSuffixType,
 	) error
 
 	// SetForwardedCallbacks sets the callback functions to write forwarded
@@ -159,7 +160,7 @@ type elemBase struct {
 	aggOpts                         raggregation.Options
 	parsedPipeline                  parsedPipeline
 	numForwardedTimes               int
-	idMutationType                  IDMutationType
+	idPrefixSuffixType              IDPrefixSuffixType
 	writeForwardedMetricFn          writeForwardedMetricFn
 	onForwardedAggregationWrittenFn onForwardedAggregationDoneFn
 
@@ -186,7 +187,7 @@ func (e *elemBase) resetSetData(
 	useDefaultAggregation bool,
 	pipeline applied.Pipeline,
 	numForwardedTimes int,
-	idMutationType IDMutationType,
+	idPrefixSuffixType IDPrefixSuffixType,
 ) error {
 	parsed, err := newParsedPipeline(pipeline)
 	if err != nil {
@@ -201,7 +202,7 @@ func (e *elemBase) resetSetData(
 	e.numForwardedTimes = numForwardedTimes
 	e.tombstoned = false
 	e.closed = false
-	e.idMutationType = idMutationType
+	e.idPrefixSuffixType = idPrefixSuffixType
 	return nil
 }
 

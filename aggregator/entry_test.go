@@ -1265,7 +1265,7 @@ func TestEntryAddTimedMetricTooLate(t *testing.T) {
 	for _, input := range inputs {
 		metric := testTimedMetric
 		metric.TimeNanos = input.timeNanos
-		require.Equal(t, errArrivedTooLate, e.AddTimed(metric, metadata.TimedMetadata{StoragePolicy: input.storagePolicy}))
+		require.Equal(t, errTooFarInThePast, e.AddTimed(metric, metadata.TimedMetadata{StoragePolicy: input.storagePolicy}))
 	}
 }
 
@@ -1273,11 +1273,8 @@ func TestEntryAddTimedMetricTooEarly(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	timedAggregationBufferFutureFn := func() time.Duration {
-		return time.Second
-	}
 	e, _, now := testEntry(ctrl)
-	e.opts = e.opts.SetBufferForFutureTimedMetricFn(timedAggregationBufferFutureFn)
+	e.opts = e.opts.SetBufferForFutureTimedMetric(time.Second)
 
 	inputs := []struct {
 		timeNanos     int64
@@ -1296,7 +1293,7 @@ func TestEntryAddTimedMetricTooEarly(t *testing.T) {
 	for _, input := range inputs {
 		metric := testTimedMetric
 		metric.TimeNanos = input.timeNanos
-		require.Equal(t, errArrivedTooEarly, e.AddTimed(metric, metadata.TimedMetadata{StoragePolicy: input.storagePolicy}))
+		require.Equal(t, errTooFarInTheFuture, e.AddTimed(metric, metadata.TimedMetadata{StoragePolicy: input.storagePolicy}))
 	}
 }
 
@@ -1310,8 +1307,9 @@ func TestEntryAddTimed(t *testing.T) {
 	require.NoError(t, e.AddTimed(testTimedMetric, testTimedMetadata))
 	require.Equal(t, 1, len(e.aggregations))
 	expectedKey := aggregationKey{
-		aggregationID: testTimedMetadata.AggregationID,
-		storagePolicy: testTimedMetadata.StoragePolicy,
+		aggregationID:      testTimedMetadata.AggregationID,
+		storagePolicy:      testTimedMetadata.StoragePolicy,
+		idPrefixSuffixType: NoPrefixNoSuffix,
 	}
 	idx := e.aggregations.index(expectedKey)
 	require.True(t, idx >= 0)
@@ -1372,8 +1370,9 @@ func TestEntryAddTimed(t *testing.T) {
 	require.NoError(t, e.AddTimed(metric, metadata))
 	require.Equal(t, 2, len(e.aggregations))
 	expectedKeyNew := aggregationKey{
-		aggregationID: metadata.AggregationID,
-		storagePolicy: metadata.StoragePolicy,
+		aggregationID:      metadata.AggregationID,
+		storagePolicy:      metadata.StoragePolicy,
+		idPrefixSuffixType: NoPrefixNoSuffix,
 	}
 	idx = e.aggregations.index(expectedKey)
 	require.True(t, idx >= 0)
@@ -1507,11 +1506,11 @@ func TestEntryAddForwarded(t *testing.T) {
 	require.NoError(t, e.AddForwarded(testForwardedMetric, testForwardMetadata1))
 	require.Equal(t, 1, len(e.aggregations))
 	expectedKey := aggregationKey{
-		aggregationID:     testForwardMetadata1.AggregationID,
-		storagePolicy:     testForwardMetadata1.StoragePolicy,
-		pipeline:          testForwardMetadata1.Pipeline,
-		numForwardedTimes: testForwardMetadata1.NumForwardedTimes,
-		idMutationType:    IDMutationEnabled,
+		aggregationID:      testForwardMetadata1.AggregationID,
+		storagePolicy:      testForwardMetadata1.StoragePolicy,
+		pipeline:           testForwardMetadata1.Pipeline,
+		numForwardedTimes:  testForwardMetadata1.NumForwardedTimes,
+		idPrefixSuffixType: WithPrefixWithSuffix,
 	}
 	idx := e.aggregations.index(expectedKey)
 	require.True(t, idx >= 0)
@@ -1583,11 +1582,11 @@ func TestEntryAddForwarded(t *testing.T) {
 	require.NoError(t, e.AddForwarded(metric, testForwardMetadata2))
 	require.Equal(t, 2, len(e.aggregations))
 	expectedKeyNew := aggregationKey{
-		aggregationID:     testForwardMetadata2.AggregationID,
-		storagePolicy:     testForwardMetadata2.StoragePolicy,
-		pipeline:          testForwardMetadata2.Pipeline,
-		numForwardedTimes: testForwardMetadata2.NumForwardedTimes,
-		idMutationType:    IDMutationEnabled,
+		aggregationID:      testForwardMetadata2.AggregationID,
+		storagePolicy:      testForwardMetadata2.StoragePolicy,
+		pipeline:           testForwardMetadata2.Pipeline,
+		numForwardedTimes:  testForwardMetadata2.NumForwardedTimes,
+		idPrefixSuffixType: WithPrefixWithSuffix,
 	}
 	idx = e.aggregations.index(expectedKey)
 	require.True(t, idx >= 0)
@@ -1808,7 +1807,7 @@ func populateTestUntimedAggregations(
 			require.Fail(t, fmt.Sprintf("unrecognized metric type: %v", typ))
 		}
 		aggTypes := e.decompressor.MustDecompress(aggKey.aggregationID)
-		newElem.ResetSetData(testID, aggKey.storagePolicy, aggTypes, aggKey.pipeline, 0, IDMutationDisabled)
+		newElem.ResetSetData(testID, aggKey.storagePolicy, aggTypes, aggKey.pipeline, 0, NoPrefixNoSuffix)
 		listID := standardMetricListID{
 			resolution: aggKey.storagePolicy.Resolution().Window,
 		}.toMetricListID()
@@ -1933,10 +1932,10 @@ func aggregationKeys(pipelines []metadata.PipelineMetadata) []aggregationKey {
 	for _, pipeline := range pipelines {
 		for _, storagePolicy := range pipeline.StoragePolicies {
 			aggKey := aggregationKey{
-				aggregationID:  pipeline.AggregationID,
-				storagePolicy:  storagePolicy,
-				pipeline:       pipeline.Pipeline,
-				idMutationType: IDMutationEnabled,
+				aggregationID:      pipeline.AggregationID,
+				storagePolicy:      storagePolicy,
+				pipeline:           pipeline.Pipeline,
+				idPrefixSuffixType: WithPrefixWithSuffix,
 			}
 			aggregationKeys = append(aggregationKeys, aggKey)
 		}

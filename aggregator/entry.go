@@ -54,7 +54,8 @@ var (
 	errEmptyMetadatas              = errors.New("empty metadata list")
 	errNoApplicableMetadata        = errors.New("no applicable metadata")
 	errNoPipelinesInMetadata       = errors.New("no pipelines in metadata")
-	errArrivedTooEarly             = errors.New("arrived too early")
+	errTooFarInTheFuture           = errors.New("too far in the future")
+	errTooFarInThePast             = errors.New("too far in the past")
 	errArrivedTooLate              = errors.New("arrived too late")
 )
 
@@ -97,18 +98,18 @@ func newUntimedEntryMetrics(scope tally.Scope) untimedEntryMetrics {
 }
 
 type timedEntryMetrics struct {
-	rateLimit       rateLimitEntryMetrics
-	arrivedTooEarly tally.Counter
-	arrivedTooLate  tally.Counter
-	metadataUpdates tally.Counter
+	rateLimit         rateLimitEntryMetrics
+	tooFarInTheFuture tally.Counter
+	tooFarInThePast   tally.Counter
+	metadataUpdates   tally.Counter
 }
 
 func newTimedEntryMetrics(scope tally.Scope) timedEntryMetrics {
 	return timedEntryMetrics{
-		rateLimit:       newRateLimitEntryMetrics(scope),
-		arrivedTooEarly: scope.Counter("arrived-too-early"),
-		arrivedTooLate:  scope.Counter("arrived-too-late"),
-		metadataUpdates: scope.Counter("metadata-updates"),
+		rateLimit:         newRateLimitEntryMetrics(scope),
+		tooFarInTheFuture: scope.Counter("too-far-in-the-future"),
+		tooFarInThePast:   scope.Counter("too-far-in-the-past"),
+		metadataUpdates:   scope.Counter("metadata-updates"),
 	}
 }
 
@@ -469,10 +470,10 @@ func (e *Entry) shouldUpdateStagedMetadatasWithLock(sm metadata.StagedMetadata) 
 		storagePolicies := e.storagePolicies(pipeline.StoragePolicies)
 		for _, storagePolicy := range storagePolicies {
 			key := aggregationKey{
-				aggregationID:  pipeline.AggregationID,
-				storagePolicy:  storagePolicy,
-				pipeline:       pipeline.Pipeline,
-				idMutationType: IDMutationEnabled,
+				aggregationID:      pipeline.AggregationID,
+				storagePolicy:      storagePolicy,
+				pipeline:           pipeline.Pipeline,
+				idPrefixSuffixType: WithPrefixWithSuffix,
 			}
 			idx := e.aggregations.index(key)
 			if idx < 0 {
@@ -537,7 +538,7 @@ func (e *Entry) addNewAggregationKeyWithLock(
 	}
 	// NB: The pipeline may not be owned by us and as such we need to make a copy here.
 	key.pipeline = key.pipeline.Clone()
-	if err = newElem.ResetSetData(metricID, key.storagePolicy, aggTypes, key.pipeline, key.numForwardedTimes, key.idMutationType); err != nil {
+	if err = newElem.ResetSetData(metricID, key.storagePolicy, aggTypes, key.pipeline, key.numForwardedTimes, key.idPrefixSuffixType); err != nil {
 		return nil, err
 	}
 	list, err := e.lists.FindOrCreate(listID)
@@ -575,10 +576,10 @@ func (e *Entry) updateStagedMetadatasWithLock(
 		storagePolicies := e.storagePolicies(pipeline.StoragePolicies)
 		for _, storagePolicy := range storagePolicies {
 			key := aggregationKey{
-				aggregationID:  pipeline.AggregationID,
-				storagePolicy:  storagePolicy,
-				pipeline:       pipeline.Pipeline,
-				idMutationType: IDMutationEnabled,
+				aggregationID:      pipeline.AggregationID,
+				storagePolicy:      storagePolicy,
+				pipeline:           pipeline.Pipeline,
+				idPrefixSuffixType: WithPrefixWithSuffix,
 			}
 			listID := standardMetricListID{
 				resolution: storagePolicy.Resolution().Window,
@@ -649,9 +650,9 @@ func (e *Entry) addTimed(
 
 	// Check if we should update metadata, and add metric if not.
 	key := aggregationKey{
-		aggregationID:  metadata.AggregationID,
-		storagePolicy:  metadata.StoragePolicy,
-		idMutationType: IDMutationDisabled,
+		aggregationID:      metadata.AggregationID,
+		storagePolicy:      metadata.StoragePolicy,
+		idPrefixSuffixType: NoPrefixNoSuffix,
 	}
 	if idx := e.aggregations.index(key); idx >= 0 {
 		err := e.addTimedWithLock(e.aggregations[idx], metric)
@@ -692,17 +693,16 @@ func (e *Entry) checkTimestampForTimedMetric(
 	currNanos, metricTimeNanos int64,
 	resolution time.Duration,
 ) error {
-	bufferFutureFn := e.opts.BufferForFutureTimedMetricFn()
-	timedBufferFuture := bufferFutureFn()
+	timedBufferFuture := e.opts.BufferForFutureTimedMetric()
 	if metricTimeNanos-currNanos > timedBufferFuture.Nanoseconds() {
-		e.metrics.timed.arrivedTooEarly.Inc(1)
-		return errArrivedTooEarly
+		e.metrics.timed.tooFarInTheFuture.Inc(1)
+		return errTooFarInTheFuture
 	}
 	bufferPastFn := e.opts.BufferForPastTimedMetricFn()
 	timedBufferPast := bufferPastFn(resolution)
 	if currNanos-metricTimeNanos > timedBufferPast.Nanoseconds() {
-		e.metrics.timed.arrivedTooLate.Inc(1)
-		return errArrivedTooLate
+		e.metrics.timed.tooFarInThePast.Inc(1)
+		return errTooFarInThePast
 	}
 	return nil
 }
@@ -718,9 +718,9 @@ func (e *Entry) updateTimedMetadataWithLock(
 
 	// Update the timed metadata.
 	key := aggregationKey{
-		aggregationID:  metadata.AggregationID,
-		storagePolicy:  metadata.StoragePolicy,
-		idMutationType: IDMutationDisabled,
+		aggregationID:      metadata.AggregationID,
+		storagePolicy:      metadata.StoragePolicy,
+		idPrefixSuffixType: NoPrefixNoSuffix,
 	}
 	listID := timedMetricListID{
 		resolution: metadata.StoragePolicy.Resolution().Window,
@@ -780,11 +780,11 @@ func (e *Entry) addForwarded(
 
 	// Check if we should update metadata, and add metric if not.
 	key := aggregationKey{
-		aggregationID:     metadata.AggregationID,
-		storagePolicy:     metadata.StoragePolicy,
-		pipeline:          metadata.Pipeline,
-		numForwardedTimes: metadata.NumForwardedTimes,
-		idMutationType:    IDMutationEnabled,
+		aggregationID:      metadata.AggregationID,
+		storagePolicy:      metadata.StoragePolicy,
+		pipeline:           metadata.Pipeline,
+		numForwardedTimes:  metadata.NumForwardedTimes,
+		idPrefixSuffixType: WithPrefixWithSuffix,
 	}
 	if idx := e.aggregations.index(key); idx >= 0 {
 		err := e.addForwardedWithLock(e.aggregations[idx], metric, metadata.SourceID)
@@ -846,11 +846,11 @@ func (e *Entry) updateForwardMetadataWithLock(
 
 	// Update the forward metadata.
 	key := aggregationKey{
-		aggregationID:     metadata.AggregationID,
-		storagePolicy:     metadata.StoragePolicy,
-		pipeline:          metadata.Pipeline,
-		numForwardedTimes: metadata.NumForwardedTimes,
-		idMutationType:    IDMutationEnabled,
+		aggregationID:      metadata.AggregationID,
+		storagePolicy:      metadata.StoragePolicy,
+		pipeline:           metadata.Pipeline,
+		numForwardedTimes:  metadata.NumForwardedTimes,
+		idPrefixSuffixType: WithPrefixWithSuffix,
 	}
 	listID := forwardedMetricListID{
 		resolution:        metadata.StoragePolicy.Resolution().Window,

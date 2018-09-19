@@ -269,11 +269,21 @@ func (mgr *leaderFlushManager) updateFlushTimesWithLock(
 		bucketID := bucket.bucketID
 		switch bucketID.listType {
 		case standardMetricListType:
-			mgr.updateStandardFlushTimesWithLock(bucketID.standard, bucket.flushers)
+			mgr.updateStandardFlushTimesWithLock(
+				bucketID.standard.resolution,
+				bucket.flushers,
+				getStandardFlushTimesByResolutionFn,
+				mgr.metrics.standard,
+			)
 		case forwardedMetricListType:
 			mgr.updateForwardedFlushTimesWithLock(bucketID.forwarded, bucket.flushers)
 		case timedMetricListType:
-			mgr.updateTimedFlushTimesWithLock(bucketID.timed, bucket.flushers)
+			mgr.updateStandardFlushTimesWithLock(
+				bucketID.timed.resolution,
+				bucket.flushers,
+				getTimedFlushTimesByResolutionFn,
+				mgr.metrics.timed,
+			)
 		default:
 			panic("should never get here")
 		}
@@ -281,10 +291,11 @@ func (mgr *leaderFlushManager) updateFlushTimesWithLock(
 }
 
 func (mgr *leaderFlushManager) updateStandardFlushTimesWithLock(
-	listID standardMetricListID,
+	resolution time.Duration,
 	flushers []flushingMetricList,
+	getFlushTimesByResolutionFn getFlushTimesByResolutionFn,
+	metrics leaderFlusherMetrics,
 ) {
-	resolution := listID.resolution
 	for _, flusher := range flushers {
 		shard := flusher.Shard()
 		flushTimes, exists := mgr.flushedByShard[shard]
@@ -292,28 +303,11 @@ func (mgr *leaderFlushManager) updateStandardFlushTimesWithLock(
 			flushTimes = newShardFlushTimes()
 			mgr.flushedByShard[shard] = flushTimes
 		}
-		flushTimes.StandardByResolution[int64(resolution)] = flusher.LastFlushedNanos()
+		flushTimesByResolution := getFlushTimesByResolutionFn(flushTimes)
+		flushTimesByResolution[int64(resolution)] = flusher.LastFlushedNanos()
 		flushTimes.Tombstoned = false
 	}
-	mgr.metrics.standard.updateFlushTimes.Inc(int64(len(flushers)))
-}
-
-func (mgr *leaderFlushManager) updateTimedFlushTimesWithLock(
-	listID timedMetricListID,
-	flushers []flushingMetricList,
-) {
-	resolution := listID.resolution
-	for _, flusher := range flushers {
-		shard := flusher.Shard()
-		flushTimes, exists := mgr.flushedByShard[shard]
-		if !exists {
-			flushTimes = newShardFlushTimes()
-			mgr.flushedByShard[shard] = flushTimes
-		}
-		flushTimes.TimedByResolution[int64(resolution)] = flusher.LastFlushedNanos()
-		flushTimes.Tombstoned = false
-	}
-	mgr.metrics.timed.updateFlushTimes.Inc(int64(len(flushers)))
+	metrics.updateFlushTimes.Inc(int64(len(flushers)))
 }
 
 func (mgr *leaderFlushManager) updateForwardedFlushTimesWithLock(

@@ -36,6 +36,21 @@ import (
 	"github.com/uber-go/tally"
 )
 
+type getFlushTimesByResolutionFn func(*schema.ShardFlushTimes) map[int64]int64
+
+var (
+	getStandardFlushTimesByResolutionFn = func(
+		shardFlushTimes *schema.ShardFlushTimes,
+	) map[int64]int64 {
+		return shardFlushTimes.StandardByResolution
+	}
+	getTimedFlushTimesByResolutionFn = func(
+		shardFlushTimes *schema.ShardFlushTimes,
+	) map[int64]int64 {
+		return shardFlushTimes.TimedByResolution
+	}
+)
+
 // FlushTimesManager manages flush times stored in kv.
 type FlushTimesManager interface {
 	// Reset resets the flush times manager.

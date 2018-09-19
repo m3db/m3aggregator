@@ -38,7 +38,7 @@ import (
 
 func TestElemBaseID(t *testing.T) {
 	e := &elemBase{}
-	e.resetSetData(testCounterID, testStoragePolicy, maggregation.DefaultTypes, true, applied.DefaultPipeline, 0, IDMutationDisabled)
+	e.resetSetData(testCounterID, testStoragePolicy, maggregation.DefaultTypes, true, applied.DefaultPipeline, 0, NoPrefixNoSuffix)
 	require.Equal(t, testCounterID, e.ID())
 }
 
@@ -71,7 +71,7 @@ func TestElemBaseResetSetData(t *testing.T) {
 		}),
 	}
 	e := &elemBase{}
-	e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3, IDMutationEnabled)
+	e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3, WithPrefixWithSuffix)
 	require.Equal(t, testCounterID, e.id)
 	require.Equal(t, testStoragePolicy, e.sp)
 	require.Equal(t, testAggregationTypesExpensive, e.aggTypes)
@@ -81,7 +81,7 @@ func TestElemBaseResetSetData(t *testing.T) {
 	require.Equal(t, 3, e.numForwardedTimes)
 	require.False(t, e.tombstoned)
 	require.False(t, e.closed)
-	require.Equal(t, IDMutationEnabled, e.idMutationType)
+	require.Equal(t, WithPrefixWithSuffix, e.idPrefixSuffixType)
 }
 
 func TestElemBaseResetSetDataInvalidPipeline(t *testing.T) {
@@ -92,7 +92,7 @@ func TestElemBaseResetSetDataInvalidPipeline(t *testing.T) {
 		},
 	})
 	e := &elemBase{}
-	err := e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypes, false, invalidPipeline, 0, IDMutationEnabled)
+	err := e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypes, false, invalidPipeline, 0, WithPrefixWithSuffix)
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "has no rollup operations"))
 }
@@ -105,7 +105,7 @@ func TestElemBaseForwardedIDWithDefaultPipeline(t *testing.T) {
 
 func TestElemBaseForwardedIDWithCustomPipeline(t *testing.T) {
 	e := &elemBase{}
-	e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3, IDMutationEnabled)
+	e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3, WithPrefixWithSuffix)
 	fid, ok := e.ForwardedID()
 	require.True(t, ok)
 	require.Equal(t, id.RawID("foo.bar"), fid)
@@ -119,7 +119,7 @@ func TestElemBaseForwardedAggregationKeyWithDefaultPipeline(t *testing.T) {
 
 func TestElemBaseForwardedAggregationKeyWithCustomPipeline(t *testing.T) {
 	e := &elemBase{}
-	e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3, IDMutationEnabled)
+	e.resetSetData(testCounterID, testStoragePolicy, testAggregationTypesExpensive, false, testPipeline, 3, WithPrefixWithSuffix)
 	aggKey, ok := e.ForwardedAggregationKey()
 	require.True(t, ok)
 	expected := aggregationKey{

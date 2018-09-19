@@ -193,7 +193,11 @@ func (s *aggregatorShard) AddTimed(
 	}
 	err := s.addTimedFn(metric, metadata)
 	s.RUnlock()
-	return err
+	if err != nil {
+		return err
+	}
+	s.metrics.writeSucccess.Inc(1)
+	return nil
 }
 
 func (s *aggregatorShard) AddForwarded(
