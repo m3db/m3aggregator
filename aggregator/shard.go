@@ -57,11 +57,13 @@ type addForwardedFn func(
 
 type aggregatorShardMetrics struct {
 	notWriteableErrors tally.Counter
+	writeSucccess      tally.Counter
 }
 
 func newAggregatorShardMetrics(scope tally.Scope) aggregatorShardMetrics {
 	return aggregatorShardMetrics{
 		notWriteableErrors: scope.Counter("not-writeable-errors"),
+		writeSucccess:      scope.Counter("write-success"),
 	}
 }
 
@@ -168,7 +170,11 @@ func (s *aggregatorShard) AddUntimed(
 	}
 	err := s.addUntimedFn(metric, metadatas)
 	s.RUnlock()
-	return err
+	if err != nil {
+		return err
+	}
+	s.metrics.writeSucccess.Inc(1)
+	return nil
 }
 
 func (s *aggregatorShard) AddTimed(
@@ -206,7 +212,11 @@ func (s *aggregatorShard) AddForwarded(
 	}
 	err := s.addForwardedFn(metric, metadata)
 	s.RUnlock()
-	return err
+	if err != nil {
+		return err
+	}
+	s.metrics.writeSucccess.Inc(1)
+	return nil
 }
 
 func (s *aggregatorShard) Tick(target time.Duration) tickResult {
