@@ -294,18 +294,21 @@ type flushTimesCheckerMetrics struct {
 	standardNotFullyFlushed  tally.Counter
 	forwardedNotFullyFlushed tally.Counter
 	forwardedNilFlushTimes   tally.Counter
+	timedNotFullyFlushed     tally.Counter
 	allFlushed               tally.Counter
 }
 
 func newFlushTimesCheckerMetrics(scope tally.Scope) flushTimesCheckerMetrics {
 	standardScope := scope.Tagged(map[string]string{"metric-type": "standard"})
 	forwardedScope := scope.Tagged(map[string]string{"metric-type": "forwarded"})
+	timedScope := scope.Tagged(map[string]string{"metric-type": "timed"})
 	return flushTimesCheckerMetrics{
 		noFlushTimes:             scope.Counter("no-flush-times"),
 		shardNotFound:            scope.Counter("shard-not-found"),
 		standardNotFullyFlushed:  standardScope.Counter("not-fully-flushed"),
 		forwardedNotFullyFlushed: forwardedScope.Counter("not-fully-flushed"),
 		forwardedNilFlushTimes:   forwardedScope.Counter("nil-flush-times"),
+		timedNotFullyFlushed:     timedScope.Counter("not-fully-flushed"),
 		allFlushed:               scope.Counter("all-flushed"),
 	}
 }
@@ -341,11 +344,15 @@ func (sc flushTimesChecker) HasFlushed(
 	}
 
 	// Check if the standard metrics have been flushed past the target time.
-	for _, lastFlushedNanos := range shardFlushTimes.StandardByResolution {
-		if lastFlushedNanos < targetNanos {
-			sc.metrics.standardNotFullyFlushed.Inc(1)
-			return false
-		}
+	if !standardFullyFlushed(shardFlushTimes.StandardByResolution, targetNanos) {
+		sc.metrics.standardNotFullyFlushed.Inc(1)
+		return false
+	}
+
+	// Check if the timed metrics have been flushed past the target time.
+	if !standardFullyFlushed(shardFlushTimes.TimedByResolution, targetNanos) {
+		sc.metrics.timedNotFullyFlushed.Inc(1)
+		return false
 	}
 
 	// Check if the forwarded metrics have been flushed past the target time.
@@ -364,5 +371,14 @@ func (sc flushTimesChecker) HasFlushed(
 
 	// All metrics have been flushed past the target time.
 	sc.metrics.allFlushed.Inc(1)
+	return true
+}
+
+func standardFullyFlushed(flushtimes map[int64]int64, targetNanos int64) bool {
+	for _, lastFlushedNanos := range flushtimes {
+		if lastFlushedNanos < targetNanos {
+			return false
+		}
+	}
 	return true
 }
