@@ -344,13 +344,13 @@ func (sc flushTimesChecker) HasFlushed(
 	}
 
 	// Check if the standard metrics have been flushed past the target time.
-	if !standardFullyFlushed(shardFlushTimes.StandardByResolution, targetNanos) {
+	if !fullyFlushed(shardFlushTimes.StandardByResolution, targetNanos) {
 		sc.metrics.standardNotFullyFlushed.Inc(1)
 		return false
 	}
 
 	// Check if the timed metrics have been flushed past the target time.
-	if !standardFullyFlushed(shardFlushTimes.TimedByResolution, targetNanos) {
+	if !fullyFlushed(shardFlushTimes.TimedByResolution, targetNanos) {
 		sc.metrics.timedNotFullyFlushed.Inc(1)
 		return false
 	}
@@ -374,7 +374,7 @@ func (sc flushTimesChecker) HasFlushed(
 	return true
 }
 
-func standardFullyFlushed(flushtimes map[int64]int64, targetNanos int64) bool {
+func fullyFlushed(flushtimes map[int64]int64, targetNanos int64) bool {
 	for _, lastFlushedNanos := range flushtimes {
 		if lastFlushedNanos < targetNanos {
 			return false

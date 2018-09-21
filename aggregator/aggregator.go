@@ -707,15 +707,14 @@ func newAggregatorAddTimedMetrics(
 }
 
 func (m *aggregatorAddTimedMetrics) ReportError(err error) {
-	if err == errTooFarInTheFuture {
+	switch err {
+	case errTooFarInTheFuture:
 		m.tooFarInTheFuture.Inc(1)
-		return
-	}
-	if err == errTooFarInThePast {
+	case errTooFarInThePast:
 		m.tooFarInThePast.Inc(1)
-		return
+	default:
+		m.aggregatorAddMetricMetrics.ReportError(err)
 	}
-	m.aggregatorAddMetricMetrics.ReportError(err)
 }
 
 type latencyBucketKey struct {
