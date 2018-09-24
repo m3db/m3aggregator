@@ -1,5 +1,5 @@
-hash: 0b486f26c4b058ad3e565d4dcc1b18c0e0505ec15d03267755c52120ddef2d14
-updated: 2018-09-05T17:43:19.425831-04:00
+hash: 5feeef73da3be22a270ba88657fdf1d889e91b6c423e06c1b786423dc7df4369
+updated: 2018-09-24T12:34:19.172517-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -188,7 +188,7 @@ imports:
   - services/leader/election
   - shard
 - name: github.com/m3db/m3metrics
-  version: 836db8a8dea1bd26b1358170ec3ac0770604bad8
+  version: e1a7251068a31510c520545297868aa342c0f7e2
   subpackages:
   - aggregation
   - encoding
@@ -351,8 +351,6 @@ imports:
   - trace
 - name: golang.org/x/sys
   version: d4feaf1a7e61e1d9e79e6c4e76c6349e9cab0a03
-  subpackages:
-  - unix
 - name: golang.org/x/text
   version: 4ee4af566555f5fbe026368b75596286a312663a
   subpackages:
@@ -410,7 +408,7 @@ imports:
   version: 5420a8b6744d3b0345ab293f6fcba19c978f1183
 testImports:
 - name: github.com/leanovate/gopter
-  version: f778776473e0ef7764e1434dd01a61cc1ec574b4
+  version: 7464b68a2409c0e6c6986805c808ca767f3c0054
   subpackages:
   - gen
   - prop
