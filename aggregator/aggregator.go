@@ -607,6 +607,8 @@ type aggregatorAddMetricMetrics struct {
 	shardNotWriteable          tally.Counter
 	valueRateLimitExceeded     tally.Counter
 	newMetricRateLimitExceeded tally.Counter
+	noApplicableMetadata       tally.Counter
+	emptyMetadatas             tally.Counter
 	uncategorizedErrors        tally.Counter
 }
 
@@ -628,6 +630,12 @@ func newAggregatorAddMetricMetrics(
 		}).Counter("errors"),
 		newMetricRateLimitExceeded: scope.Tagged(map[string]string{
 			"reason": "new-metric-rate-limit-exceeded",
+		}).Counter("errors"),
+		noApplicableMetadata: scope.Tagged(map[string]string{
+			"reason": "no-applicable-metadata",
+		}).Counter("errors"),
+		emptyMetadatas: scope.Tagged(map[string]string{
+			"reason": "empty-metadatas",
 		}).Counter("errors"),
 		uncategorizedErrors: scope.Tagged(map[string]string{
 			"reason": "not-categorized",
@@ -653,6 +661,10 @@ func (m *aggregatorAddMetricMetrics) ReportError(err error) {
 		m.newMetricRateLimitExceeded.Inc(1)
 	case errWriteValueRateLimitExceeded:
 		m.valueRateLimitExceeded.Inc(1)
+	case errNoApplicableMetadata:
+		m.noApplicableMetadata.Inc(1)
+	case errEmptyMetadatas:
+		m.emptyMetadatas.Inc(1)
 	default:
 		m.uncategorizedErrors.Inc(1)
 	}
